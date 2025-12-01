@@ -20,6 +20,7 @@ SRC_DIRS := \
 
 SRC_FILES := \
   src/mqtt_bridge.cpp \
+  src/uptime_monitor.c \
 
 SRCS := $(SRC_FILES) $(shell find $(SRC_DIRS) -maxdepth 1 -name *.cpp -or -name *.c -or -name *.s)
 OBJS := $(SRCS:%=$(BUILD_DIR)/%.o)
