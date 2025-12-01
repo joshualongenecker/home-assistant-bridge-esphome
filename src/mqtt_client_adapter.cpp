@@ -123,10 +123,10 @@ static void update_erd_write_result(i_mqtt_client_t* _self, tiny_erd_t erd, bool
   }
 }
 
-static void publish_topic(i_mqtt_client_t* _self, const char* client_topic, const char* payload)
+static void publish_sub_topic(i_mqtt_client_t* _self, const char* sub_topic, const char* payload)
 {
   auto self = reinterpret_cast<mqtt_client_adapter_t*>(_self);
-  auto topic = String("geappliances/") + self->device_id + "/" + String(client_topic);
+  auto topic = String("geappliances/") + self->device_id + "/" + String(sub_topic);
   adapter->client->publish(topic, payload);
 }
 
@@ -146,7 +146,7 @@ static const i_mqtt_client_api_t api = {
   register_erd,
   update_erd,
   update_erd_write_result,
-  publish_topic,
+  publish_sub_topic,
   on_write_request,
   on_mqtt_disconnect
 };

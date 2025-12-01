@@ -38,9 +38,9 @@ TEST_GROUP(uptime_monitor)
     char expected_payload[16];                                                                               \
     snprintf(expected_payload, sizeof(expected_payload), "%u", seconds);                                     \
     mock()                                                                                                   \
-      .expectOneCall("publish_topic")                                                                        \
+      .expectOneCall("publish_sub_topic")                                                                    \
       .onObject(&mqtt_client)                                                                                \
-      .withParameter("topic", "uptime")                                                                      \
+      .withParameter("sub_topic", "uptime")                                                                  \
       .withMemoryBufferParameter("payload", (const uint8_t*)expected_payload, strlen(expected_payload) + 1); \
   } while(0)
 
