@@ -15,7 +15,7 @@ static void publish_uptime(uptime_monitor_t* self)
 {
   char payload[20];
   snprintf(payload, sizeof(payload), "%lu", self->elapsed_msec / 1000);
-  mqtt_client_write_topic(self->mqtt_client, "uptime", payload);
+  mqtt_client_publish_topic(self->mqtt_client, "uptime", payload);
 }
 
 static void update(void* context)

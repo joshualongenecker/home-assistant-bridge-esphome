@@ -29,7 +29,7 @@ typedef struct i_mqtt_client_api_t {
 
   void (*update_erd_write_result)(i_mqtt_client_t* self, tiny_erd_t erd, bool success, tiny_gea3_erd_client_write_failure_reason_t failure_reason);
 
-  void (*write_topic)(i_mqtt_client_t* self, const char* topic, const char *payload);
+  void (*publish_topic)(i_mqtt_client_t* self, const char* topic, const char* payload);
 
   i_tiny_event_t* (*on_write_request)(i_mqtt_client_t* self);
 
@@ -61,11 +61,11 @@ static inline void mqtt_client_update_erd_write_result(i_mqtt_client_t* self, ti
 }
 
 /*!
- * Writes a topic under the client's namespace.
+ * Publishes to a topic under the client's namespace.
  */
-static inline void mqtt_client_write_topic(i_mqtt_client_t* self, const char* topic, const char *payload)
+static inline void mqtt_client_publish_topic(i_mqtt_client_t* self, const char* topic, const char* payload)
 {
-  self->api->write_topic(self, topic, payload);
+  self->api->publish_topic(self, topic, payload);
 }
 
 /*!

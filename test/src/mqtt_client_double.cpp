@@ -33,10 +33,10 @@ static void update_erd_write_result(i_mqtt_client_t* self, tiny_erd_t erd, bool 
     .withParameter("failure_reason", failure_reason);
 }
 
-static void write_topic(i_mqtt_client_t* self, const char* topic, const char* payload)
+static void publish_topic(i_mqtt_client_t* self, const char* topic, const char* payload)
 {
   mock()
-    .actualCall("write_topic")
+    .actualCall("publish_topic")
     .onObject(self)
     .withParameter("topic", topic)
     .withMemoryBufferParameter("payload", (const uint8_t*)payload, strlen(payload) + 1);
@@ -58,7 +58,7 @@ static const i_mqtt_client_api_t api = {
   register_erd,
   update_erd,
   update_erd_write_result,
-  write_topic,
+  publish_topic,
   on_write_request,
   on_mqtt_disconnect
 };
