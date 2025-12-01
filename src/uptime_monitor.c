@@ -3,6 +3,7 @@
  * @brief
  */
 
+#include <inttypes.h>
 #include <stdio.h>
 #include "uptime_monitor.h"
 
@@ -14,7 +15,7 @@ static void nothing(void* context)
 static void publish_uptime(uptime_monitor_t* self)
 {
   char payload[20];
-  snprintf(payload, sizeof(payload), "%lu", self->elapsed_msec / 1000);
+  snprintf(payload, sizeof(payload), "%" PRIu64, (uint64_t)(self->elapsed_msec / 1000));
   mqtt_client_publish_topic(self->mqtt_client, "uptime", payload);
 }
 
