@@ -16,6 +16,7 @@ extern "C" {
 #include "tiny_gea3_erd_client.h"
 #include "tiny_gea3_interface.h"
 #include "tiny_timer.h"
+#include "uptime_monitor.h"
 }
 
 class HomeAssistantBridge {
@@ -42,6 +43,8 @@ class HomeAssistantBridge {
   uint8_t client_queue_buffer[1024];
 
   mqtt_bridge_t mqtt_bridge;
+
+  uptime_monitor_t uptime_monitor;
 };
 
 #endif

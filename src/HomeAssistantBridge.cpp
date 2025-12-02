@@ -24,6 +24,11 @@ void HomeAssistantBridge::begin(PubSubClient& pubSubClient, Stream& uart, const 
 
   mqtt_client_adapter_init(&client_adapter, &pubSubClient, deviceId);
 
+  uptime_monitor_init(
+    &uptime_monitor,
+    &timer_group,
+    &client_adapter.interface);
+
   tiny_gea3_interface_init(
     &gea3_interface,
     &uart_adapter.interface,
