@@ -127,7 +127,7 @@ static void publish_sub_topic(i_mqtt_client_t* _self, const char* sub_topic, con
 {
   auto self = reinterpret_cast<mqtt_client_adapter_t*>(_self);
   auto topic = String("geappliances/") + self->device_id + "/" + String(sub_topic);
-  adapter->client->publish(topic, payload);
+  self->client->publish(topic.c_str(), payload);
 }
 
 static i_tiny_event_t* on_write_request(i_mqtt_client_t* _self)

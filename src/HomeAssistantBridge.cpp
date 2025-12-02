@@ -7,7 +7,6 @@
 
 extern "C" {
 #include "tiny_time_source.h"
-#include "uptime_monitor.h"
 }
 
 static const tiny_gea3_erd_client_configuration_t client_configuration = {
