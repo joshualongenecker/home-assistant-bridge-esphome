@@ -3,3 +3,6 @@
 build
 .DS_Store
 _codeql_detected_source_root
+
+# ESPHome secrets
+components/geappliances_bridge/secrets.yaml

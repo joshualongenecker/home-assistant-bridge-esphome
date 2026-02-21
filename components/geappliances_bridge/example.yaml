@@ -1,8 +1,11 @@
 esphome:
   name: ge-appliance-bridge
   friendly_name: GE Appliance Bridge
-  platform: ESP32
+
+esp32:
   board: esp32dev
+  framework:
+    type: arduino
 
 # Enable logging
 logger:
@@ -10,11 +13,13 @@ logger:
 
 # Enable Home Assistant API
 api:
-  password: !secret api_password
+  encryption:
+    key: !secret api_encryption_key
 
 # Enable OTA updates
 ota:
-  password: !secret ota_password
+  - platform: esphome
+    password: !secret ota_password
 
 # WiFi configuration
 wifi:
