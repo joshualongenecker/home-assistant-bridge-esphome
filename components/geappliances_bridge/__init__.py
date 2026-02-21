@@ -33,6 +33,8 @@ CONFIG_SCHEMA = cv.Schema(
 async def to_code(config):
     """Generate C++ code for the component."""
     # Add library dependencies - pinned to specific commits for stability
+    # tiny: f9381a5 - Last known stable version
+    # tiny-gea-api: d2d3107 - Version before send buffer elimination (API change)
     cg.add_library("https://github.com/ryanplusplus/tiny#f9381a5efe0aee7f4446f4cc473a8d0eb48ab52a", None)
     cg.add_library("https://github.com/geappliances/tiny-gea-api#d2d31078c00871d718236da4e92590f12a2e470d", None)
     

@@ -34,7 +34,10 @@ void GeappliancesBridge::setup() {
     &this->timer_group_,
     &this->mqtt_client_adapter_.interface);
 
-  // Initialize GEA3 interface
+  // Initialize GEA3 interface with older API that requires explicit send_buffer
+  // Parameter order: self, uart, address, send_buffer, send_buffer_size,
+  //                  receive_buffer, receive_buffer_size, send_queue_buffer,
+  //                  send_queue_buffer_size, ignore_destination
   ESP_LOGD(TAG, "Initializing GEA3 interface with client address 0x%02X", this->client_address_);
   tiny_gea3_interface_init(
     &this->gea3_interface_,
