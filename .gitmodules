@@ -1,7 +1,0 @@
-[submodule "lib/tiny"]
-	path = lib/tiny
-	url = https://github.com/ryanplusplus/tiny
-[submodule "lib/tiny-gea-api"]
-	path = lib/tiny-gea-api
-	url = https://github.com/geappliances/tiny-gea-api
-	branch = develop
