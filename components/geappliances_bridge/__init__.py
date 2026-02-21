@@ -47,7 +47,6 @@ async def to_code(config):
     cg.add(var.set_client_address(config[CONF_CLIENT_ADDRESS]))
     
     # Add include paths for dependencies
-    # ESPHome will look for these relative to the component directory
-    cg.add_build_flag("-I" + str(Path(__file__).parent / ".." / ".." / "lib" / "tiny" / "include"))
-    cg.add_build_flag("-I" + str(Path(__file__).parent / ".." / ".." / "lib" / "tiny-gea-api" / "include"))
-    cg.add_build_flag("-I" + str(Path(__file__).parent / ".." / ".." / "include"))
+    # Headers are included directly in the component directory to avoid submodule dependencies
+    cg.add_build_flag("-I" + str(Path(__file__).parent / "tiny_include"))
+    cg.add_build_flag("-I" + str(Path(__file__).parent / "tiny_gea_include"))
