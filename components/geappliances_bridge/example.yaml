@@ -55,6 +55,6 @@ uart:
 
 # GE Appliances Bridge component
 geappliances_bridge:
-  device_id: "Zoneline"
+  device_id: "YourDeviceId"
   uart_id: gea3_uart
   client_address: 0xE4  # Default GEA3 client address

@@ -20,8 +20,8 @@ The FirstBuild adapter uses the following pins for GEA3 communication:
 ```yaml
 uart:
   id: gea3_uart
-  tx_pin: GPIO21
-  rx_pin: GPIO20
+  tx_pin: GPIO21 #D6
+  rx_pin: GPIO20 #D7
   baud_rate: 230400
 ```
 
