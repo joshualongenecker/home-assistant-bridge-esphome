@@ -23,10 +23,13 @@ Add to your ESPHome YAML configuration:
 
 ```yaml
 # UART configuration for GEA3 communication
+# NOTE: Pin configuration depends on your hardware
+# - For Xiao ESP32C3 (D6/D7): use GPIO4 (TX) and GPIO5 (RX)
+# - For generic ESP32: adjust based on your wiring
 uart:
   id: gea3_uart
-  tx_pin: GPIO1
-  rx_pin: GPIO3
+  tx_pin: GPIO4  # D6 on Xiao ESP32C3
+  rx_pin: GPIO5  # D7 on Xiao ESP32C3
   baud_rate: 230400
 
 # MQTT configuration
@@ -48,6 +51,8 @@ geappliances_bridge:
 ```
 
 **Note:** The required C++ libraries (`tiny` and `tiny-gea-api`) are automatically included by the component.
+
+**Important:** Pin configuration must match your hardware. See [HARDWARE.md](HARDWARE.md) for detailed pin mapping information for different boards.
 
 See [components/geappliances_bridge/example.yaml](components/geappliances_bridge/example.yaml) for a complete configuration example.
 

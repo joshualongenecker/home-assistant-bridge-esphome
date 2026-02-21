@@ -67,8 +67,8 @@ external_components:
 
 uart:
   id: gea3_uart
-  tx_pin: GPIO1
-  rx_pin: GPIO3
+  tx_pin: GPIO4  # D6 on Xiao ESP32C3
+  rx_pin: GPIO5  # D7 on Xiao ESP32C3
   baud_rate: 230400
 
 mqtt:
