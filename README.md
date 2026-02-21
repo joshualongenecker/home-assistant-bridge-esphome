@@ -39,9 +39,7 @@ esp32:
 
 api:
   encryption:
-    # Generate a key with: esphome run example.yaml
-    # Or use: !secret api_encryption_key
-    key: "base64-encoded-32-byte-key-here=="
+    key: !secret api_encryption_key
 
 wifi:
   ssid: !secret wifi_ssid
@@ -52,15 +50,10 @@ external_components:
   - source: github://joshualongenecker/home-assistant-bridge@develop
     components: [ geappliances_bridge ]
 
-# MQTT configuration for Home Assistant
-# Replace placeholder values with actual credentials or use secrets:
-# broker: !secret mqtt_broker
-# username: !secret mqtt_username
-# password: !secret mqtt_password
 mqtt:
-  broker: 192.168.1.100  # Replace with your MQTT broker IP
-  username: mqtt_user     # Replace with your MQTT username
-  password: mqtt_password # Replace with your MQTT password
+  broker: !secret mqtt_broker
+  username: !secret mqtt_username
+  password: !secret mqtt_password
   port: 1883
   discovery: true
   discovery_prefix: homeassistant
@@ -74,7 +67,7 @@ uart:
 
 # GE Appliances Bridge component
 geappliances_bridge:
-  device_id: "Zoneline"
+  device_id: "YourDeviceId"
   uart_id: gea3_uart
   client_address: 0xE4  # Default GEA3 client address
 ```
