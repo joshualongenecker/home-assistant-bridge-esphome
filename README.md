@@ -37,7 +37,7 @@ mqtt:
 
 # External component
 external_components:
-  - source: github://joshualongenecker/home-assistant-bridge
+  - source: github://joshualongenecker/home-assistant-bridge-esphome
     components: [ geappliances_bridge ]
 
 # GE Appliances Bridge
@@ -46,6 +46,8 @@ geappliances_bridge:
   uart_id: gea3_uart
   client_address: 0xE4  # Optional, default 0xE4
 ```
+
+**Note:** The required C++ libraries (`tiny` and `tiny-gea-api`) are automatically included by the component.
 
 See [components/geappliances_bridge/example.yaml](components/geappliances_bridge/example.yaml) for a complete configuration example.
 

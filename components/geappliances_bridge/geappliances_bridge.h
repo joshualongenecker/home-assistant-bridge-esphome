@@ -46,7 +46,6 @@ class GeappliancesBridge : public Component {
   esphome_mqtt_client_adapter_t mqtt_client_adapter_;
 
   tiny_gea3_interface_t gea3_interface_;
-  uint8_t send_buffer_[255];
   uint8_t receive_buffer_[255];
   uint8_t send_queue_buffer_[1000];
 
