@@ -34,7 +34,7 @@ async def to_code(config):
     """Generate C++ code for the component."""
     # Add library dependencies
     cg.add_library("https://github.com/ryanplusplus/tiny", None)
-    cg.add_library("https://github.com/geappliances/tiny-gea-api", None)
+    cg.add_library("https://github.com/geappliances/tiny-gea-api#develop", None)
     
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)

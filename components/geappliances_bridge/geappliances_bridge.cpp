@@ -35,12 +35,10 @@ void GeappliancesBridge::setup() {
     &this->gea3_interface_,
     &this->uart_adapter_.interface,
     this->client_address_,
-    this->send_buffer_,
-    sizeof(this->send_buffer_),
-    this->receive_buffer_,
-    sizeof(this->receive_buffer_),
     this->send_queue_buffer_,
     sizeof(this->send_queue_buffer_),
+    this->receive_buffer_,
+    sizeof(this->receive_buffer_),
     false);
 
   // Initialize ERD client
