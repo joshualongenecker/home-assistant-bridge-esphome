@@ -108,7 +108,7 @@ The component reuses the existing library dependencies:
 - **tiny-gea-api**: GEA3 protocol implementation, ERD client (from https://github.com/geappliances/tiny-gea-api)
 - Existing bridge code: mqtt_bridge, uptime_monitor
 
-These dependencies are included as libraries in the ESPHome configuration using the `libraries:` option.
+These dependencies are automatically included by the component using `cg.add_library()` in the Python configuration.
 
 ### MQTT Topics
 
@@ -150,46 +150,42 @@ The component properly integrates with ESPHome's:
 ### Local Development
 
 ```yaml
-esphome:
-  name: my-appliance-bridge
-  libraries:
-    - https://github.com/ryanplusplus/tiny
-    - https://github.com/geappliances/tiny-gea-api
-
 external_components:
   - source:
       type: local
       path: /path/to/home-assistant-bridge-esphome
     components: [ geappliances_bridge ]
+
+geappliances_bridge:
+  device_id: "my-appliance"
+  uart_id: gea3_uart
 ```
 
 ### GitHub Source
 
 ```yaml
-esphome:
-  name: my-appliance-bridge
-  libraries:
-    - https://github.com/ryanplusplus/tiny
-    - https://github.com/geappliances/tiny-gea-api
-
 external_components:
   - source: github://joshualongenecker/home-assistant-bridge-esphome
     components: [ geappliances_bridge ]
+
+geappliances_bridge:
+  device_id: "my-appliance"
+  uart_id: gea3_uart
 ```
 
 ### With Branch/Tag
 
 ```yaml
-esphome:
-  name: my-appliance-bridge
-  libraries:
-    - https://github.com/ryanplusplus/tiny
-    - https://github.com/geappliances/tiny-gea-api
-
 external_components:
   - source: github://joshualongenecker/home-assistant-bridge-esphome@main
     components: [ geappliances_bridge ]
+
+geappliances_bridge:
+  device_id: "my-appliance"
+  uart_id: gea3_uart
 ```
+
+**Note:** C++ library dependencies (`tiny` and `tiny-gea-api`) are automatically included by the component.
 
 ## Compatibility
 

@@ -60,9 +60,6 @@ Provide a complete ESPHome YAML configuration example:
 ```yaml
 esphome:
   name: ge-appliance-bridge
-  libraries:
-    - https://github.com/ryanplusplus/tiny
-    - https://github.com/geappliances/tiny-gea-api
 
 external_components:
   - source: github://joshualongenecker/home-assistant-bridge-esphome
@@ -84,6 +81,8 @@ geappliances_bridge:
   uart_id: gea3_uart
   client_address: 0xE4
 ```
+
+**Note:** The C++ library dependencies are automatically added by the component.
 
 ### 6. **Update Repository Structure**
 Organize the repository to support both Arduino library and ESPHome component:

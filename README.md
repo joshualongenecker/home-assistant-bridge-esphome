@@ -22,12 +22,6 @@ Use as an ESPHome external component for seamless integration with Home Assistan
 Add to your ESPHome YAML configuration:
 
 ```yaml
-esphome:
-  name: my-appliance-bridge
-  libraries:
-    - https://github.com/ryanplusplus/tiny
-    - https://github.com/geappliances/tiny-gea-api
-
 # UART configuration for GEA3 communication
 uart:
   id: gea3_uart
@@ -52,6 +46,8 @@ geappliances_bridge:
   uart_id: gea3_uart
   client_address: 0xE4  # Optional, default 0xE4
 ```
+
+**Note:** The required C++ libraries (`tiny` and `tiny-gea-api`) are automatically included by the component.
 
 See [components/geappliances_bridge/example.yaml](components/geappliances_bridge/example.yaml) for a complete configuration example.
 
