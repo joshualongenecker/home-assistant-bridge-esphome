@@ -18,11 +18,14 @@ components/geappliances_bridge/
 ├── esphome_uart_adapter.*               # UART adapter for ESPHome
 ├── esphome_mqtt_client_adapter.*        # MQTT adapter for ESPHome
 ├── esphome_time_source.*                # Time source for ESPHome
+├── mqtt_bridge.*                        # MQTT bridge implementation
+├── uptime_monitor.*                     # Uptime monitoring
+├── i_mqtt_client.h                      # MQTT client interface
 ├── example.yaml                         # Complete configuration example
-├── secrets.yaml.example                 # Example secrets file
-├── [symlinks to shared code]            # Links to include/ and src/
-└── [symlinks to dependencies]           # Links to lib/tiny and lib/tiny-gea-api
+└── secrets.yaml.example                 # Example secrets file
 ```
+
+**Note**: Dependencies (`tiny` and `tiny-gea-api`) are now referenced as separate external components rather than being included directly.
 
 ### 2. Key Components
 
@@ -101,11 +104,11 @@ Created comprehensive documentation:
 ### Dependencies
 
 The component reuses the existing library dependencies:
-- **tiny**: Event system, timers, HSM, communication primitives
-- **tiny-gea-api**: GEA3 protocol implementation, ERD client
+- **tiny**: Event system, timers, HSM, communication primitives (from https://github.com/ryanplusplus/tiny)
+- **tiny-gea-api**: GEA3 protocol implementation, ERD client (from https://github.com/geappliances/tiny-gea-api)
 - Existing bridge code: mqtt_bridge, uptime_monitor
 
-All required source files are symlinked into the component directory and compiled as part of the ESPHome build.
+These dependencies must be included as separate external components in the ESPHome configuration.
 
 ### MQTT Topics
 
@@ -148,26 +151,50 @@ The component properly integrates with ESPHome's:
 
 ```yaml
 external_components:
+  # GE Appliances Bridge component
   - source:
       type: local
-      path: /path/to/home-assistant-bridge
+      path: /path/to/home-assistant-bridge-esphome
     components: [ geappliances_bridge ]
+  
+  # Required dependencies
+  - source: github://ryanplusplus/tiny
+    components: []
+  
+  - source: github://geappliances/tiny-gea-api
+    components: []
 ```
 
 ### GitHub Source
 
 ```yaml
 external_components:
-  - source: github://joshualongenecker/home-assistant-bridge
+  # GE Appliances Bridge component
+  - source: github://joshualongenecker/home-assistant-bridge-esphome
     components: [ geappliances_bridge ]
+  
+  # Required dependencies
+  - source: github://ryanplusplus/tiny
+    components: []
+  
+  - source: github://geappliances/tiny-gea-api
+    components: []
 ```
 
 ### With Branch/Tag
 
 ```yaml
 external_components:
-  - source: github://joshualongenecker/home-assistant-bridge@main
+  # GE Appliances Bridge component
+  - source: github://joshualongenecker/home-assistant-bridge-esphome@main
     components: [ geappliances_bridge ]
+  
+  # Required dependencies
+  - source: github://ryanplusplus/tiny
+    components: []
+  
+  - source: github://geappliances/tiny-gea-api
+    components: []
 ```
 
 ## Compatibility

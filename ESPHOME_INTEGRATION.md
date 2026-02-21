@@ -62,8 +62,16 @@ esphome:
   name: ge-appliance-bridge
 
 external_components:
-  - source: github://joshualongenecker/home-assistant-bridge
+  # GE Appliances Bridge component
+  - source: github://joshualongenecker/home-assistant-bridge-esphome
     components: [ geappliances_bridge ]
+  
+  # Required dependencies
+  - source: github://ryanplusplus/tiny
+    components: []
+  
+  - source: github://geappliances/tiny-gea-api
+    components: []
 
 uart:
   id: gea3_uart
