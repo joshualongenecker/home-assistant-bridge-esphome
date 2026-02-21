@@ -18,8 +18,8 @@ Add to your ESPHome YAML configuration:
 
 ```yaml
 substitutions:
-  name: zoneline-esphome
-  friendly_name: zoneline-esphome
+  name: gea-esphome-1
+  friendly_name: gea-esphome
 
 packages:
   esphome.esp_web_tools_example: github://esphome/firmware/esp-web-tools/esp32c3.yaml@main
