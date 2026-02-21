@@ -39,7 +39,9 @@ esp32:
 
 api:
   encryption:
-    key: YourKey
+    # Generate a key with: esphome run example.yaml
+    # Or use: !secret api_encryption_key
+    key: "base64-encoded-32-byte-key-here=="
 
 wifi:
   ssid: !secret wifi_ssid
@@ -51,10 +53,14 @@ external_components:
     components: [ geappliances_bridge ]
 
 # MQTT configuration for Home Assistant
+# Replace placeholder values with actual credentials or use secrets:
+# broker: !secret mqtt_broker
+# username: !secret mqtt_username
+# password: !secret mqtt_password
 mqtt:
-  broker: BrokerIp
-  username: YourUsername
-  password: YourPassword
+  broker: 192.168.1.100  # Replace with your MQTT broker IP
+  username: mqtt_user     # Replace with your MQTT username
+  password: mqtt_password # Replace with your MQTT password
   port: 1883
   discovery: true
   discovery_prefix: homeassistant
@@ -73,6 +79,6 @@ geappliances_bridge:
   client_address: 0xE4  # Default GEA3 client address
 ```
 
-**Note:** The required C++ libraries (`tiny` and `tiny-gea-api`) are automatically included by the component.
+**Note:** The required C++ libraries (`tiny` and `tiny-gea-api`) are automatically fetched and compiled by ESPHome during the build process.
 
 See [components/geappliances_bridge/example.yaml](components/geappliances_bridge/example.yaml) for the complete configuration example.
