@@ -108,12 +108,12 @@ Expected log messages:
 Subscribe to all topics for your device:
 
 ```bash
-mosquitto_sub -h 192.168.1.100 -u mqtt_user -P mqtt_pass -t '/geappliances/test-appliance/#' -v
+mosquitto_sub -h 192.168.1.100 -u mqtt_user -P mqtt_pass -t 'geappliances/test-appliance/#' -v
 ```
 
 You should see:
-- `/geappliances/test-appliance/uptime` - Periodic uptime updates
-- `/geappliances/test-appliance/erd/0xXXXX/value` - ERD values as hex strings (when appliance publishes)
+- `geappliances/test-appliance/uptime` - Periodic uptime updates
+- `geappliances/test-appliance/erd/0xXXXX/value` - ERD values as hex strings (when appliance publishes)
 
 ### 4. Test Write Functionality
 
@@ -121,12 +121,12 @@ Publish a write request to an ERD:
 
 ```bash
 mosquitto_pub -h 192.168.1.100 -u mqtt_user -P mqtt_pass \
-  -t '/geappliances/test-appliance/erd/0x1234/write' \
+  -t 'geappliances/test-appliance/erd/0x1234/write' \
   -m '0102030405'
 ```
 
 Check logs for write request processing and result publication to:
-- `/geappliances/test-appliance/erd/0x1234/write_result`
+- `geappliances/test-appliance/erd/0x1234/write_result`
 
 ## Common Issues and Solutions
 
@@ -215,7 +215,7 @@ Test under load:
 
 Test with actual Home Assistant:
 1. Configure Home Assistant MQTT integration
-2. Subscribe to `/geappliances/+/#` in HA
+2. Subscribe to `geappliances/+/#` in HA
 3. Create MQTT sensors/switches for ERDs
 4. Verify two-way communication
 
@@ -230,9 +230,9 @@ To verify compatibility with the Arduino library version:
 
 Both should produce identical MQTT message structure:
 ```
-/geappliances/<device_id>/uptime -> "12345"
-/geappliances/<device_id>/erd/<erd_id>/value -> "AABBCCDD..."
-/geappliances/<device_id>/erd/<erd_id>/write_result -> "success" or "failure (reason: X)"
+geappliances/<device_id>/uptime -> "12345"
+geappliances/<device_id>/erd/<erd_id>/value -> "AABBCCDD..."
+geappliances/<device_id>/erd/<erd_id>/write_result -> "success" or "failure (reason: X)"
 ```
 
 ## Reporting Issues
