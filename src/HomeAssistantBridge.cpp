@@ -29,6 +29,10 @@ void HomeAssistantBridge::begin(PubSubClient& pubSubClient, Stream& uart, const 
     &timer_group,
     &client_adapter.interface);
 
+  // Initialize GEA3 interface with buffers for send/receive operations
+  // Parameters: interface, uart, address, send_buffer, send_buffer_size, 
+  //             receive_buffer, receive_buffer_size, send_queue_buffer, 
+  //             send_queue_buffer_size, ignore_destination_address
   tiny_gea3_interface_init(
     &gea3_interface,
     &uart_adapter.interface,
