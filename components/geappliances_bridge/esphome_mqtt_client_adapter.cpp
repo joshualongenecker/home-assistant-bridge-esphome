@@ -117,7 +117,8 @@ static void publish_sub_topic(i_mqtt_client_t* _self, const char* sub_topic, con
 {
   auto self = reinterpret_cast<esphome_mqtt_client_adapter_t*>(_self);
   
-  std::string topic = build_topic(self, (std::string("/") + sub_topic).c_str());
+  std::string suffix = std::string("/") + sub_topic;
+  std::string topic = build_topic(self, suffix.c_str());
   
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
   if (mqtt_client != nullptr) {
