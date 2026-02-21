@@ -37,6 +37,7 @@ class HomeAssistantBridge {
 
   tiny_gea3_interface_t gea3_interface;
   uint8_t receive_buffer[255];
+  uint8_t send_buffer[255];  // Required for older tiny-gea-api version
   uint8_t send_queue_buffer[1000];
 
   tiny_gea3_erd_client_t erd_client;

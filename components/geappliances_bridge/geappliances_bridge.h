@@ -47,6 +47,7 @@ class GeappliancesBridge : public Component {
 
   tiny_gea3_interface_t gea3_interface_;
   uint8_t receive_buffer_[255];
+  uint8_t send_buffer_[255];  // Required for older tiny-gea-api version
   uint8_t send_queue_buffer_[1000];
 
   tiny_gea3_erd_client_t erd_client_;

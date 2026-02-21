@@ -32,9 +32,9 @@ CONFIG_SCHEMA = cv.Schema(
 
 async def to_code(config):
     """Generate C++ code for the component."""
-    # Add library dependencies
-    cg.add_library("https://github.com/ryanplusplus/tiny", None)
-    cg.add_library("https://github.com/geappliances/tiny-gea-api#develop", None)
+    # Add library dependencies - pinned to specific commits for stability
+    cg.add_library("https://github.com/ryanplusplus/tiny#f9381a5efe0aee7f4446f4cc473a8d0eb48ab52a", None)
+    cg.add_library("https://github.com/geappliances/tiny-gea-api#d2d31078c00871d718236da4e92590f12a2e470d", None)
     
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
