@@ -108,7 +108,7 @@ The component reuses the existing library dependencies:
 - **tiny-gea-api**: GEA3 protocol implementation, ERD client (from https://github.com/geappliances/tiny-gea-api)
 - Existing bridge code: mqtt_bridge, uptime_monitor
 
-These dependencies must be included as separate external components in the ESPHome configuration.
+These dependencies are included as libraries in the ESPHome configuration using the `libraries:` option.
 
 ### MQTT Topics
 
@@ -150,51 +150,45 @@ The component properly integrates with ESPHome's:
 ### Local Development
 
 ```yaml
+esphome:
+  name: my-appliance-bridge
+  libraries:
+    - https://github.com/ryanplusplus/tiny
+    - https://github.com/geappliances/tiny-gea-api
+
 external_components:
-  # GE Appliances Bridge component
   - source:
       type: local
       path: /path/to/home-assistant-bridge-esphome
     components: [ geappliances_bridge ]
-  
-  # Required dependencies
-  - source: github://ryanplusplus/tiny
-    components: []
-  
-  - source: github://geappliances/tiny-gea-api
-    components: []
 ```
 
 ### GitHub Source
 
 ```yaml
+esphome:
+  name: my-appliance-bridge
+  libraries:
+    - https://github.com/ryanplusplus/tiny
+    - https://github.com/geappliances/tiny-gea-api
+
 external_components:
-  # GE Appliances Bridge component
   - source: github://joshualongenecker/home-assistant-bridge-esphome
     components: [ geappliances_bridge ]
-  
-  # Required dependencies
-  - source: github://ryanplusplus/tiny
-    components: []
-  
-  - source: github://geappliances/tiny-gea-api
-    components: []
 ```
 
 ### With Branch/Tag
 
 ```yaml
+esphome:
+  name: my-appliance-bridge
+  libraries:
+    - https://github.com/ryanplusplus/tiny
+    - https://github.com/geappliances/tiny-gea-api
+
 external_components:
-  # GE Appliances Bridge component
   - source: github://joshualongenecker/home-assistant-bridge-esphome@main
     components: [ geappliances_bridge ]
-  
-  # Required dependencies
-  - source: github://ryanplusplus/tiny
-    components: []
-  
-  - source: github://geappliances/tiny-gea-api
-    components: []
 ```
 
 ## Compatibility

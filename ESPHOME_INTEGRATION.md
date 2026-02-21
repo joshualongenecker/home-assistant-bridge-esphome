@@ -60,18 +60,13 @@ Provide a complete ESPHome YAML configuration example:
 ```yaml
 esphome:
   name: ge-appliance-bridge
+  libraries:
+    - https://github.com/ryanplusplus/tiny
+    - https://github.com/geappliances/tiny-gea-api
 
 external_components:
-  # GE Appliances Bridge component
   - source: github://joshualongenecker/home-assistant-bridge-esphome
     components: [ geappliances_bridge ]
-  
-  # Required dependencies
-  - source: github://ryanplusplus/tiny
-    components: []
-  
-  - source: github://geappliances/tiny-gea-api
-    components: []
 
 uart:
   id: gea3_uart

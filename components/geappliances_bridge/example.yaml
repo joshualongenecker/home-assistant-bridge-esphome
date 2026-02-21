@@ -1,6 +1,9 @@
 esphome:
   name: ge-appliance-bridge
   friendly_name: GE Appliance Bridge
+  libraries:
+    - https://github.com/ryanplusplus/tiny
+    - https://github.com/geappliances/tiny-gea-api
 
 esp32:
   board: esp32dev
@@ -54,14 +57,6 @@ external_components:
   # GE Appliances Bridge component
   - source: github://joshualongenecker/home-assistant-bridge-esphome
     components: [ geappliances_bridge ]
-  
-  # Required dependencies - tiny library
-  - source: github://ryanplusplus/tiny
-    components: []
-  
-  # Required dependencies - tiny-gea-api library  
-  - source: github://geappliances/tiny-gea-api
-    components: []
 
 # GE Appliances Bridge component
 geappliances_bridge:
