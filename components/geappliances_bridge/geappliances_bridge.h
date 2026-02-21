@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/uart/uart.h"
+#include "esphome/components/mqtt/mqtt_client.h"
 
 extern "C" {
 #include "mqtt_bridge.h"
@@ -31,9 +32,13 @@ class GeappliancesBridge : public Component {
   void set_client_address(uint8_t address) { this->client_address_ = address; }
 
  protected:
+  void on_mqtt_connected_();
+  void notify_mqtt_disconnected_();
+
   uart::UARTComponent *uart_{nullptr};
   std::string device_id_;
   uint8_t client_address_{0xE4};
+  bool mqtt_was_connected_{false};
 
   tiny_timer_group_t timer_group_;
 

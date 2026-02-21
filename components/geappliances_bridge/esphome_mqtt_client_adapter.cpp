@@ -155,3 +155,11 @@ extern "C" void esphome_mqtt_client_adapter_init(
   tiny_event_init(&self->on_write_request_event);
   tiny_event_init(&self->on_mqtt_disconnect_event);
 }
+
+extern "C" void esphome_mqtt_client_adapter_notify_disconnected(
+  esphome_mqtt_client_adapter_t* self)
+{
+  // Publish the disconnect event to notify the bridge
+  // This will clear the ERD registry and trigger resubscription
+  tiny_event_publish(&self->on_mqtt_disconnect_event, nullptr);
+}

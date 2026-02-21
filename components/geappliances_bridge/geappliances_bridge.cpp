@@ -61,11 +61,40 @@ void GeappliancesBridge::setup() {
 }
 
 void GeappliancesBridge::loop() {
+  // Check MQTT connection state
+  auto mqtt_client = mqtt::global_mqtt_client;
+  if (mqtt_client != nullptr) {
+    bool is_connected = mqtt_client->is_connected();
+    
+    // Detect reconnection: was disconnected, now connected
+    if (is_connected && !this->mqtt_was_connected_) {
+      this->on_mqtt_connected_();
+    }
+    // Detect disconnection: was connected, now disconnected  
+    else if (!is_connected && this->mqtt_was_connected_) {
+      // Note: We don't notify here because the bridge will handle it
+      // when it tries to publish and fails
+    }
+    
+    this->mqtt_was_connected_ = is_connected;
+  }
+
   // Run timer group
   tiny_timer_group_run(&this->timer_group_);
   
   // Run GEA3 interface
   tiny_gea3_interface_run(&this->gea3_interface_);
+}
+
+void GeappliancesBridge::on_mqtt_connected_() {
+  ESP_LOGI(TAG, "MQTT connected, notifying bridge to reset subscriptions");
+  this->notify_mqtt_disconnected_();
+}
+
+void GeappliancesBridge::notify_mqtt_disconnected_() {
+  // Notify the MQTT adapter that we disconnected
+  // This will clear the ERD registry and trigger resubscription
+  esphome_mqtt_client_adapter_notify_disconnected(&this->mqtt_client_adapter_);
 }
 
 void GeappliancesBridge::dump_config() {
