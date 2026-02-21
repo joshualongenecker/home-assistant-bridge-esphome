@@ -15,7 +15,7 @@ static const char *const TAG = "geappliances_bridge.mqtt";
 
 static std::string build_topic(esphome_mqtt_client_adapter_t* self, const char* suffix)
 {
-  return std::string("/geappliances/") + *self->device_id + suffix;
+  return std::string("geappliances/") + *self->device_id + suffix;
 }
 
 static void register_erd(i_mqtt_client_t* _self, tiny_erd_t erd)
