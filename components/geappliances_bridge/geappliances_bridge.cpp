@@ -1,9 +1,6 @@
 #include "geappliances_bridge.h"
 #include "esphome/core/log.h"
-
-extern "C" {
-#include "tiny_time_source.h"
-}
+#include "esphome_time_source.h"
 
 namespace esphome {
 namespace geappliances_bridge {
@@ -19,7 +16,7 @@ void GeappliancesBridge::setup() {
   ESP_LOGCONFIG(TAG, "Setting up GE Appliances Bridge...");
 
   // Initialize timer group
-  tiny_timer_group_init(&this->timer_group_, tiny_time_source_init());
+  tiny_timer_group_init(&this->timer_group_, esphome_time_source_init());
 
   // Initialize UART adapter
   esphome_uart_adapter_init(&this->uart_adapter_, &this->timer_group_, this->uart_);

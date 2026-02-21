@@ -7,6 +7,7 @@ from esphome.const import (
     CONF_ID,
     CONF_UART_ID,
 )
+from pathlib import Path
 
 CODEOWNERS = ["@joshualongenecker"]
 DEPENDENCIES = ["uart", "mqtt"]
@@ -44,3 +45,9 @@ async def to_code(config):
 
     # Set client address
     cg.add(var.set_client_address(config[CONF_CLIENT_ADDRESS]))
+    
+    # Add include paths for dependencies
+    # ESPHome will look for these relative to the component directory
+    cg.add_build_flag("-I" + str(Path(__file__).parent / ".." / ".." / "lib" / "tiny" / "include"))
+    cg.add_build_flag("-I" + str(Path(__file__).parent / ".." / ".." / "lib" / "tiny-gea-api" / "include"))
+    cg.add_build_flag("-I" + str(Path(__file__).parent / ".." / ".." / "include"))
