@@ -24,7 +24,7 @@ CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(GeappliancesBridge),
         cv.GenerateID(CONF_UART_ID): cv.use_id(uart.UARTComponent),
-        cv.Required(CONF_DEVICE_ID): cv.string,
+        cv.Optional(CONF_DEVICE_ID): cv.string,
         cv.Optional(CONF_CLIENT_ADDRESS, default=0xE4): cv.hex_uint8_t,
     }
 ).extend(cv.COMPONENT_SCHEMA)
@@ -43,8 +43,9 @@ async def to_code(config):
     uart_component = await cg.get_variable(config[CONF_UART_ID])
     cg.add(var.set_uart(uart_component))
 
-    # Set device ID
-    cg.add(var.set_device_id(config[CONF_DEVICE_ID]))
+    # Set device ID if provided, otherwise it will be auto-generated
+    if CONF_DEVICE_ID in config:
+        cg.add(var.set_device_id(config[CONF_DEVICE_ID]))
 
     # Set client address
     cg.add(var.set_client_address(config[CONF_CLIENT_ADDRESS]))

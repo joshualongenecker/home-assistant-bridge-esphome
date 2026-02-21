@@ -12,6 +12,12 @@ static const tiny_gea3_erd_client_configuration_t client_configuration = {
   .request_retries = 10
 };
 
+// ERD identifiers for device ID generation
+static constexpr tiny_erd_t ERD_MODEL_NUMBER = 0x0001;
+static constexpr tiny_erd_t ERD_SERIAL_NUMBER = 0x0002;
+static constexpr tiny_erd_t ERD_APPLIANCE_TYPE = 0x0008;
+static constexpr uint8_t ERD_HOST_ADDRESS = 0xC0;
+
 void GeappliancesBridge::setup() {
   ESP_LOGCONFIG(TAG, "Setting up GE Appliances Bridge...");
 
@@ -20,15 +26,6 @@ void GeappliancesBridge::setup() {
 
   // Initialize UART adapter
   esphome_uart_adapter_init(&this->uart_adapter_, &this->timer_group_, this->uart_);
-
-  // Initialize MQTT client adapter
-  esphome_mqtt_client_adapter_init(&this->mqtt_client_adapter_, this->device_id_.c_str());
-
-  // Initialize uptime monitor
-  uptime_monitor_init(
-    &this->uptime_monitor_,
-    &this->timer_group_,
-    &this->mqtt_client_adapter_.interface);
 
   // Initialize GEA3 interface
   tiny_gea3_interface_init(
@@ -50,12 +47,29 @@ void GeappliancesBridge::setup() {
     sizeof(this->client_queue_buffer_),
     &client_configuration);
 
-  // Initialize MQTT bridge
-  mqtt_bridge_init(
-    &this->mqtt_bridge_,
-    &this->timer_group_,
-    &this->erd_client_.interface,
-    &this->mqtt_client_adapter_.interface);
+  // Subscribe to ERD client activity
+  tiny_event_subscription_init(
+    &this->erd_client_activity_subscription_, 
+    this, 
+    +[](void* context, const void* args) {
+      auto self = reinterpret_cast<GeappliancesBridge*>(context);
+      auto activity_args = reinterpret_cast<const tiny_gea3_erd_client_on_activity_args_t*>(args);
+      self->on_erd_client_activity_(activity_args);
+    });
+  tiny_event_subscribe(
+    tiny_gea3_erd_client_on_activity(&this->erd_client_.interface), 
+    &this->erd_client_activity_subscription_);
+
+  // Determine if we should auto-generate device ID or use configured one
+  if (this->configured_device_id_.empty()) {
+    ESP_LOGI(TAG, "No device_id configured, will auto-generate from appliance ERDs");
+    this->device_id_state_ = DEVICE_ID_STATE_READING_APPLIANCE_TYPE;
+  } else {
+    ESP_LOGI(TAG, "Using configured device_id: %s", this->configured_device_id_.c_str());
+    this->final_device_id_ = this->configured_device_id_;
+    this->device_id_state_ = DEVICE_ID_STATE_COMPLETE;
+    this->initialize_mqtt_bridge_();
+  }
 
   ESP_LOGCONFIG(TAG, "GE Appliances Bridge setup complete");
 }
@@ -84,6 +98,30 @@ void GeappliancesBridge::loop() {
   
   // Run GEA3 interface
   tiny_gea3_interface_run(&this->gea3_interface_);
+
+  // Handle device ID generation state machine
+  if (this->device_id_state_ == DEVICE_ID_STATE_READING_APPLIANCE_TYPE) {
+    // Request appliance type ERD
+    if (tiny_gea3_erd_client_read(&this->erd_client_.interface, &this->pending_request_id_, 
+                                   ERD_HOST_ADDRESS, ERD_APPLIANCE_TYPE)) {
+      ESP_LOGD(TAG, "Reading appliance type ERD 0x%04X", ERD_APPLIANCE_TYPE);
+      this->device_id_state_ = DEVICE_ID_STATE_IDLE; // Wait for response
+    }
+  } else if (this->device_id_state_ == DEVICE_ID_STATE_READING_MODEL_NUMBER) {
+    // Request model number ERD
+    if (tiny_gea3_erd_client_read(&this->erd_client_.interface, &this->pending_request_id_, 
+                                   ERD_HOST_ADDRESS, ERD_MODEL_NUMBER)) {
+      ESP_LOGD(TAG, "Reading model number ERD 0x%04X", ERD_MODEL_NUMBER);
+      this->device_id_state_ = DEVICE_ID_STATE_IDLE; // Wait for response
+    }
+  } else if (this->device_id_state_ == DEVICE_ID_STATE_READING_SERIAL_NUMBER) {
+    // Request serial number ERD
+    if (tiny_gea3_erd_client_read(&this->erd_client_.interface, &this->pending_request_id_, 
+                                   ERD_HOST_ADDRESS, ERD_SERIAL_NUMBER)) {
+      ESP_LOGD(TAG, "Reading serial number ERD 0x%04X", ERD_SERIAL_NUMBER);
+      this->device_id_state_ = DEVICE_ID_STATE_IDLE; // Wait for response
+    }
+  }
 }
 
 void GeappliancesBridge::on_mqtt_connected_() {
@@ -92,14 +130,119 @@ void GeappliancesBridge::on_mqtt_connected_() {
 }
 
 void GeappliancesBridge::notify_mqtt_disconnected_() {
-  // Notify the MQTT adapter that we disconnected
-  // This will clear the ERD registry and trigger resubscription
-  esphome_mqtt_client_adapter_notify_disconnected(&this->mqtt_client_adapter_);
+  // Only notify if MQTT bridge is initialized
+  if (this->mqtt_bridge_initialized_) {
+    // Notify the MQTT adapter that we disconnected
+    // This will clear the ERD registry and trigger resubscription
+    esphome_mqtt_client_adapter_notify_disconnected(&this->mqtt_client_adapter_);
+  }
+}
+
+void GeappliancesBridge::on_erd_client_activity_(const tiny_gea3_erd_client_on_activity_args_t* args) {
+  // Only process read responses for device ID ERDs before MQTT bridge is initialized
+  if (!this->mqtt_bridge_initialized_ && args->address == ERD_HOST_ADDRESS) {
+    if (args->type == tiny_gea3_erd_client_activity_type_read_completed) {
+      if (args->read_completed.erd == ERD_APPLIANCE_TYPE) {
+        // Appliance type is a single byte enum
+        this->appliance_type_ = reinterpret_cast<const uint8_t*>(args->read_completed.data)[0];
+        ESP_LOGI(TAG, "Read appliance type: %u", this->appliance_type_);
+        this->device_id_state_ = DEVICE_ID_STATE_READING_MODEL_NUMBER;
+      } else if (args->read_completed.erd == ERD_MODEL_NUMBER) {
+        // Model number is a 32-byte hex string
+        this->model_number_ = this->hex_to_string_(
+          reinterpret_cast<const uint8_t*>(args->read_completed.data), 
+          args->read_completed.data_size);
+        ESP_LOGI(TAG, "Read model number: %s", this->model_number_.c_str());
+        this->device_id_state_ = DEVICE_ID_STATE_READING_SERIAL_NUMBER;
+      } else if (args->read_completed.erd == ERD_SERIAL_NUMBER) {
+        // Serial number is a 32-byte hex string
+        this->serial_number_ = this->hex_to_string_(
+          reinterpret_cast<const uint8_t*>(args->read_completed.data), 
+          args->read_completed.data_size);
+        ESP_LOGI(TAG, "Read serial number: %s", this->serial_number_.c_str());
+        
+        // Generate device ID
+        char appliance_type_str[4];
+        snprintf(appliance_type_str, sizeof(appliance_type_str), "%u", this->appliance_type_);
+        this->generated_device_id_ = std::string(appliance_type_str) + "_" + 
+                                     this->model_number_ + "_" + 
+                                     this->serial_number_;
+        this->final_device_id_ = this->generated_device_id_;
+        
+        ESP_LOGI(TAG, "Generated device ID: %s", this->final_device_id_.c_str());
+        
+        this->device_id_state_ = DEVICE_ID_STATE_COMPLETE;
+        this->initialize_mqtt_bridge_();
+      }
+    } else if (args->type == tiny_gea3_erd_client_activity_type_read_failed) {
+      ESP_LOGE(TAG, "Failed to read ERD 0x%04X for device ID generation, reason: %u", 
+               args->read_failed.erd, args->read_failed.reason);
+      this->device_id_state_ = DEVICE_ID_STATE_FAILED;
+      
+      // Fall back to a default device ID if generation fails
+      if (this->final_device_id_.empty()) {
+        this->final_device_id_ = "unknown_device";
+        ESP_LOGW(TAG, "Using fallback device ID: %s", this->final_device_id_.c_str());
+        this->initialize_mqtt_bridge_();
+      }
+    }
+  }
+}
+
+void GeappliancesBridge::initialize_mqtt_bridge_() {
+  if (this->mqtt_bridge_initialized_) {
+    return;
+  }
+
+  ESP_LOGI(TAG, "Initializing MQTT bridge with device ID: %s", this->final_device_id_.c_str());
+
+  // Initialize MQTT client adapter
+  esphome_mqtt_client_adapter_init(&this->mqtt_client_adapter_, this->final_device_id_.c_str());
+
+  // Initialize uptime monitor
+  uptime_monitor_init(
+    &this->uptime_monitor_,
+    &this->timer_group_,
+    &this->mqtt_client_adapter_.interface);
+
+  // Initialize MQTT bridge
+  mqtt_bridge_init(
+    &this->mqtt_bridge_,
+    &this->timer_group_,
+    &this->erd_client_.interface,
+    &this->mqtt_client_adapter_.interface);
+
+  this->mqtt_bridge_initialized_ = true;
+  ESP_LOGI(TAG, "MQTT bridge initialized successfully");
+}
+
+std::string GeappliancesBridge::hex_to_string_(const uint8_t* data, uint8_t size) {
+  // Convert hex data to string, stopping at first null byte
+  std::string result;
+  result.reserve(size);
+  for (uint8_t i = 0; i < size; i++) {
+    if (data[i] == 0x00) {
+      break; // Stop at null terminator
+    }
+    result += static_cast<char>(data[i]);
+  }
+  return result;
 }
 
 void GeappliancesBridge::dump_config() {
   ESP_LOGCONFIG(TAG, "GE Appliances Bridge:");
-  ESP_LOGCONFIG(TAG, "  Device ID: %s", this->device_id_.c_str());
+  if (!this->configured_device_id_.empty()) {
+    ESP_LOGCONFIG(TAG, "  Configured Device ID: %s", this->configured_device_id_.c_str());
+  }
+  if (!this->final_device_id_.empty()) {
+    ESP_LOGCONFIG(TAG, "  Device ID: %s", this->final_device_id_.c_str());
+  }
+  if (!this->generated_device_id_.empty()) {
+    ESP_LOGCONFIG(TAG, "  Generated Device ID: %s", this->generated_device_id_.c_str());
+    ESP_LOGCONFIG(TAG, "    Appliance Type: %u", this->appliance_type_);
+    ESP_LOGCONFIG(TAG, "    Model Number: %s", this->model_number_.c_str());
+    ESP_LOGCONFIG(TAG, "    Serial Number: %s", this->serial_number_.c_str());
+  }
   ESP_LOGCONFIG(TAG, "  Client Address: 0x%02X", this->client_address_);
   ESP_LOGCONFIG(TAG, "  UART Baud Rate: %lu", baud);
 }

@@ -72,6 +72,28 @@ geappliances_bridge:
   client_address: 0xE4  # Default GEA3 client address
 ```
 
+### Auto-Generated Device ID
+
+The `device_id` parameter is **optional**. If not provided, the component will automatically generate a device ID by reading the following ERDs from the appliance:
+
+- **Appliance Type** (ERD 0x0008) - Single byte enum
+- **Model Number** (ERD 0x0001) - 32 byte string
+- **Serial Number** (ERD 0x0002) - 32 byte string
+
+The auto-generated device ID format is: `ApplianceType_ModelNumber_SerialNumber`
+
+Example:
+```yaml
+# Auto-generate device ID (recommended)
+geappliances_bridge:
+  uart_id: gea3_uart
+  
+# Or use a custom device ID
+geappliances_bridge:
+  device_id: "my_custom_id"
+  uart_id: gea3_uart
+```
+
 **Note:** The required C++ libraries (`tiny` and `tiny-gea-api`) are automatically fetched and compiled by ESPHome during the build process.
 
 See [components/geappliances_bridge/example.yaml](components/geappliances_bridge/example.yaml) for the complete configuration example.

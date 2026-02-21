@@ -28,17 +28,38 @@ class GeappliancesBridge : public Component {
   float get_setup_priority() const override;
 
   void set_uart(uart::UARTComponent *uart) { this->uart_ = uart; }
-  void set_device_id(const std::string &device_id) { this->device_id_ = device_id; }
+  void set_device_id(const std::string &device_id) { this->configured_device_id_ = device_id; }
   void set_client_address(uint8_t address) { this->client_address_ = address; }
 
  protected:
   void on_mqtt_connected_();
   void notify_mqtt_disconnected_();
+  void on_erd_client_activity_(const tiny_gea3_erd_client_on_activity_args_t* args);
+  void initialize_mqtt_bridge_();
+  std::string hex_to_string_(const uint8_t* data, uint8_t size);
+
+  enum DeviceIdState {
+    DEVICE_ID_STATE_IDLE,
+    DEVICE_ID_STATE_READING_APPLIANCE_TYPE,
+    DEVICE_ID_STATE_READING_MODEL_NUMBER,
+    DEVICE_ID_STATE_READING_SERIAL_NUMBER,
+    DEVICE_ID_STATE_COMPLETE,
+    DEVICE_ID_STATE_FAILED
+  };
 
   uart::UARTComponent *uart_{nullptr};
-  std::string device_id_;
+  std::string configured_device_id_;
+  std::string generated_device_id_;
+  std::string final_device_id_;
   uint8_t client_address_{0xE4};
   bool mqtt_was_connected_{false};
+  bool mqtt_bridge_initialized_{false};
+  
+  DeviceIdState device_id_state_{DEVICE_ID_STATE_IDLE};
+  tiny_gea3_erd_client_request_id_t pending_request_id_;
+  uint8_t appliance_type_{0};
+  std::string model_number_;
+  std::string serial_number_;
 
   tiny_timer_group_t timer_group_;
 
@@ -55,6 +76,8 @@ class GeappliancesBridge : public Component {
   mqtt_bridge_t mqtt_bridge_;
 
   uptime_monitor_t uptime_monitor_;
+  
+  tiny_event_subscription_t erd_client_activity_subscription_;
 };
 
 }  // namespace geappliances_bridge
