@@ -130,11 +130,13 @@ Check logs for write request processing and result publication to:
 
 ## Common Issues and Solutions
 
-### Issue: Missing header files
+### Issue: Missing header files (Historical - Fixed)
 
 **Error**: `fatal error: tiny_timer.h: No such file or directory`
 
-**Solution**: Ensure git submodules are initialized:
+**Solution**: This issue has been resolved. The ESPHome component now includes all necessary header and source files directly, eliminating the need for git submodule initialization when using ESPHome.
+
+**Note**: If you are developing the library itself (not just using it as an ESPHome component), you may still need to initialize submodules for running the test suite:
 ```bash
 cd /path/to/home-assistant-bridge
 git submodule update --init --recursive
