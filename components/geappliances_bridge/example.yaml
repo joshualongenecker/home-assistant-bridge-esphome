@@ -43,10 +43,12 @@ mqtt:
   discovery_prefix: homeassistant
 
 # UART configuration for GEA3 communication
+# For Xiao ESP32C3 hardware (D6/D7 pins): use GPIO4 (TX) and GPIO5 (RX)
+# For generic ESP32: adjust pins based on your hardware
 uart:
   id: gea3_uart
-  tx_pin: GPIO1
-  rx_pin: GPIO3
+  tx_pin: GPIO4  # D6 on Xiao ESP32C3
+  rx_pin: GPIO5  # D7 on Xiao ESP32C3
   baud_rate: 230400
 
 # External component configuration
