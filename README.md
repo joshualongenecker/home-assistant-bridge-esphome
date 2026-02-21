@@ -61,8 +61,8 @@ mqtt:
 # UART configuration for GEA3 communication
 uart:
   id: gea3_uart
-  tx_pin: GPIO21
-  rx_pin: GPIO20
+  tx_pin: GPIO21   # D6
+  rx_pin: GPIO20   # D7
   baud_rate: 230400
 
 # GE Appliances Bridge component
