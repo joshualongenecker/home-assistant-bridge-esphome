@@ -117,10 +117,10 @@ Template for sensitive configuration values
 **Status: COMPLETE**
 
 MQTT topics and message format remain identical to Arduino library:
-- `/geappliances/<device_id>/uptime`
-- `/geappliances/<device_id>/erd/<erd_id>/value`
-- `/geappliances/<device_id>/erd/<erd_id>/write`
-- `/geappliances/<device_id>/erd/<erd_id>/write_result`
+- `geappliances/<device_id>/uptime`
+- `geappliances/<device_id>/erd/<erd_id>/value`
+- `geappliances/<device_id>/erd/<erd_id>/write`
+- `geappliances/<device_id>/erd/<erd_id>/write_result`
 
 ## 📋 USAGE
 

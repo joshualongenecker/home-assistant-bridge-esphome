@@ -51,8 +51,8 @@ components/geappliances_bridge/
 
 **MQTT Adapter** (`esphome_mqtt_client_adapter.*`):
 - Adapts ESPHome MQTT client to `i_mqtt_client` interface
-- Publishes ERD values to `/geappliances/<device_id>/erd/<erd_id>/value`
-- Subscribes to write topics `/geappliances/<device_id>/erd/<erd_id>/write`
+- Publishes ERD values to `geappliances/<device_id>/erd/<erd_id>/value`
+- Subscribes to write topics `geappliances/<device_id>/erd/<erd_id>/write`
 - Publishes write results
 - Uses ESPHome's global MQTT client
 
@@ -111,10 +111,10 @@ All required source files are symlinked into the component directory and compile
 
 Maintains compatibility with the original Arduino library:
 
-- **Uptime**: `/geappliances/<device_id>/uptime`
-- **ERD Value**: `/geappliances/<device_id>/erd/<erd_id>/value` (hex string)
-- **ERD Write**: `/geappliances/<device_id>/erd/<erd_id>/write` (hex string)
-- **Write Result**: `/geappliances/<device_id>/erd/<erd_id>/write_result` (success/failure)
+- **Uptime**: `geappliances/<device_id>/uptime`
+- **ERD Value**: `geappliances/<device_id>/erd/<erd_id>/value` (hex string)
+- **ERD Write**: `geappliances/<device_id>/erd/<erd_id>/write` (hex string)
+- **Write Result**: `geappliances/<device_id>/erd/<erd_id>/write_result` (success/failure)
 
 ### Integration with ESPHome
 
