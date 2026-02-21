@@ -51,8 +51,17 @@ uart:
 
 # External component configuration
 external_components:
-  - source: github://joshualongenecker/home-assistant-bridge
+  # GE Appliances Bridge component
+  - source: github://joshualongenecker/home-assistant-bridge-esphome
     components: [ geappliances_bridge ]
+  
+  # Required dependencies - tiny library
+  - source: github://ryanplusplus/tiny
+    components: []
+  
+  # Required dependencies - tiny-gea-api library  
+  - source: github://geappliances/tiny-gea-api
+    components: []
 
 # GE Appliances Bridge component
 geappliances_bridge:
