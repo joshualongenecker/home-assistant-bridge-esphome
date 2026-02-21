@@ -16,21 +16,26 @@ void GeappliancesBridge::setup() {
   ESP_LOGCONFIG(TAG, "Setting up GE Appliances Bridge...");
 
   // Initialize timer group
+  ESP_LOGD(TAG, "Initializing timer group");
   tiny_timer_group_init(&this->timer_group_, esphome_time_source_init());
 
   // Initialize UART adapter
+  ESP_LOGD(TAG, "Initializing UART adapter with baud rate %lu", baud);
   esphome_uart_adapter_init(&this->uart_adapter_, &this->timer_group_, this->uart_);
 
   // Initialize MQTT client adapter
+  ESP_LOGD(TAG, "Initializing MQTT client adapter for device: %s", this->device_id_.c_str());
   esphome_mqtt_client_adapter_init(&this->mqtt_client_adapter_, this->device_id_.c_str());
 
   // Initialize uptime monitor
+  ESP_LOGD(TAG, "Initializing uptime monitor");
   uptime_monitor_init(
     &this->uptime_monitor_,
     &this->timer_group_,
     &this->mqtt_client_adapter_.interface);
 
   // Initialize GEA3 interface
+  ESP_LOGD(TAG, "Initializing GEA3 interface with client address 0x%02X", this->client_address_);
   tiny_gea3_interface_init(
     &this->gea3_interface_,
     &this->uart_adapter_.interface,
@@ -42,6 +47,7 @@ void GeappliancesBridge::setup() {
     false);
 
   // Initialize ERD client
+  ESP_LOGD(TAG, "Initializing ERD client");
   tiny_gea3_erd_client_init(
     &this->erd_client_,
     &this->timer_group_,
@@ -51,6 +57,7 @@ void GeappliancesBridge::setup() {
     &client_configuration);
 
   // Initialize MQTT bridge
+  ESP_LOGD(TAG, "Initializing MQTT bridge");
   mqtt_bridge_init(
     &this->mqtt_bridge_,
     &this->timer_group_,
@@ -68,15 +75,19 @@ void GeappliancesBridge::loop() {
     
     // Detect reconnection: was disconnected, now connected
     if (is_connected && !this->mqtt_was_connected_) {
+      ESP_LOGI(TAG, "MQTT connection established");
       this->on_mqtt_connected_();
     }
     // Detect disconnection: was connected, now disconnected  
     else if (!is_connected && this->mqtt_was_connected_) {
+      ESP_LOGW(TAG, "MQTT connection lost");
       // Note: We don't notify here because the bridge will handle it
       // when it tries to publish and fails
     }
     
     this->mqtt_was_connected_ = is_connected;
+  } else {
+    ESP_LOGVV(TAG, "MQTT client is null in loop()");
   }
 
   // Run timer group

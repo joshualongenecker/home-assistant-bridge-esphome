@@ -10,6 +10,16 @@ extern "C" {
 
 #include <set>
 
+#ifdef ESP_PLATFORM
+#include "esphome/core/log.h"
+static const char *const TAG = "geappliances_bridge.mqtt_bridge";
+#define DEBUG_LOG(...) ESP_LOGD(TAG, __VA_ARGS__)
+#define INFO_LOG(...) ESP_LOGI(TAG, __VA_ARGS__)
+#else
+#define DEBUG_LOG(...)
+#define INFO_LOG(...)
+#endif
+
 using namespace std;
 
 enum {
@@ -69,11 +79,15 @@ static tiny_hsm_result_t state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, co
       auto args = reinterpret_cast<const tiny_gea3_erd_client_on_activity_args_t*>(data);
       auto erd = args->subscription_publication_received.erd;
 
+      DEBUG_LOG("Received publication for ERD 0x%04X (size: %d)", erd, args->subscription_publication_received.data_size);
+
       if(erd_set(self).find(erd) == erd_set(self).end()) {
+        INFO_LOG("Registering new ERD 0x%04X", erd);
         mqtt_client_register_erd(self->mqtt_client, erd);
         erd_set(self).insert(erd);
       }
 
+      DEBUG_LOG("Updating ERD 0x%04X with %d bytes", erd, args->subscription_publication_received.data_size);
       mqtt_client_update_erd(
         self->mqtt_client,
         erd,
@@ -83,6 +97,7 @@ static tiny_hsm_result_t state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, co
 
     case signal_write_requested: {
       auto args = reinterpret_cast<const mqtt_client_on_write_request_args_t*>(data);
+      INFO_LOG("Write requested for ERD 0x%04X (size: %d)", args->erd, args->size);
       tiny_gea3_erd_client_request_id_t request_id;
       tiny_gea3_erd_client_write(self->erd_client, &request_id, erd_host_address, args->erd, args->value, args->size);
     } break;
@@ -101,18 +116,33 @@ static tiny_hsm_result_t state_subscribing(tiny_hsm_t* hsm, tiny_hsm_signal_t si
 
   switch(signal) {
     case tiny_hsm_signal_entry:
+      INFO_LOG("Entering subscribing state");
+      // Fall through
     case signal_subscription_failed:
+      if (signal == signal_subscription_failed) {
+        INFO_LOG("Subscription failed, retrying...");
+      }
+      // Fall through
     case signal_timer_expired:
+      if (signal == signal_timer_expired) {
+        DEBUG_LOG("Timer expired in subscribing state, retrying subscription");
+      }
       if(!tiny_gea3_erd_client_subscribe(self->erd_client, erd_host_address)) {
+        DEBUG_LOG("Subscribe request sent, waiting for response...");
+        arm_timer(self, resubscribe_delay);
+      } else {
+        INFO_LOG("Subscribe failed to queue, retrying in %d ms", resubscribe_delay);
         arm_timer(self, resubscribe_delay);
       }
       break;
 
     case signal_subscription_added_or_retained:
+      INFO_LOG("Subscription added or retained successfully");
       tiny_hsm_transition(hsm, state_subscribed);
       break;
 
     case tiny_hsm_signal_exit:
+      DEBUG_LOG("Exiting subscribing state");
       disarm_timer(self);
       break;
 
@@ -131,19 +161,27 @@ static tiny_hsm_result_t state_subscribed(tiny_hsm_t* hsm, tiny_hsm_signal_t sig
 
   switch(signal) {
     case tiny_hsm_signal_entry:
+      INFO_LOG("Entering subscribed state");
       arm_periodic_timer(self, subscription_retention_period);
       break;
 
     case signal_timer_expired:
+      DEBUG_LOG("Timer expired in subscribed state, retaining subscription");
       tiny_gea3_erd_client_retain_subscription(self->erd_client, erd_host_address);
       break;
 
     case signal_subscription_host_came_online:
+      INFO_LOG("Subscription host came online, resubscribing...");
+      tiny_hsm_transition(hsm, state_subscribing);
+      break;
+
     case signal_mqtt_disconnected:
+      INFO_LOG("MQTT disconnected, transitioning to subscribing state");
       tiny_hsm_transition(hsm, state_subscribing);
       break;
 
     case tiny_hsm_signal_exit:
+      DEBUG_LOG("Exiting subscribed state");
       disarm_timer(self);
       break;
 
@@ -181,31 +219,40 @@ void mqtt_bridge_init(
       auto args = reinterpret_cast<const tiny_gea3_erd_client_on_activity_args_t*>(_args);
 
       if(args->address != erd_host_address) {
+        DEBUG_LOG("Ignoring activity for non-host address 0x%02X", args->address);
         return;
       }
 
       switch(args->type) {
         case tiny_gea3_erd_client_activity_type_subscription_added_or_retained:
+          DEBUG_LOG("ERD client activity: subscription_added_or_retained");
           tiny_hsm_send_signal(&self->hsm, signal_subscription_added_or_retained, nullptr);
           break;
 
         case tiny_gea3_erd_client_activity_type_subscription_publication_received:
+          DEBUG_LOG("ERD client activity: subscription_publication_received for ERD 0x%04X", 
+                    args->subscription_publication_received.erd);
           tiny_hsm_send_signal(&self->hsm, signal_subscription_publication_received, args);
           break;
 
         case tiny_gea3_erd_client_activity_type_subscription_host_came_online:
+          INFO_LOG("ERD client activity: subscription_host_came_online");
           tiny_hsm_send_signal(&self->hsm, signal_subscription_host_came_online, nullptr);
           break;
 
         case tiny_gea3_erd_client_activity_type_subscribe_failed:
+          INFO_LOG("ERD client activity: subscribe_failed");
           tiny_hsm_send_signal(&self->hsm, signal_subscription_failed, nullptr);
           break;
 
         case tiny_gea3_erd_client_activity_type_write_completed:
+          INFO_LOG("ERD client activity: write_completed for ERD 0x%04X", args->write_completed.erd);
           mqtt_client_update_erd_write_result(self->mqtt_client, args->write_completed.erd, true, 0);
           break;
 
         case tiny_gea3_erd_client_activity_type_write_failed:
+          INFO_LOG("ERD client activity: write_failed for ERD 0x%04X (reason: %d)", 
+                   args->write_failed.erd, args->write_failed.reason);
           mqtt_client_update_erd_write_result(self->mqtt_client, args->write_failed.erd, false, args->write_failed.reason);
           break;
       }
@@ -223,6 +270,7 @@ void mqtt_bridge_init(
   tiny_event_subscription_init(
     &self->mqtt_disconnect_subscription, self, +[](void* context, const void*) {
       auto self = reinterpret_cast<mqtt_bridge_t*>(context);
+      INFO_LOG("MQTT disconnect event received, clearing ERD registry");
       reinterpret_cast<set<tiny_erd_t>*>(self->erd_set)->clear();
       tiny_hsm_send_signal(&self->hsm, signal_mqtt_disconnected, nullptr);
     });

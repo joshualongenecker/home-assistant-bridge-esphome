@@ -28,11 +28,17 @@ static void register_erd(i_mqtt_client_t* _self, tiny_erd_t erd)
   std::string value_topic = build_topic(self, (std::string(topic_suffix) + "/value").c_str());
   std::string write_topic = build_topic(self, (std::string(topic_suffix) + "/write").c_str());
   
-  ESP_LOGD(TAG, "Registered ERD 0x%04X", erd);
+  ESP_LOGI(TAG, "Registering ERD 0x%04X - value_topic: %s, write_topic: %s", 
+           erd, value_topic.c_str(), write_topic.c_str());
   
   // Subscribe to write topic for this ERD
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
   if (mqtt_client != nullptr) {
+    if (mqtt_client->is_connected()) {
+      ESP_LOGD(TAG, "MQTT connected, subscribing to write topic for ERD 0x%04X", erd);
+    } else {
+      ESP_LOGW(TAG, "MQTT not connected, cannot subscribe to write topic for ERD 0x%04X", erd);
+    }
     mqtt_client->subscribe(
       write_topic,
       [self, erd](const std::string &topic, const std::string &payload) {
@@ -58,6 +64,8 @@ static void register_erd(i_mqtt_client_t* _self, tiny_erd_t erd)
       },
       2  // QoS 2
     );
+  } else {
+    ESP_LOGE(TAG, "MQTT client is null, cannot register ERD 0x%04X", erd);
   }
 }
 
@@ -79,10 +87,21 @@ static void update_erd(i_mqtt_client_t* _self, tiny_erd_t erd, const void* value
     hex_payload += hex;
   }
   
+  ESP_LOGI(TAG, "Updating ERD 0x%04X: topic=%s, payload=%s (size=%d)", 
+           erd, topic.c_str(), hex_payload.c_str(), size);
+  
   // Publish to MQTT
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
   if (mqtt_client != nullptr) {
-    mqtt_client->publish(topic, hex_payload, 2, true);  // QoS 2, retain
+    if (mqtt_client->is_connected()) {
+      ESP_LOGD(TAG, "MQTT connected, publishing ERD 0x%04X update", erd);
+      mqtt_client->publish(topic, hex_payload, 2, true);  // QoS 2, retain
+      ESP_LOGD(TAG, "Published ERD 0x%04X update successfully", erd);
+    } else {
+      ESP_LOGW(TAG, "MQTT not connected, cannot publish ERD 0x%04X update", erd);
+    }
+  } else {
+    ESP_LOGE(TAG, "MQTT client is null, cannot publish ERD 0x%04X update", erd);
   }
 }
 
@@ -120,9 +139,17 @@ static void publish_sub_topic(i_mqtt_client_t* _self, const char* sub_topic, con
   std::string suffix = std::string("/") + sub_topic;
   std::string topic = build_topic(self, suffix.c_str());
   
+  ESP_LOGD(TAG, "Publishing to sub-topic: topic=%s, payload=%s", topic.c_str(), payload);
+  
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
   if (mqtt_client != nullptr) {
-    mqtt_client->publish(topic, std::string(payload), 2, true);  // QoS 2, retain
+    if (mqtt_client->is_connected()) {
+      mqtt_client->publish(topic, std::string(payload), 2, true);  // QoS 2, retain
+    } else {
+      ESP_LOGW(TAG, "MQTT not connected, cannot publish to sub-topic %s", sub_topic);
+    }
+  } else {
+    ESP_LOGE(TAG, "MQTT client is null, cannot publish to sub-topic %s", sub_topic);
   }
 }
 
@@ -156,11 +183,14 @@ extern "C" void esphome_mqtt_client_adapter_init(
   
   tiny_event_init(&self->on_write_request_event);
   tiny_event_init(&self->on_mqtt_disconnect_event);
+  
+  ESP_LOGI(TAG, "MQTT client adapter initialized for device: %s", device_id);
 }
 
 extern "C" void esphome_mqtt_client_adapter_notify_disconnected(
   esphome_mqtt_client_adapter_t* self)
 {
+  ESP_LOGI(TAG, "MQTT client adapter notifying disconnection");
   // Publish the disconnect event to notify the bridge
   // This will clear the ERD registry and trigger resubscription
   tiny_event_publish(&self->on_mqtt_disconnect_event, nullptr);
