@@ -110,7 +110,7 @@ void GeappliancesBridge::loop() {
     } else {
       // Failed to queue the read request, will retry on next loop
       this->read_retry_count_++;
-      if (this->read_retry_count_ % MAX_RETRY_LOG_INTERVAL == 0) {
+      if (this->read_retry_count_ % LOG_EVERY_N_RETRIES == 0) {
         ESP_LOGW(TAG, "Failed to queue appliance type read, retrying... (attempt %u)", this->read_retry_count_);
       }
     }
@@ -124,7 +124,7 @@ void GeappliancesBridge::loop() {
     } else {
       // Failed to queue the read request, will retry on next loop
       this->read_retry_count_++;
-      if (this->read_retry_count_ % MAX_RETRY_LOG_INTERVAL == 0) {
+      if (this->read_retry_count_ % LOG_EVERY_N_RETRIES == 0) {
         ESP_LOGW(TAG, "Failed to queue model number read, retrying... (attempt %u)", this->read_retry_count_);
       }
     }
@@ -138,7 +138,7 @@ void GeappliancesBridge::loop() {
     } else {
       // Failed to queue the read request, will retry on next loop
       this->read_retry_count_++;
-      if (this->read_retry_count_ % MAX_RETRY_LOG_INTERVAL == 0) {
+      if (this->read_retry_count_ % LOG_EVERY_N_RETRIES == 0) {
         ESP_LOGW(TAG, "Failed to queue serial number read, retrying... (attempt %u)", this->read_retry_count_);
       }
     }
@@ -182,10 +182,14 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
           args->read_completed.data_size);
         ESP_LOGI(TAG, "Read serial number: %s", this->serial_number_.c_str());
         
+        // Sanitize strings for MQTT topic use
+        std::string sanitized_model = this->sanitize_for_mqtt_topic_(this->model_number_);
+        std::string sanitized_serial = this->sanitize_for_mqtt_topic_(this->serial_number_);
+        
         // Generate device ID using std::to_string for safer conversion
         this->generated_device_id_ = std::to_string(this->appliance_type_) + "_" + 
-                                     this->model_number_ + "_" + 
-                                     this->serial_number_;
+                                     sanitized_model + "_" + 
+                                     sanitized_serial;
         this->final_device_id_ = this->generated_device_id_;
         
         ESP_LOGI(TAG, "Generated device ID: %s", this->final_device_id_.c_str());
@@ -237,7 +241,7 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
   ESP_LOGI(TAG, "MQTT bridge initialized successfully");
 }
 
-std::string GeappliancesBridge::bytes_to_string_(const uint8_t* data, uint8_t size) {
+std::string GeappliancesBridge::bytes_to_string_(const uint8_t* data, size_t size) {
   // Validate input
   if (data == nullptr || size == 0) {
     return "";
@@ -246,12 +250,32 @@ std::string GeappliancesBridge::bytes_to_string_(const uint8_t* data, uint8_t si
   // Convert byte data to string, stopping at first null byte
   std::string result;
   result.reserve(size);
-  for (uint8_t i = 0; i < size; i++) {
+  for (size_t i = 0; i < size; i++) {
     if (data[i] == 0x00) {
       break; // Stop at null terminator
     }
     result += static_cast<char>(data[i]);
   }
+  return result;
+}
+
+std::string GeappliancesBridge::sanitize_for_mqtt_topic_(const std::string& input) {
+  // MQTT topic names should not contain: +, #, null character, and ideally avoid spaces
+  // Replace invalid characters with underscores
+  std::string result;
+  result.reserve(input.length());
+  
+  for (char c : input) {
+    if (c == '+' || c == '#' || c == '\0' || c == ' ' || c == '/' || c == '$') {
+      result += '_';
+    } else if (c < 32 || c > 126) {
+      // Replace non-printable and extended ASCII characters
+      result += '_';
+    } else {
+      result += c;
+    }
+  }
+  
   return result;
 }
 

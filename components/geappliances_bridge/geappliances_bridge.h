@@ -36,7 +36,8 @@ class GeappliancesBridge : public Component {
   void notify_mqtt_disconnected_();
   void handle_erd_client_activity_(const tiny_gea3_erd_client_on_activity_args_t* args);
   void initialize_mqtt_bridge_();
-  std::string bytes_to_string_(const uint8_t* data, uint8_t size);
+  std::string bytes_to_string_(const uint8_t* data, size_t size);
+  std::string sanitize_for_mqtt_topic_(const std::string& input);
 
   enum DeviceIdState {
     DEVICE_ID_STATE_IDLE,
@@ -61,7 +62,7 @@ class GeappliancesBridge : public Component {
   std::string model_number_;
   std::string serial_number_;
   uint32_t read_retry_count_{0};
-  static constexpr uint32_t MAX_RETRY_LOG_INTERVAL = 50; // Log every 50 retries
+  static constexpr uint32_t LOG_EVERY_N_RETRIES = 50; // Log retry attempts periodically
 
   tiny_timer_group_t timer_group_;
 
