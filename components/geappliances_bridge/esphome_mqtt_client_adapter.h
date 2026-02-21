@@ -4,13 +4,14 @@
 
 extern "C" {
 #include "i_mqtt_client.h"
+#include "tiny_event.h"
 }
 
 typedef struct {
   i_mqtt_client_t interface;
   std::string* device_id;
-  i_tiny_event_t on_write_request_event;
-  i_tiny_event_t on_mqtt_disconnect_event;
+  tiny_event_t on_write_request_event;
+  tiny_event_t on_mqtt_disconnect_event;
 } esphome_mqtt_client_adapter_t;
 
 #ifdef __cplusplus

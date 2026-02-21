@@ -5,6 +5,7 @@
 
 extern "C" {
 #include "tiny_utils.h"
+#include "tiny_event.h"
 }
 
 #include <cstdio>
@@ -116,24 +117,24 @@ static void publish_sub_topic(i_mqtt_client_t* _self, const char* sub_topic, con
 {
   auto self = reinterpret_cast<esphome_mqtt_client_adapter_t*>(_self);
   
-  std::string topic = build_topic(self, std::string("/") + sub_topic);
+  std::string topic = build_topic(self, (std::string("/") + sub_topic).c_str());
   
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
   if (mqtt_client != nullptr) {
-    mqtt_client->publish(topic, payload, 2, true);  // QoS 2, retain
+    mqtt_client->publish(topic, std::string(payload), 2, true);  // QoS 2, retain
   }
 }
 
 static i_tiny_event_t* on_write_request(i_mqtt_client_t* _self)
 {
   auto self = reinterpret_cast<esphome_mqtt_client_adapter_t*>(_self);
-  return &self->on_write_request_event;
+  return &self->on_write_request_event.interface;
 }
 
 static i_tiny_event_t* on_mqtt_disconnect(i_mqtt_client_t* _self)
 {
   auto self = reinterpret_cast<esphome_mqtt_client_adapter_t*>(_self);
-  return &self->on_mqtt_disconnect_event;
+  return &self->on_mqtt_disconnect_event.interface;
 }
 
 static const i_mqtt_client_api_t api = {
