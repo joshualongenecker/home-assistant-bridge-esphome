@@ -3,8 +3,9 @@
  * @brief Polling bridge implementation for GE Appliances integration
  */
 
-extern "C" {
 #include "polling_bridge.h"
+
+extern "C" {
 #include "tiny_utils.h"
 #include "tiny_gea_constants.h"
 }
@@ -351,6 +352,8 @@ static const tiny_hsm_configuration_t hsm_configuration = {
   .state_count = element_count(hsm_state_descriptors)
 };
 
+extern "C" {
+
 void polling_bridge_init(
   polling_bridge_t* self,
   tiny_timer_group_t* timer_group,
@@ -416,3 +419,5 @@ void polling_bridge_destroy(polling_bridge_t* self)
 {
   delete reinterpret_cast<set<tiny_erd_t>*>(self->erd_set);
 }
+
+}  // extern "C"

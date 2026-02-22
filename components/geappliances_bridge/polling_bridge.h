@@ -6,10 +6,18 @@
 #ifndef POLLING_BRIDGE_H
 #define POLLING_BRIDGE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "i_mqtt_client.h"
 #include "i_tiny_gea3_erd_client.h"
 #include "tiny_hsm.h"
 #include "tiny_timer.h"
+
+#ifdef __cplusplus
+}
+#endif
 
 // Maximum number of ERDs that can be added to the polling list
 #define MAX_POLLING_LIST_SIZE 512
@@ -47,6 +55,10 @@ typedef struct {
   tiny_erd_t last_erd_polled_successfully;
 } polling_bridge_t;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*!
  * Initialize the polling bridge.
  */
@@ -62,5 +74,9 @@ void polling_bridge_init(
  */
 void polling_bridge_destroy(
   polling_bridge_t* self);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  // POLLING_BRIDGE_H
