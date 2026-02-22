@@ -51,38 +51,59 @@ def sanitize_appliance_name(name):
 
 
 def load_appliance_types():
-    """Load appliance type mappings from the API documentation."""
-    # Try to load from submodule first (for local development)
-    component_dir = os.path.dirname(__file__)
-    json_path = os.path.join(
-        component_dir, 
-        "..", 
-        "..", 
-        "public-appliance-api-documentation", 
-        "appliance_api_erd_definitions.json"
-    )
-    json_path = os.path.normpath(json_path)
+    """Load appliance type mappings from the API documentation library."""
+    # ESPHome downloads libraries to .esphome/external_files/libraries
+    # We need to check multiple possible locations
     
     data = None
+    json_filename = "appliance_api_erd_definitions.json"
     
-    # Try loading from local submodule first
-    if os.path.exists(json_path):
-        try:
-            with open(json_path, 'r') as f:
-                data = json.load(f)
-            _LOGGER.info("Loaded appliance types from local submodule")
-        except Exception as e:
-            _LOGGER.warning("Failed to load from local submodule: %s", str(e))
+    # Try to find the JSON file in common locations
+    search_paths = []
     
-    # If local load failed, fetch from GitHub
+    # Path 1: Local submodule (for local development)
+    component_dir = os.path.dirname(__file__)
+    local_submodule_path = os.path.normpath(os.path.join(
+        component_dir, "..", "..", "public-appliance-api-documentation", json_filename
+    ))
+    search_paths.append(("local submodule", local_submodule_path))
+    
+    # Path 2: ESPHome library download location (relative to component)
+    # ESPHome typically puts libraries alongside the component
+    library_path = os.path.normpath(os.path.join(
+        component_dir, "..", "..", "public-appliance-api-documentation", json_filename
+    ))
+    if library_path not in [p[1] for p in search_paths]:
+        search_paths.append(("library path", library_path))
+    
+    # Path 3: Check parent directories for the library
+    parent_dir = os.path.dirname(os.path.dirname(component_dir))
+    alt_library_path = os.path.normpath(os.path.join(
+        parent_dir, "public-appliance-api-documentation", json_filename
+    ))
+    if alt_library_path not in [p[1] for p in search_paths]:
+        search_paths.append(("parent library path", alt_library_path))
+    
+    # Try each path
+    for location_name, json_path in search_paths:
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, 'r') as f:
+                    data = json.load(f)
+                _LOGGER.info("Loaded appliance types from %s: %s", location_name, json_path)
+                break
+            except Exception as e:
+                _LOGGER.warning("Failed to load from %s (%s): %s", location_name, json_path, str(e))
+    
+    # If local paths failed, try fetching from GitHub as fallback
     if data is None:
         url = "https://raw.githubusercontent.com/geappliances/public-appliance-api-documentation/main/appliance_api_erd_definitions.json"
-        _LOGGER.info("Fetching appliance types from GitHub: %s", url)
+        _LOGGER.warning("Could not find local library. Fetching from GitHub as fallback: %s", url)
         
         try:
             with urllib.request.urlopen(url, timeout=10) as response:
                 data = json.loads(response.read().decode('utf-8'))
-            _LOGGER.info("Successfully fetched appliance types from GitHub")
+            _LOGGER.info("Successfully fetched appliance types from GitHub (fallback)")
         except urllib.error.HTTPError as e:
             _LOGGER.error(
                 "HTTP error fetching appliance API documentation (status %d): %s. Using fallback mapping.", 
@@ -177,6 +198,9 @@ async def to_code(config):
     # Add library dependencies
     cg.add_library("https://github.com/ryanplusplus/tiny", None)
     cg.add_library("https://github.com/geappliances/tiny-gea-api#develop", None)
+    # Add public-appliance-api-documentation as a library dependency
+    # This allows users to control the version by updating the library reference
+    cg.add_library("https://github.com/geappliances/public-appliance-api-documentation", None)
     
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)

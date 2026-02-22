@@ -82,7 +82,7 @@ The `device_id` parameter is **optional**. If not provided, the component will a
 
 The auto-generated device ID format is: `ApplianceTypeName_ModelNumber_SerialNumber`
 
-The appliance type names are automatically fetched from the [GE Appliances Public API Documentation](https://github.com/geappliances/public-appliance-api-documentation) during the ESPHome build process, ensuring compatibility with API updates.
+The appliance type names are loaded from the [GE Appliances Public API Documentation](https://github.com/geappliances/public-appliance-api-documentation) library during the ESPHome build process. The library is automatically downloaded and cached like other dependencies, giving you control over when to update the appliance type definitions.
 
 Example:
 ```yaml
@@ -98,6 +98,6 @@ geappliances_bridge:
 
 Generated device ID example: `Dishwasher_ZL4200ABC_12345678` (for appliance type 6 - Dishwasher)
 
-**Note:** The required C++ libraries (`tiny` and `tiny-gea-api`) are automatically fetched and compiled by ESPHome during the build process.
+**Note:** The required libraries (`tiny`, `tiny-gea-api`, and `public-appliance-api-documentation`) are automatically fetched and compiled by ESPHome during the build process.
 
 See [components/geappliances_bridge/example.yaml](components/geappliances_bridge/example.yaml) for the complete configuration example.
