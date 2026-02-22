@@ -3,8 +3,8 @@
  * @brief Polls ERDs and publishes them to an MQTT server.
  */
 
-#ifndef POLLING_BRIDGE_H
-#define POLLING_BRIDGE_H
+#ifndef GEAPPLIANCES_POLLING_BRIDGE_H
+#define GEAPPLIANCES_POLLING_BRIDGE_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -79,4 +79,4 @@ void polling_bridge_destroy(
 }
 #endif
 
-#endif  // POLLING_BRIDGE_H
+#endif  // GEAPPLIANCES_POLLING_BRIDGE_H

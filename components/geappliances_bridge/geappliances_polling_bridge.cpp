@@ -3,7 +3,7 @@
  * @brief Polling bridge implementation for GE Appliances integration
  */
 
-#include "polling_bridge.h"
+#include "geappliances_polling_bridge.h"
 
 extern "C" {
 #include "tiny_utils.h"

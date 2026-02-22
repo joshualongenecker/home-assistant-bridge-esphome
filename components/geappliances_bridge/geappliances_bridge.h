@@ -13,7 +13,7 @@ extern "C" {
 #include "uptime_monitor.h"
 }
 
-#include "polling_bridge.h"
+#include "geappliances_polling_bridge.h"
 #include "esphome_uart_adapter.h"
 #include "esphome_mqtt_client_adapter.h"
 

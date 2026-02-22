@@ -20,7 +20,7 @@ SRC_DIRS := \
 
 SRC_FILES := \
   components/geappliances_bridge/mqtt_bridge.cpp \
-  components/geappliances_bridge/polling_bridge.cpp \
+  components/geappliances_bridge/geappliances_polling_bridge.cpp \
   components/geappliances_bridge/uptime_monitor.c \
 
 SRCS := $(SRC_FILES) $(shell find $(SRC_DIRS) -maxdepth 1 -name *.cpp -or -name *.c -or -name *.s)

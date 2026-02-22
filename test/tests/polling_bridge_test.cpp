@@ -4,7 +4,7 @@
  */
 
 extern "C" {
-#include "polling_bridge.h"
+#include "geappliances_polling_bridge.h"
 }
 
 #include "CppUTest/TestHarness.h"
