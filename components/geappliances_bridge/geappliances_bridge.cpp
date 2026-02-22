@@ -21,6 +21,10 @@ static constexpr uint8_t ERD_HOST_ADDRESS = 0xC0;
 void GeappliancesBridge::setup() {
   ESP_LOGCONFIG(TAG, "Setting up GE Appliances Bridge...");
 
+  // Record startup time for delay
+  this->startup_time_ = millis();
+  ESP_LOGI(TAG, "Startup delay: waiting %u seconds before initializing", STARTUP_DELAY_MS / 1000);
+
   // Initialize timer group
   tiny_timer_group_init(&this->timer_group_, esphome_time_source_init());
 
@@ -68,13 +72,26 @@ void GeappliancesBridge::setup() {
     ESP_LOGI(TAG, "Using configured device_id: %s", this->configured_device_id_.c_str());
     this->final_device_id_ = this->configured_device_id_;
     this->device_id_state_ = DEVICE_ID_STATE_COMPLETE;
-    this->initialize_mqtt_bridge_();
+    // Don't initialize MQTT bridge yet - wait for MQTT connection
+    this->bridge_init_state_ = BRIDGE_INIT_STATE_WAITING_FOR_MQTT;
   }
 
   ESP_LOGCONFIG(TAG, "GE Appliances Bridge setup complete");
 }
 
 void GeappliancesBridge::loop() {
+  // Enforce startup delay to allow WiFi to establish and capture early debug messages
+  if (!this->startup_delay_complete_) {
+    // Note: Unsigned subtraction wraps correctly even when millis() overflows after ~49 days
+    if (millis() - this->startup_time_ >= STARTUP_DELAY_MS) {
+      this->startup_delay_complete_ = true;
+      ESP_LOGI(TAG, "Startup delay complete, beginning normal operation");
+    } else {
+      // Skip all processing during startup delay
+      return;
+    }
+  }
+
   // Check MQTT connection state
   auto mqtt_client = mqtt::global_mqtt_client;
   if (mqtt_client != nullptr) {
@@ -99,6 +116,14 @@ void GeappliancesBridge::loop() {
   // Run GEA3 interface
   tiny_gea3_interface_run(&this->gea3_interface_);
 
+  // Initialize MQTT bridge when device ID is ready and MQTT is connected
+  if (this->bridge_init_state_ == BRIDGE_INIT_STATE_WAITING_FOR_MQTT && 
+      mqtt_client != nullptr && mqtt_client->is_connected()) {
+    ESP_LOGI(TAG, "Device ID ready and MQTT connected, initializing MQTT bridge");
+    this->initialize_mqtt_bridge_();
+    this->bridge_init_state_ = BRIDGE_INIT_STATE_COMPLETE;
+  }
+
   // Handle device ID generation state machine
   // Note: If state reaches DEVICE_ID_STATE_FAILED, device requires reboot to retry
   if (this->device_id_state_ == DEVICE_ID_STATE_READING_APPLIANCE_TYPE) {
@@ -111,7 +136,17 @@ void GeappliancesBridge::loop() {
 }
 
 void GeappliancesBridge::on_mqtt_connected_() {
-  ESP_LOGI(TAG, "MQTT connected, notifying bridge to reset subscriptions");
+  ESP_LOGI(TAG, "MQTT connected, flushing pending updates and resetting subscriptions");
+  
+  // Flush any pending ERD updates that were queued while MQTT was not connected
+  if (this->mqtt_bridge_initialized_) {
+    esphome_mqtt_client_adapter_notify_connected(&this->mqtt_client_adapter_);
+  }
+  
+  // Notify bridge to reset subscriptions
+  // Note: This notifies the bridge as if MQTT disconnected, which triggers the bridge
+  // to clear its ERD registry and resubscribe. This ensures all ERDs are re-registered
+  // and subscriptions are fresh after reconnection.
   this->notify_mqtt_disconnected_();
 }
 
@@ -163,7 +198,8 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
         ESP_LOGI(TAG, "Generated device ID: %s", this->final_device_id_.c_str());
         
         this->device_id_state_ = DEVICE_ID_STATE_COMPLETE;
-        this->initialize_mqtt_bridge_();
+        // Don't initialize MQTT bridge yet - wait for MQTT connection
+        this->bridge_init_state_ = BRIDGE_INIT_STATE_WAITING_FOR_MQTT;
       }
     } else if (args->type == tiny_gea3_erd_client_activity_type_read_failed) {
       // Log the failure and retry by transitioning back to the appropriate reading state

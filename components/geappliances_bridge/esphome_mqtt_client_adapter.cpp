@@ -11,8 +11,12 @@ extern "C" {
 #include <cstdio>
 #include <string>
 #include <cctype>
+#include <deque>
 
 static const char *const TAG = "geappliances_bridge.mqtt";
+
+// Maximum number of pending updates to queue (prevent memory exhaustion)
+static constexpr size_t MAX_PENDING_UPDATES = 100;
 
 static std::string build_topic(esphome_mqtt_client_adapter_t* self, const char* suffix)
 {
@@ -103,12 +107,21 @@ static void update_erd(i_mqtt_client_t* _self, tiny_erd_t erd, const void* value
     hex_payload += hex;
   }
   
-  // Publish to MQTT
+  // Publish to MQTT or queue if not connected
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
   if (mqtt_client != nullptr && mqtt_client->is_connected()) {
     mqtt_client->publish(topic, hex_payload, 2, true);  // QoS 2, retain
   } else {
-    ESP_LOGD(TAG, "MQTT not connected, skipping ERD update for 0x%04X", erd);
+    // Queue the update for later when MQTT connects
+    if (self->pending_updates != nullptr && self->pending_updates->size() < MAX_PENDING_UPDATES) {
+      self->pending_updates->push_back({topic, hex_payload});
+      ESP_LOGD(TAG, "MQTT not connected, queued ERD update for 0x%04X (queue size: %zu)", 
+               erd, self->pending_updates->size());
+    } else if (self->pending_updates == nullptr) {
+      ESP_LOGW(TAG, "Pending updates queue not initialized, dropping ERD update for 0x%04X", erd);
+    } else {
+      ESP_LOGW(TAG, "Pending update queue full, dropping ERD update for 0x%04X", erd);
+    }
   }
 }
 
@@ -183,6 +196,7 @@ extern "C" void esphome_mqtt_client_adapter_init(
 {
   self->interface.api = &api;
   self->device_id = new std::string(device_id);
+  self->pending_updates = new std::deque<PendingErdUpdate>();
   
   tiny_event_init(&self->on_write_request_event);
   tiny_event_init(&self->on_mqtt_disconnect_event);
@@ -196,11 +210,33 @@ extern "C" void esphome_mqtt_client_adapter_notify_disconnected(
   tiny_event_publish(&self->on_mqtt_disconnect_event, nullptr);
 }
 
+extern "C" void esphome_mqtt_client_adapter_notify_connected(
+  esphome_mqtt_client_adapter_t* self)
+{
+  // Flush pending updates when MQTT connects
+  auto mqtt_client = esphome::mqtt::global_mqtt_client;
+  if (mqtt_client != nullptr && mqtt_client->is_connected() && 
+      self->pending_updates != nullptr && !self->pending_updates->empty()) {
+    ESP_LOGI(TAG, "MQTT connected, flushing %zu pending ERD updates", self->pending_updates->size());
+    
+    for (const auto& update : *self->pending_updates) {
+      mqtt_client->publish(update.topic, update.payload, 2, true);  // QoS 2, retain
+    }
+    
+    self->pending_updates->clear();
+    ESP_LOGI(TAG, "Flushed all pending ERD updates");
+  }
+}
+
 extern "C" void esphome_mqtt_client_adapter_destroy(
   esphome_mqtt_client_adapter_t* self)
 {
   if (self->device_id != nullptr) {
     delete self->device_id;
     self->device_id = nullptr;
+  }
+  if (self->pending_updates != nullptr) {
+    delete self->pending_updates;
+    self->pending_updates = nullptr;
   }
 }

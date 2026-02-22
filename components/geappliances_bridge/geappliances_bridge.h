@@ -52,6 +52,12 @@ class GeappliancesBridge : public Component {
     DEVICE_ID_STATE_FAILED
   };
 
+  enum BridgeInitState {
+    BRIDGE_INIT_STATE_WAITING_FOR_DEVICE_ID,
+    BRIDGE_INIT_STATE_WAITING_FOR_MQTT,
+    BRIDGE_INIT_STATE_COMPLETE
+  };
+
   uart::UARTComponent *uart_{nullptr};
   std::string configured_device_id_;
   std::string generated_device_id_;
@@ -61,6 +67,12 @@ class GeappliancesBridge : public Component {
   bool mqtt_bridge_initialized_{false};
   
   DeviceIdState device_id_state_{DEVICE_ID_STATE_IDLE};
+  BridgeInitState bridge_init_state_{BRIDGE_INIT_STATE_WAITING_FOR_DEVICE_ID};
+  
+  // Startup delay to allow WiFi to establish and capture early debug messages
+  static constexpr uint32_t STARTUP_DELAY_MS = 20000; // 20 seconds
+  uint32_t startup_time_{0};
+  bool startup_delay_complete_{false};
   tiny_gea3_erd_client_request_id_t pending_request_id_;
   uint8_t appliance_type_{0};
   std::string model_number_;
