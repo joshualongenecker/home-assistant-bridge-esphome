@@ -1,6 +1,6 @@
 /*!
  * @file
- * @brief
+ * @brief Uptime monitor for publishing system uptime to MQTT
  *
  * Writes the approximate system uptime to an MQTT topic every second.
  */

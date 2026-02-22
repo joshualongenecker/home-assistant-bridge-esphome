@@ -83,6 +83,12 @@ static void update_erd(i_mqtt_client_t* _self, tiny_erd_t erd, const void* value
 {
   auto self = reinterpret_cast<esphome_mqtt_client_adapter_t*>(_self);
   
+  // Validate inputs
+  if (value == nullptr || size == 0) {
+    ESP_LOGW(TAG, "Invalid ERD update: null value or zero size for ERD 0x%04X", erd);
+    return;
+  }
+  
   char topic_suffix[32];
   snprintf(topic_suffix, sizeof(topic_suffix), "/erd/0x%04X/value", erd);
   std::string topic = build_topic(self, topic_suffix);
@@ -99,8 +105,10 @@ static void update_erd(i_mqtt_client_t* _self, tiny_erd_t erd, const void* value
   
   // Publish to MQTT
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
-  if (mqtt_client != nullptr) {
+  if (mqtt_client != nullptr && mqtt_client->is_connected()) {
     mqtt_client->publish(topic, hex_payload, 2, true);  // QoS 2, retain
+  } else {
+    ESP_LOGD(TAG, "MQTT not connected, skipping ERD update for 0x%04X", erd);
   }
 }
 
@@ -124,8 +132,10 @@ static void update_erd_write_result(
   }
   
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
-  if (mqtt_client != nullptr) {
+  if (mqtt_client != nullptr && mqtt_client->is_connected()) {
     mqtt_client->publish(topic, payload, 2, false);  // QoS 2, no retain
+  } else {
+    ESP_LOGD(TAG, "MQTT not connected, skipping write result for 0x%04X", erd);
   }
   
   ESP_LOGD(TAG, "Write result for ERD 0x%04X: %s", erd, payload.c_str());
@@ -139,8 +149,10 @@ static void publish_sub_topic(i_mqtt_client_t* _self, const char* sub_topic, con
   std::string topic = build_topic(self, suffix.c_str());
   
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
-  if (mqtt_client != nullptr) {
+  if (mqtt_client != nullptr && mqtt_client->is_connected()) {
     mqtt_client->publish(topic, std::string(payload), 2, true);  // QoS 2, retain
+  } else {
+    ESP_LOGD(TAG, "MQTT not connected, skipping sub-topic publish for %s", sub_topic);
   }
 }
 
