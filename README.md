@@ -100,3 +100,47 @@ Generated device ID example: `Dishwasher_ZL4200ABC_12345678` (for appliance type
 **Note:** The required libraries (`tiny`, `tiny-gea-api`, and `public-appliance-api-documentation`) are automatically fetched and compiled by ESPHome during the build process.
 
 See [components/geappliances_bridge/example.yaml](components/geappliances_bridge/example.yaml) for the complete configuration example.
+
+## Development
+
+### Running Tests
+
+This project includes unit tests for the core bridge functionality. The tests are built using CppUTest.
+
+#### Prerequisites
+
+Install CppUTest:
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get install cpputest libcpputest-dev
+```
+
+**macOS:**
+```bash
+brew install cpputest
+```
+
+#### Running the Tests
+
+Clone the repository with submodules:
+```bash
+git clone --recursive https://github.com/joshualongenecker/home-assistant-bridge-esphome.git
+cd home-assistant-bridge-esphome
+```
+
+Build and run the tests:
+```bash
+make test
+```
+
+This will:
+1. Compile the test suite
+2. Run all unit tests
+3. Display the test results
+
+The tests cover:
+- MQTT bridge functionality
+- Subscription management
+- ERD publication handling
+- Uptime monitoring

@@ -1,0 +1,41 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    
+    permissions:
+      contents: read
+
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-latest, macos-14, macos-latest]
+
+    steps:
+    - name: Install CppUTest
+      uses: lyricwulf/abc@v1
+      with:
+        all: cpputest
+
+    - uses: SimenB/github-actions-cpu-cores@v1
+      id: cpu-cores
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+
+    - name: Configure brew paths on macOS
+      if: contains(matrix.os, 'macos')
+      run: |
+        echo CPATH="$CPATH:$(brew --prefix)/include" >> $GITHUB_ENV
+        echo LIBRARY_PATH="$LIBRARY_PATH:$(brew --prefix)/lib" >> $GITHUB_ENV
+
+    - run: make test -j${{ steps.cpu-cores.outputs.count }}

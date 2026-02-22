@@ -1,3 +1,9 @@
+[submodule "lib/tiny-gea-api"]
+	path = lib/tiny-gea-api
+	url = https://github.com/geappliances/tiny-gea-api
+[submodule "lib/tiny"]
+	path = lib/tiny
+	url = https://github.com/ryanplusplus/tiny
 [submodule "public-appliance-api-documentation"]
 	path = public-appliance-api-documentation
 	url = https://github.com/geappliances/public-appliance-api-documentation.git

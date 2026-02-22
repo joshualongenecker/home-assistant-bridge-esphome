@@ -4,6 +4,9 @@ components/geappliances_bridge/.esphome/
 __pycache__/
 *.pyc
 
+# Test build artifacts
+build/
+
 # IDE
 .vscode/
 .DS_Store
