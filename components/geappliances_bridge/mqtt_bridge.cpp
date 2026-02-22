@@ -228,6 +228,9 @@ void mqtt_bridge_init(
     });
   tiny_event_subscribe(mqtt_client_on_mqtt_disconnect(mqtt_client), &self->mqtt_disconnect_subscription);
 
+  // INITIALIZATION ORDER: Start HSM in state_subscribing
+  // This state will immediately attempt to subscribe to GEA3 host (0xC0) on entry
+  // See state_subscribing() which queues the subscription request
   tiny_hsm_init(&self->hsm, &hsm_configuration, state_subscribing);
 }
 

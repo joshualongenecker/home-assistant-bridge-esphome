@@ -101,6 +101,43 @@ Generated device ID example: `Dishwasher_ZL4200ABC_12345678` (for appliance type
 
 See [components/geappliances_bridge/example.yaml](components/geappliances_bridge/example.yaml) for the complete configuration example.
 
+### Initialization Order
+
+The component follows a specific initialization sequence that varies depending on whether the device ID is configured or auto-generated:
+
+#### When `device_id` is Configured
+
+1. **Setup Phase:**
+   - Initialize GEA3 communication (UART, GEA3 interface, ERD client)
+   - Use the configured device ID
+   - Initialize MQTT client adapter with the device ID
+   - Initialize MQTT bridge
+2. **Loop Phase:**
+   - Subscribe to GEA3 host (address 0xC0) for appliance data
+   - Begin forwarding ERD data to MQTT
+
+**Sequence:** `GEA3 Init → Device ID (configured) → MQTT Init → GEA3 Subscribe → Data Forwarding`
+
+#### When `device_id` is NOT Configured (Auto-Generated)
+
+1. **Setup Phase:**
+   - Initialize GEA3 communication (UART, GEA3 interface, ERD client)
+   - MQTT bridge initialization is **deferred**
+2. **Loop Phase - Device ID Generation:**
+   - Read appliance type (ERD 0x0008)
+   - Read model number (ERD 0x0001)
+   - Read serial number (ERD 0x0002)
+   - Generate device ID: `{ApplianceType}_{Model}_{Serial}`
+   - Initialize MQTT client adapter with the generated device ID
+   - Initialize MQTT bridge
+3. **Loop Phase - Data Forwarding:**
+   - Subscribe to GEA3 host (address 0xC0) for appliance data
+   - Begin forwarding ERD data to MQTT
+
+**Sequence:** `GEA3 Init → Read ERDs → Device ID (generated) → MQTT Init → GEA3 Subscribe → Data Forwarding`
+
+**Key Point:** The MQTT bridge is not initialized until a valid device ID is available. When auto-generating, ERD reads occur first, then MQTT initialization and GEA3 subscriptions follow.
+
 ## Development
 
 ### Running Tests
