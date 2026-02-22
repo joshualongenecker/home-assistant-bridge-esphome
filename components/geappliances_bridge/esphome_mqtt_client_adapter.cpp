@@ -208,19 +208,20 @@ extern "C" void esphome_mqtt_client_adapter_process_registrations(
     return;
   }
   
-  // Process one ERD from the queue
+  // Peek at the next ERD without removing it yet
   tiny_erd_t erd = self->pending_registrations->front();
-  self->pending_registrations->pop_front();
   
-  char topic_suffix[32];
-  snprintf(topic_suffix, sizeof(topic_suffix), "/erd/0x%04x", erd);
+  // Build topics more efficiently
+  char value_suffix[48];
+  char write_suffix[48];
+  snprintf(value_suffix, sizeof(value_suffix), "/erd/0x%04x/value", erd);
+  snprintf(write_suffix, sizeof(write_suffix), "/erd/0x%04x/write", erd);
   
-  std::string value_topic = build_topic(self, (std::string(topic_suffix) + "/value").c_str());
-  std::string write_topic = build_topic(self, (std::string(topic_suffix) + "/write").c_str());
-  
-  ESP_LOGD(TAG, "Registered ERD 0x%04X", erd);
+  std::string value_topic = build_topic(self, value_suffix);
+  std::string write_topic = build_topic(self, write_suffix);
   
   // Subscribe to write topic for this ERD
+  // Note: ESPHome's subscribe() doesn't return a status, so we assume success
   mqtt_client->subscribe(
     write_topic,
     [self, erd](const std::string &topic, const std::string &payload) {
@@ -263,6 +264,12 @@ extern "C" void esphome_mqtt_client_adapter_process_registrations(
     },
     2  // QoS 2
   );
+  
+  // Only remove from queue after successful subscription
+  // Note: subscribe() is void, so we assume it succeeded if no exception was thrown
+  self->pending_registrations->pop_front();
+  
+  ESP_LOGD(TAG, "Registered ERD 0x%04X", erd);
 }
 
 extern "C" void esphome_mqtt_client_adapter_destroy(
