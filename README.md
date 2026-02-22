@@ -69,7 +69,6 @@ uart:
 geappliances_bridge:
   # device_id: "YourDeviceId"  # Optional: Uncomment to use a custom device ID
   uart_id: gea3_uart
-  # client_address: 0xE4  # Hard-coded to 0xE4, no longer configurable
 ```
 
 ### Auto-Generated Device ID
