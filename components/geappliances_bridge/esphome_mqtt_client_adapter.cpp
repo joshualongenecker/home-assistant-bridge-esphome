@@ -213,7 +213,8 @@ extern "C" void esphome_mqtt_client_adapter_notify_connected(
 {
   // Flush pending updates when MQTT connects
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
-  if (mqtt_client != nullptr && mqtt_client->is_connected() && !self->pending_updates->empty()) {
+  if (mqtt_client != nullptr && mqtt_client->is_connected() && 
+      self->pending_updates != nullptr && !self->pending_updates->empty()) {
     ESP_LOGI(TAG, "MQTT connected, flushing %zu pending ERD updates", self->pending_updates->size());
     
     for (const auto& update : *self->pending_updates) {
