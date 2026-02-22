@@ -67,12 +67,37 @@ uart:
 
 # GE Appliances Bridge component
 geappliances_bridge:
-  device_id: "YourDeviceId"
+  # device_id: "YourDeviceId"  # Optional: Uncomment to use a custom device ID
   uart_id: gea3_uart
-  client_address: 0xE4  # Default GEA3 client address
 ```
 
-**Note:** The required C++ libraries (`tiny` and `tiny-gea-api`) are automatically fetched and compiled by ESPHome during the build process.
+### Auto-Generated Device ID
+
+The `device_id` parameter is **optional**. If not provided, the component will automatically generate a device ID by reading the following ERDs from the appliance:
+
+- **Appliance Type** (ERD 0x0008) - Single byte enum (converted to string name, e.g., "Dishwasher")
+- **Model Number** (ERD 0x0001) - 32 byte string
+- **Serial Number** (ERD 0x0002) - 32 byte string
+
+The auto-generated device ID format is: `ApplianceTypeName_ModelNumber_SerialNumber`
+
+The appliance type names are loaded from the [GE Appliances Public API Documentation](https://github.com/geappliances/public-appliance-api-documentation) library during the ESPHome build process. The library is automatically downloaded and cached like other dependencies, giving you control over when to update the appliance type definitions.
+
+Example:
+```yaml
+# Auto-generate device ID (recommended)
+geappliances_bridge:
+  uart_id: gea3_uart
+  
+# Or use a custom device ID
+geappliances_bridge:
+  device_id: "my_custom_id"
+  uart_id: gea3_uart
+```
+
+Generated device ID example: `Dishwasher_ZL4200ABC_12345678` (for appliance type 6 - Dishwasher)
+
+**Note:** The required libraries (`tiny`, `tiny-gea-api`, and `public-appliance-api-documentation`) are automatically fetched and compiled by ESPHome during the build process.
 
 See [components/geappliances_bridge/example.yaml](components/geappliances_bridge/example.yaml) for the complete configuration example.
 

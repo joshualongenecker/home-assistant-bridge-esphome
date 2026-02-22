@@ -55,6 +55,8 @@ uart:
 
 # GE Appliances Bridge component
 geappliances_bridge:
-  device_id: "YourDeviceId"
+  # device_id is optional - if not provided, it will be auto-generated from appliance ERDs
+  # Format: "ApplianceTypeName_ModelNumber_SerialNumber" (e.g., "Dishwasher_ZL4200ABC_12345678")
+  # Appliance type names are parsed from GE Appliances API documentation
+  # device_id: "YourDeviceId"  # Optional: Uncomment to use a custom device ID
   uart_id: gea3_uart
-  client_address: 0xE4  # Default GEA3 client address
