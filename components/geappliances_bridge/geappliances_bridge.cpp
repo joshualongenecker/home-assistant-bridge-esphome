@@ -62,19 +62,18 @@ void GeappliancesBridge::setup() {
 
   // Determine if we should auto-generate device ID or use configured one
   // INITIALIZATION ORDER:
-  // 1. If device_id is configured: Initialize MQTT bridge immediately (this setup phase)
-  // 2. If device_id is NOT configured: Defer MQTT bridge init until ERDs are read (in loop phase)
+  // 1. If device_id is configured: Set device ID but defer MQTT bridge init until MQTT connects
+  // 2. If device_id is NOT configured: Defer MQTT bridge init until ERDs are read AND MQTT connects
   if (this->configured_device_id_.empty()) {
     ESP_LOGI(TAG, "No device_id configured, will auto-generate from appliance ERDs");
     this->device_id_state_ = DEVICE_ID_STATE_READING_APPLIANCE_TYPE;
-    // MQTT bridge will be initialized in loop() after device ID is generated
+    // MQTT bridge will be initialized in loop() after device ID is generated AND MQTT connects
   } else {
     ESP_LOGI(TAG, "Using configured device_id: %s", this->configured_device_id_.c_str());
     this->final_device_id_ = this->configured_device_id_;
     this->device_id_state_ = DEVICE_ID_STATE_COMPLETE;
-    // Initialize MQTT bridge immediately with configured device ID
-    // This also triggers GEA3 subscription in the next loop iteration
-    this->initialize_mqtt_bridge_();
+    // MQTT bridge will be initialized in loop() when MQTT connection is established
+    // This ensures first ERD publications after GEA3 subscription are not dropped
   }
 
   ESP_LOGCONFIG(TAG, "GE Appliances Bridge setup complete");
@@ -115,6 +114,12 @@ void GeappliancesBridge::loop() {
     this->try_read_erd_with_retry_(ERD_MODEL_NUMBER, "model number");
   } else if (this->device_id_state_ == DEVICE_ID_STATE_READING_SERIAL_NUMBER) {
     this->try_read_erd_with_retry_(ERD_SERIAL_NUMBER, "serial number");
+  } else if (this->device_id_state_ == DEVICE_ID_STATE_COMPLETE && !this->mqtt_bridge_initialized_) {
+    // Device ID is ready but MQTT bridge not yet initialized
+    // Wait for MQTT connection before initializing bridge to avoid dropping initial ERD publications
+    if (mqtt_client != nullptr && mqtt_client->is_connected()) {
+      this->initialize_mqtt_bridge_();
+    }
   }
 }
 
@@ -171,9 +176,9 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
         ESP_LOGI(TAG, "Generated device ID: %s", this->final_device_id_.c_str());
         
         this->device_id_state_ = DEVICE_ID_STATE_COMPLETE;
-        // INITIALIZATION ORDER: Now that device ID is complete, initialize MQTT bridge
-        // This will trigger GEA3 subscription in the mqtt_bridge_init function
-        this->initialize_mqtt_bridge_();
+        // INITIALIZATION ORDER: Device ID is now complete
+        // MQTT bridge will be initialized in loop() when MQTT connection is confirmed
+        // This prevents dropping initial ERD publications if MQTT isn't connected yet
       }
     } else if (args->type == tiny_gea3_erd_client_activity_type_read_failed) {
       // Log the failure and retry by transitioning back to the appropriate reading state
@@ -200,9 +205,10 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
   ESP_LOGI(TAG, "Initializing MQTT bridge with device ID: %s", this->final_device_id_.c_str());
 
   // INITIALIZATION ORDER:
-  // 1. Initialize MQTT client adapter (requires device ID)
-  // 2. Initialize uptime monitor
-  // 3. Initialize MQTT bridge (which will subscribe to GEA3 host in its init)
+  // This function is only called when BOTH conditions are met:
+  // 1. Device ID is available (configured or auto-generated)
+  // 2. MQTT client is connected
+  // This ensures first ERD publications after GEA3 subscription are not dropped
   
   // Initialize MQTT client adapter
   esphome_mqtt_client_adapter_init(&this->mqtt_client_adapter_, this->final_device_id_.c_str());

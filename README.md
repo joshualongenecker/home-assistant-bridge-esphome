@@ -103,40 +103,48 @@ See [components/geappliances_bridge/example.yaml](components/geappliances_bridge
 
 ### Initialization Order
 
-The component follows a specific initialization sequence that varies depending on whether the device ID is configured or auto-generated:
+The component follows a specific initialization sequence that ensures MQTT is connected before subscribing to GEA3 data, preventing loss of initial ERD publications:
 
 #### When `device_id` is Configured
 
 1. **Setup Phase:**
    - Initialize GEA3 communication (UART, GEA3 interface, ERD client)
-   - Use the configured device ID
-   - Initialize MQTT client adapter with the device ID
-   - Initialize MQTT bridge
-2. **Loop Phase:**
-   - Subscribe to GEA3 host (address 0xC0) for appliance data
-   - Begin forwarding ERD data to MQTT
+   - Set the configured device ID
+   - **Wait for MQTT connection**
+2. **Loop Phase - MQTT Connection Check:**
+   - Monitor MQTT connection status
+   - Once MQTT is connected:
+     - Initialize MQTT client adapter with the device ID
+     - Initialize MQTT bridge
+     - Subscribe to GEA3 host (address 0xC0) for appliance data
+3. **Loop Phase - Data Forwarding:**
+   - Forward ERD data to MQTT
 
-**Sequence:** `GEA3 Init → Device ID (configured) → MQTT Init → GEA3 Subscribe → Data Forwarding`
+**Sequence:** `GEA3 Init → Device ID (configured) → Wait for MQTT → MQTT Init → GEA3 Subscribe → Data Forwarding`
 
 #### When `device_id` is NOT Configured (Auto-Generated)
 
 1. **Setup Phase:**
    - Initialize GEA3 communication (UART, GEA3 interface, ERD client)
-   - MQTT bridge initialization is **deferred**
+   - **MQTT bridge initialization is deferred**
 2. **Loop Phase - Device ID Generation:**
    - Read appliance type (ERD 0x0008)
    - Read model number (ERD 0x0001)
    - Read serial number (ERD 0x0002)
    - Generate device ID: `{ApplianceType}_{Model}_{Serial}`
-   - Initialize MQTT client adapter with the generated device ID
-   - Initialize MQTT bridge
-3. **Loop Phase - Data Forwarding:**
-   - Subscribe to GEA3 host (address 0xC0) for appliance data
-   - Begin forwarding ERD data to MQTT
+   - **Wait for MQTT connection**
+3. **Loop Phase - MQTT Connection Check:**
+   - Monitor MQTT connection status
+   - Once MQTT is connected:
+     - Initialize MQTT client adapter with the generated device ID
+     - Initialize MQTT bridge
+     - Subscribe to GEA3 host (address 0xC0) for appliance data
+4. **Loop Phase - Data Forwarding:**
+   - Forward ERD data to MQTT
 
-**Sequence:** `GEA3 Init → Read ERDs → Device ID (generated) → MQTT Init → GEA3 Subscribe → Data Forwarding`
+**Sequence:** `GEA3 Init → Read ERDs → Device ID (generated) → Wait for MQTT → MQTT Init → GEA3 Subscribe → Data Forwarding`
 
-**Key Point:** The MQTT bridge is not initialized until a valid device ID is available. When auto-generating, ERD reads occur first, then MQTT initialization and GEA3 subscriptions follow.
+**Key Point:** The MQTT bridge is not initialized until BOTH a valid device ID is available AND the MQTT client is connected. This ensures that when GEA3 subscription occurs and ERD publications start arriving, the MQTT client is ready to publish them, preventing data loss.
 
 ## Development
 
