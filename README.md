@@ -17,17 +17,13 @@ Available from [FirstBuild](https://firstbuild.com/inventions/home-assistant-ada
 Add to your ESPHome YAML configuration:
 
 ```yaml
-substitutions:
-  name: gea-esphome-1
-  friendly_name: gea-esphome
-
 packages:
   esphome.esp_web_tools_example: github://esphome/firmware/esp-web-tools/esp32c3.yaml@main
 
 esphome:
-  name: ${name}
-  name_add_mac_suffix: false
-  friendly_name: ${friendly_name}
+  name: gea-esphome
+  friendly_name: gea-esphome
+  name_add_mac_suffix: true
   platformio_options:
    board_build.flash_mode: dio
 
@@ -50,6 +46,7 @@ external_components:
   - source: github://joshualongenecker/home-assistant-bridge@develop
     components: [ geappliances_bridge ]
 
+# MQTT configuration for Home Assistant
 mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
@@ -61,8 +58,8 @@ mqtt:
 # UART configuration for GEA3 communication
 uart:
   id: gea3_uart
-  tx_pin: GPIO21   # D6
-  rx_pin: GPIO20   # D7
+  tx_pin: GPIO21
+  rx_pin: GPIO20
   baud_rate: 230400
 
 # GE Appliances Bridge component
