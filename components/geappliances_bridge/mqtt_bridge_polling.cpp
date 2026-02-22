@@ -9,6 +9,7 @@ extern "C" {
 #include "tiny_gea_constants.h"
 }
 
+#include "erd_lists.h"
 #include <set>
 
 using namespace std;
@@ -86,6 +87,7 @@ static tiny_hsm_result_t state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, co
 static tiny_hsm_result_t state_identify_appliance(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
 static tiny_hsm_result_t state_add_common_erds(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
 static tiny_hsm_result_t state_add_energy_erds(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
+static tiny_hsm_result_t state_add_appliance_erds(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
 static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
 
 static tiny_hsm_result_t state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data)
@@ -237,6 +239,53 @@ static tiny_hsm_result_t state_add_energy_erds(tiny_hsm_t* hsm, tiny_hsm_signal_
 
     case signal_timer_expired:
       if(!send_next_read_request(self)) {
+        tiny_hsm_transition(hsm, state_add_appliance_erds);
+      }
+      break;
+
+    case signal_read_completed:
+      disarm_timer(self);
+      add_erd_to_polling_list(self, args->read_completed.erd);
+      mqtt_client_update_erd(
+        self->mqtt_client,
+        args->read_completed.erd,
+        args->read_completed.data,
+        args->read_completed.data_size);
+
+      if(!send_next_read_request(self)) {
+        tiny_hsm_transition(hsm, state_add_appliance_erds);
+      }
+      break;
+
+    default:
+      return tiny_hsm_result_signal_deferred;
+  }
+
+  return tiny_hsm_result_signal_consumed;
+}
+
+static tiny_hsm_result_t state_add_appliance_erds(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data)
+{
+  mqtt_bridge_polling_t* self = container_of(mqtt_bridge_polling_t, hsm, hsm);
+  auto args = reinterpret_cast<const tiny_gea3_erd_client_on_activity_args_t*>(data);
+
+  switch(signal) {
+    case tiny_hsm_signal_entry:
+      // Validate appliance type and select appropriate ERD list
+      if (self->appliance_type >= maximumApplianceType) {
+        self->appliance_type = 0;  // Default to first entry if out of range
+      }
+      
+      self->appliance_erd_list = applianceTypeToErdGroupTranslation[self->appliance_type].erdList;
+      self->appliance_erd_list_count = applianceTypeToErdGroupTranslation[self->appliance_type].erdCount;
+      self->erd_index = 0;
+
+      tiny_gea3_erd_client_read(self->erd_client, &self->request_id, self->erd_host_address, self->appliance_erd_list[self->erd_index]);
+      arm_timer(self, retry_delay);
+      break;
+
+    case signal_timer_expired:
+      if(!send_next_read_request(self)) {
         tiny_hsm_transition(hsm, state_polling);
       }
       break;
@@ -330,6 +379,7 @@ static const tiny_hsm_state_descriptor_t hsm_state_descriptors[] = {
   { .state = state_identify_appliance, .parent = state_top },
   { .state = state_add_common_erds, .parent = state_top },
   { .state = state_add_energy_erds, .parent = state_top },
+  { .state = state_add_appliance_erds, .parent = state_top },
   { .state = state_polling, .parent = state_top }
 };
 
