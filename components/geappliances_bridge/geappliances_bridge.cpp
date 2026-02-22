@@ -82,6 +82,7 @@ void GeappliancesBridge::setup() {
 void GeappliancesBridge::loop() {
   // Enforce startup delay to allow WiFi to establish and capture early debug messages
   if (!this->startup_delay_complete_) {
+    // Note: millis() overflow is handled correctly by unsigned arithmetic
     if (millis() - this->startup_time_ >= STARTUP_DELAY_MS) {
       this->startup_delay_complete_ = true;
       ESP_LOGI(TAG, "Startup delay complete, beginning normal operation");
