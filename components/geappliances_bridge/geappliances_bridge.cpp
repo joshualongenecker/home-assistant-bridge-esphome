@@ -101,12 +101,11 @@ void GeappliancesBridge::loop() {
   tiny_gea3_interface_run(&this->gea3_interface_);
 
   // Initialize MQTT bridge when device ID is ready and MQTT is connected
-  if (this->bridge_init_state_ == BRIDGE_INIT_STATE_WAITING_FOR_MQTT) {
-    if (mqtt_client != nullptr && mqtt_client->is_connected()) {
-      ESP_LOGI(TAG, "Device ID ready and MQTT connected, initializing MQTT bridge");
-      this->initialize_mqtt_bridge_();
-      this->bridge_init_state_ = BRIDGE_INIT_STATE_COMPLETE;
-    }
+  if (this->bridge_init_state_ == BRIDGE_INIT_STATE_WAITING_FOR_MQTT && 
+      mqtt_client != nullptr && mqtt_client->is_connected()) {
+    ESP_LOGI(TAG, "Device ID ready and MQTT connected, initializing MQTT bridge");
+    this->initialize_mqtt_bridge_();
+    this->bridge_init_state_ = BRIDGE_INIT_STATE_COMPLETE;
   }
 
   // Handle device ID generation state machine
