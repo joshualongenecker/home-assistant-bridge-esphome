@@ -23,7 +23,7 @@ void GeappliancesBridge::setup() {
 
   // Record startup time for delay
   this->startup_time_ = millis();
-  ESP_LOGI(TAG, "Startup delay: waiting %d seconds before initializing", STARTUP_DELAY_MS / 1000);
+  ESP_LOGI(TAG, "Startup delay: waiting %u seconds before initializing", STARTUP_DELAY_MS / 1000);
 
   // Initialize timer group
   tiny_timer_group_init(&this->timer_group_, esphome_time_source_init());
