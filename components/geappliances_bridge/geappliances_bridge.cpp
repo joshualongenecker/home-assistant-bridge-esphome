@@ -68,7 +68,8 @@ void GeappliancesBridge::setup() {
     ESP_LOGI(TAG, "Using configured device_id: %s", this->configured_device_id_.c_str());
     this->final_device_id_ = this->configured_device_id_;
     this->device_id_state_ = DEVICE_ID_STATE_COMPLETE;
-    this->initialize_mqtt_bridge_();
+    // Don't initialize MQTT bridge yet - wait for MQTT connection
+    this->bridge_init_state_ = BRIDGE_INIT_STATE_WAITING_FOR_MQTT;
   }
 
   ESP_LOGCONFIG(TAG, "GE Appliances Bridge setup complete");
@@ -98,6 +99,15 @@ void GeappliancesBridge::loop() {
   
   // Run GEA3 interface
   tiny_gea3_interface_run(&this->gea3_interface_);
+
+  // Initialize MQTT bridge when device ID is ready and MQTT is connected
+  if (this->bridge_init_state_ == BRIDGE_INIT_STATE_WAITING_FOR_MQTT) {
+    if (mqtt_client != nullptr && mqtt_client->is_connected()) {
+      ESP_LOGI(TAG, "Device ID ready and MQTT connected, initializing MQTT bridge");
+      this->initialize_mqtt_bridge_();
+      this->bridge_init_state_ = BRIDGE_INIT_STATE_COMPLETE;
+    }
+  }
 
   // Handle device ID generation state machine
   // Note: If state reaches DEVICE_ID_STATE_FAILED, device requires reboot to retry
@@ -173,7 +183,8 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
         ESP_LOGI(TAG, "Generated device ID: %s", this->final_device_id_.c_str());
         
         this->device_id_state_ = DEVICE_ID_STATE_COMPLETE;
-        this->initialize_mqtt_bridge_();
+        // Don't initialize MQTT bridge yet - wait for MQTT connection
+        this->bridge_init_state_ = BRIDGE_INIT_STATE_WAITING_FOR_MQTT;
       }
     } else if (args->type == tiny_gea3_erd_client_activity_type_read_failed) {
       // Log the failure and retry by transitioning back to the appropriate reading state
