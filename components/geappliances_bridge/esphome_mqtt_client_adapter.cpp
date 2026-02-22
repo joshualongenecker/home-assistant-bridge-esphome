@@ -24,7 +24,7 @@ static void register_erd(i_mqtt_client_t* _self, tiny_erd_t erd)
   auto self = reinterpret_cast<esphome_mqtt_client_adapter_t*>(_self);
   
   char topic_suffix[32];
-  snprintf(topic_suffix, sizeof(topic_suffix), "/erd/0x%04X", erd);
+  snprintf(topic_suffix, sizeof(topic_suffix), "/erd/0x%04x", erd);
   
   std::string value_topic = build_topic(self, (std::string(topic_suffix) + "/value").c_str());
   std::string write_topic = build_topic(self, (std::string(topic_suffix) + "/write").c_str());
@@ -90,7 +90,7 @@ static void update_erd(i_mqtt_client_t* _self, tiny_erd_t erd, const void* value
   }
   
   char topic_suffix[32];
-  snprintf(topic_suffix, sizeof(topic_suffix), "/erd/0x%04X/value", erd);
+  snprintf(topic_suffix, sizeof(topic_suffix), "/erd/0x%04x/value", erd);
   std::string topic = build_topic(self, topic_suffix);
   
   // Convert binary data to hex string
@@ -99,7 +99,7 @@ static void update_erd(i_mqtt_client_t* _self, tiny_erd_t erd, const void* value
   const uint8_t* bytes = reinterpret_cast<const uint8_t*>(value);
   for (uint8_t i = 0; i < size; i++) {
     char hex[3];
-    snprintf(hex, sizeof(hex), "%02X", bytes[i]);
+    snprintf(hex, sizeof(hex), "%02x", bytes[i]);
     hex_payload += hex;
   }
   
@@ -121,7 +121,7 @@ static void update_erd_write_result(
   auto self = reinterpret_cast<esphome_mqtt_client_adapter_t*>(_self);
   
   char topic_suffix[48];
-  snprintf(topic_suffix, sizeof(topic_suffix), "/erd/0x%04X/write_result", erd);
+  snprintf(topic_suffix, sizeof(topic_suffix), "/erd/0x%04x/write_result", erd);
   std::string topic = build_topic(self, topic_suffix);
   
   std::string payload = success ? "success" : "failure";
