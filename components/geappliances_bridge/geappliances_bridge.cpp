@@ -21,6 +21,10 @@ static constexpr uint8_t ERD_HOST_ADDRESS = 0xC0;
 void GeappliancesBridge::setup() {
   ESP_LOGCONFIG(TAG, "Setting up GE Appliances Bridge...");
 
+  // Record startup time for delay
+  this->startup_time_ = millis();
+  ESP_LOGI(TAG, "Startup delay: waiting %d seconds before initializing", STARTUP_DELAY_MS / 1000);
+
   // Initialize timer group
   tiny_timer_group_init(&this->timer_group_, esphome_time_source_init());
 
@@ -76,6 +80,17 @@ void GeappliancesBridge::setup() {
 }
 
 void GeappliancesBridge::loop() {
+  // Enforce startup delay to allow WiFi to establish and capture early debug messages
+  if (!this->startup_delay_complete_) {
+    if (millis() - this->startup_time_ >= STARTUP_DELAY_MS) {
+      this->startup_delay_complete_ = true;
+      ESP_LOGI(TAG, "Startup delay complete, beginning normal operation");
+    } else {
+      // Skip all processing during startup delay
+      return;
+    }
+  }
+
   // Check MQTT connection state
   auto mqtt_client = mqtt::global_mqtt_client;
   if (mqtt_client != nullptr) {
