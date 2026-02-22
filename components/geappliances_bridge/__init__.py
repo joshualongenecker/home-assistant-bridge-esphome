@@ -406,10 +406,10 @@ def generate_erd_lists_cpp():
     
     code = f'''
 // Auto-generated ERD definitions from public-appliance-api-documentation
-namespace {{
+extern "C" {{
   // Common ERDs that apply to all appliances (0x0000 series)
-  constexpr tiny_erd_t common_erds[] = {{ {common_erds_str} }};
-  constexpr size_t common_erd_count = {len(common_erd_list)};
+  const tiny_erd_t common_erds[] = {{ {common_erds_str} }};
+  const size_t common_erd_count = {len(common_erd_list)};
 '''
     
     # Generate energy/diagnostic ERDs (0xD000-0xDFFF series)
@@ -429,18 +429,20 @@ namespace {{
         energy_erds_str = ', '.join(energy_erd_list)
         code += f'''
   // Energy and diagnostic ERDs (0xD000 series)
-  constexpr tiny_erd_t energy_erds[] = {{ {energy_erds_str} }};
-  constexpr size_t energy_erd_count = {len(energy_erd_list)};
+  const tiny_erd_t energy_erds[] = {{ {energy_erds_str} }};
+  const size_t energy_erd_count = {len(energy_erd_list)};
 '''
     else:
         code += '''
   // No energy ERDs found
-  constexpr tiny_erd_t energy_erds[] = {};
-  constexpr size_t energy_erd_count = 0;
+  const tiny_erd_t energy_erds[] = {};
+  const size_t energy_erd_count = 0;
 '''
     
+    code += '}  // extern "C"\n'
+    
     # Generate appliance-specific ERD arrays by series
-    code += '\n  // Appliance-specific ERD lists by feature type\n'
+    code += '\nnamespace {\n  // Appliance-specific ERD lists by feature type\n'
     
     for feature_type, erds in sorted(appliance_erds.items()):
         # Group ERDs by series for this appliance type
