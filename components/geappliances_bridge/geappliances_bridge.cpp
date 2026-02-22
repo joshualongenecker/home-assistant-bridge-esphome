@@ -223,7 +223,9 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
     return;
   }
 
-  ESP_LOGI(TAG, "Initializing MQTT bridge with device ID: %s", this->final_device_id_.c_str());
+  ESP_LOGI(TAG, "Initializing bridge with device ID: %s (mode: %s)", 
+           this->final_device_id_.c_str(),
+           this->bridge_mode_ == BRIDGE_MODE_POLL ? "POLL" : "SUBSCRIBE");
 
   // Initialize MQTT client adapter
   esphome_mqtt_client_adapter_init(&this->mqtt_client_adapter_, this->final_device_id_.c_str());
@@ -234,15 +236,26 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
     &this->timer_group_,
     &this->mqtt_client_adapter_.interface);
 
-  // Initialize MQTT bridge
-  mqtt_bridge_init(
-    &this->mqtt_bridge_,
-    &this->timer_group_,
-    &this->erd_client_.interface,
-    &this->mqtt_client_adapter_.interface);
+  // Initialize the appropriate bridge based on mode
+  if (this->bridge_mode_ == BRIDGE_MODE_POLL) {
+    ESP_LOGI(TAG, "Initializing polling bridge with %u ms interval", this->poll_interval_ms_);
+    polling_bridge_init(
+      &this->polling_bridge_,
+      &this->timer_group_,
+      &this->erd_client_.interface,
+      &this->mqtt_client_adapter_.interface,
+      this->poll_interval_ms_);
+  } else {
+    ESP_LOGI(TAG, "Initializing subscribe bridge");
+    mqtt_bridge_init(
+      &this->mqtt_bridge_,
+      &this->timer_group_,
+      &this->erd_client_.interface,
+      &this->mqtt_client_adapter_.interface);
+  }
 
   this->mqtt_bridge_initialized_ = true;
-  ESP_LOGI(TAG, "MQTT bridge initialized successfully");
+  ESP_LOGI(TAG, "Bridge initialized successfully");
 }
 
 std::string GeappliancesBridge::bytes_to_string_(const uint8_t* data, size_t size) {
@@ -306,6 +319,10 @@ bool GeappliancesBridge::try_read_erd_with_retry_(tiny_erd_t erd, const char* er
 
 void GeappliancesBridge::dump_config() {
   ESP_LOGCONFIG(TAG, "GE Appliances Bridge:");
+  ESP_LOGCONFIG(TAG, "  Mode: %s", this->bridge_mode_ == BRIDGE_MODE_POLL ? "POLL" : "SUBSCRIBE");
+  if (this->bridge_mode_ == BRIDGE_MODE_POLL) {
+    ESP_LOGCONFIG(TAG, "  Poll Interval: %u ms", this->poll_interval_ms_);
+  }
   if (!this->configured_device_id_.empty()) {
     ESP_LOGCONFIG(TAG, "  Configured Device ID: %s", this->configured_device_id_.c_str());
   }

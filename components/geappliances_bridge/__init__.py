@@ -21,6 +21,12 @@ DEPENDENCIES = ["uart", "mqtt"]
 AUTO_LOAD = []
 
 CONF_DEVICE_ID = "device_id"
+CONF_MODE = "mode"
+CONF_POLL_INTERVAL = "poll_interval"
+
+# Mode options
+MODE_SUBSCRIBE = "subscribe"
+MODE_POLL = "poll"
 
 geappliances_bridge_ns = cg.esphome_ns.namespace("geappliances_bridge")
 GeappliancesBridge = geappliances_bridge_ns.class_(
@@ -228,11 +234,205 @@ std::string appliance_type_to_string(uint8_t appliance_type) {{
 '''
     return function_code
 
+
+def extract_erds_from_section(section):
+    """Extract ERD hex values from a section (common or featureApis)."""
+    erds = set()
+    
+    if 'versions' in section:
+        for version_data in section['versions'].values():
+            # Extract from top-level required field
+            if 'required' in version_data:
+                for erd_item in version_data['required']:
+                    if 'erd' in erd_item:
+                        erds.add(erd_item['erd'])
+            
+            # Extract from features
+            if 'features' in version_data:
+                for feature in version_data['features']:
+                    if 'required' in feature:
+                        for erd_item in feature['required']:
+                            if 'erd' in erd_item:
+                                erds.add(erd_item['erd'])
+                    if 'optional' in feature:
+                        for erd_item in feature['optional']:
+                            if 'erd' in erd_item:
+                                erds.add(erd_item['erd'])
+    
+    return erds
+
+
+def get_erd_series(erd_hex):
+    """Get the series prefix for an ERD (e.g., '0x0000', '0x1000', etc.)."""
+    try:
+        erd_int = int(erd_hex, 16)
+        # Round down to nearest 0x1000
+        series = (erd_int // 0x1000) * 0x1000
+        return f'0x{series:04X}'
+    except:
+        return None
+
+
+def parse_appliance_api_for_erds():
+    """Parse appliance_api.json to extract ERD lists for polling."""
+    # Try to find the JSON file
+    data = None
+    json_filename = "appliance_api.json"
+    
+    search_paths = []
+    seen_paths = set()
+    
+    component_dir = os.path.dirname(__file__)
+    
+    # Path 1: Local submodule
+    local_submodule_path = os.path.normpath(os.path.join(
+        component_dir, "..", "..", "lib", "public-appliance-api-documentation", json_filename
+    ))
+    search_paths.append(("local submodule", local_submodule_path))
+    seen_paths.add(local_submodule_path)
+    
+    # Path 2: ESPHome library cache in user's home directory
+    home_dir = os.path.expanduser("~")
+    esphome_cache_path = os.path.join(
+        home_dir, ".esphome", "external_files", "libraries",
+        "public-appliance-api-documentation", json_filename
+    )
+    if esphome_cache_path not in seen_paths:
+        search_paths.append(("ESPHome cache (home)", esphome_cache_path))
+        seen_paths.add(esphome_cache_path)
+    
+    # Path 3: ESPHome library cache in /config (Home Assistant add-on)
+    config_esphome_cache_path = os.path.join(
+        "/config", ".esphome", "external_files", "libraries",
+        "public-appliance-api-documentation", json_filename
+    )
+    if config_esphome_cache_path not in seen_paths:
+        search_paths.append(("ESPHome cache (/config)", config_esphome_cache_path))
+        seen_paths.add(config_esphome_cache_path)
+    
+    # Try each path
+    for location_name, json_path in search_paths:
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, 'r') as f:
+                    data = json.load(f)
+                _LOGGER.info("Loaded appliance API from %s: %s", location_name, json_path)
+                break
+            except Exception as e:
+                _LOGGER.warning("Failed to load from %s (%s): %s", location_name, json_path, str(e))
+    
+    if data is None:
+        _LOGGER.error("Could not find appliance_api.json for ERD polling")
+        return {}, {}
+    
+    # Extract common ERDs
+    common_erds = extract_erds_from_section(data.get('common', {}))
+    _LOGGER.info("Found %d common ERDs", len(common_erds))
+    
+    # Extract appliance-specific ERDs by feature type
+    appliance_erds = {}
+    feature_apis = data.get('featureApis', {})
+    for feature_type, feature_data in feature_apis.items():
+        erds = extract_erds_from_section(feature_data)
+        if erds:
+            appliance_erds[feature_type] = erds
+            _LOGGER.info("Found %d ERDs for appliance type %s (%s)", 
+                        len(erds), feature_type, feature_data.get('name', 'Unknown'))
+    
+    return common_erds, appliance_erds
+
+
+def categorize_erds_by_series(erds):
+    """Categorize ERDs by their series (0x0000, 0x1000, etc.)."""
+    series_dict = {}
+    for erd_hex in erds:
+        series = get_erd_series(erd_hex)
+        if series:
+            if series not in series_dict:
+                series_dict[series] = []
+            series_dict[series].append(erd_hex)
+    
+    # Sort ERDs within each series
+    for series in series_dict:
+        series_dict[series].sort(key=lambda x: int(x, 16))
+    
+    return series_dict
+
+
+def generate_erd_lists_cpp():
+    """Generate C++ code with ERD lists for polling."""
+    common_erds, appliance_erds = parse_appliance_api_for_erds()
+    
+    if not common_erds:
+        _LOGGER.warning("No ERDs found, using minimal fallback")
+        common_erds = {'0x0001', '0x0002', '0x0008'}
+    
+    # Convert common ERDs to sorted list
+    common_erd_list = sorted(list(common_erds), key=lambda x: int(x, 16))
+    
+    # Generate common ERDs array
+    common_erds_str = ', '.join(common_erd_list)
+    
+    code = f'''
+// Auto-generated ERD definitions from public-appliance-api-documentation
+namespace {{
+  // Common ERDs that apply to all appliances (0x0000 series)
+  constexpr tiny_erd_t common_erds[] = {{ {common_erds_str} }};
+  constexpr size_t common_erd_count = {len(common_erd_list)};
+'''
+    
+    # Generate energy/diagnostic ERDs (0xD000 series)
+    energy_erds = set()
+    for erds in appliance_erds.values():
+        for erd in erds:
+            if erd.startswith('0xD') or erd.startswith('0xd'):
+                energy_erds.add(erd)
+    
+    if energy_erds:
+        energy_erd_list = sorted(list(energy_erds), key=lambda x: int(x, 16))
+        energy_erds_str = ', '.join(energy_erd_list)
+        code += f'''
+  // Energy and diagnostic ERDs (0xD000 series)
+  constexpr tiny_erd_t energy_erds[] = {{ {energy_erds_str} }};
+  constexpr size_t energy_erd_count = {len(energy_erd_list)};
+'''
+    else:
+        code += '''
+  // No energy ERDs found
+  constexpr tiny_erd_t energy_erds[] = {};
+  constexpr size_t energy_erd_count = 0;
+'''
+    
+    # Generate appliance-specific ERD arrays by series
+    code += '\n  // Appliance-specific ERD lists by feature type\n'
+    
+    for feature_type, erds in sorted(appliance_erds.items()):
+        # Group ERDs by series for this appliance type
+        series_dict = categorize_erds_by_series(erds)
+        
+        # Generate arrays for each series (excluding common 0x0000 and energy 0xD000)
+        for series, erd_list in sorted(series_dict.items()):
+            if series == '0x0000' or series.upper() == '0XD000':
+                continue  # Skip common and energy series
+            
+            erd_str = ', '.join(erd_list)
+            safe_feature_name = feature_type.replace('-', '_')
+            code += f'  constexpr tiny_erd_t appliance_type_{safe_feature_name}_series_{series}_erds[] = {{ {erd_str} }};\n'
+            code += f'  constexpr size_t appliance_type_{safe_feature_name}_series_{series}_erd_count = {len(erd_list)};\n\n'
+    
+    code += '}\n'
+    
+    return code
+
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(GeappliancesBridge),
         cv.GenerateID(CONF_UART_ID): cv.use_id(uart.UARTComponent),
         cv.Optional(CONF_DEVICE_ID): cv.string,
+        cv.Optional(CONF_MODE, default=MODE_SUBSCRIBE): cv.enum(
+            {MODE_SUBSCRIBE: MODE_SUBSCRIBE, MODE_POLL: MODE_POLL}, upper=False
+        ),
+        cv.Optional(CONF_POLL_INTERVAL, default=10000): cv.int_range(min=1000, max=300000),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -257,9 +457,26 @@ async def to_code(config):
     if CONF_DEVICE_ID in config:
         cg.add(var.set_device_id(config[CONF_DEVICE_ID]))
     
+    # Set mode (subscribe or poll)
+    mode = config[CONF_MODE]
+    if mode == MODE_POLL:
+        cg.add(var.set_mode_poll())
+        # Set polling interval
+        poll_interval = config[CONF_POLL_INTERVAL]
+        cg.add(var.set_poll_interval(poll_interval))
+        _LOGGER.info("Configuring bridge in POLL mode with %d ms interval", poll_interval)
+    else:
+        cg.add(var.set_mode_subscribe())
+        _LOGGER.info("Configuring bridge in SUBSCRIBE mode (default)")
+    
     # Load appliance types from JSON and generate C++ mapping function
     appliance_types = load_appliance_types()
     function_code = generate_appliance_type_function(appliance_types)
     
     # Add the generated function to the global namespace
     cg.add_global(cg.RawStatement(function_code))
+    
+    # Generate ERD lists for polling mode
+    if mode == MODE_POLL:
+        erd_lists_code = generate_erd_lists_cpp()
+        cg.add_global(cg.RawStatement(erd_lists_code))

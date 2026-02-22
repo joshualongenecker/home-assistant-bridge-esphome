@@ -7,6 +7,7 @@
 
 extern "C" {
 #include "mqtt_bridge.h"
+#include "polling_bridge.h"
 #include "tiny_gea3_erd_client.h"
 #include "tiny_gea3_interface.h"
 #include "tiny_timer.h"
@@ -22,6 +23,12 @@ std::string appliance_type_to_string(uint8_t appliance_type);
 namespace esphome {
 namespace geappliances_bridge {
 
+// Bridge operation mode
+enum BridgeMode {
+  BRIDGE_MODE_SUBSCRIBE = 0,  // Subscribe to ERD publications (default)
+  BRIDGE_MODE_POLL = 1        // Poll ERDs at regular intervals
+};
+
 class GeappliancesBridge : public Component {
  public:
   static constexpr unsigned long baud = 230400;
@@ -33,12 +40,16 @@ class GeappliancesBridge : public Component {
 
   void set_uart(uart::UARTComponent *uart) { this->uart_ = uart; }
   void set_device_id(const std::string &device_id) { this->configured_device_id_ = device_id; }
+  void set_mode_subscribe() { this->bridge_mode_ = BRIDGE_MODE_SUBSCRIBE; }
+  void set_mode_poll() { this->bridge_mode_ = BRIDGE_MODE_POLL; }
+  void set_poll_interval(uint32_t interval_ms) { this->poll_interval_ms_ = interval_ms; }
 
  protected:
   void on_mqtt_connected_();
   void notify_mqtt_disconnected_();
   void handle_erd_client_activity_(const tiny_gea3_erd_client_on_activity_args_t* args);
   void initialize_mqtt_bridge_();
+  void initialize_polling_bridge_();
   std::string bytes_to_string_(const uint8_t* data, size_t size);
   std::string sanitize_for_mqtt_topic_(const std::string& input);
   bool try_read_erd_with_retry_(tiny_erd_t erd, const char* erd_name);
@@ -65,6 +76,9 @@ class GeappliancesBridge : public Component {
   uint8_t client_address_{0xE4};
   bool mqtt_was_connected_{false};
   bool mqtt_bridge_initialized_{false};
+  
+  BridgeMode bridge_mode_{BRIDGE_MODE_SUBSCRIBE};
+  uint32_t poll_interval_ms_{10000};  // Default 10 seconds
   
   DeviceIdState device_id_state_{DEVICE_ID_STATE_IDLE};
   BridgeInitState bridge_init_state_{BRIDGE_INIT_STATE_WAITING_FOR_DEVICE_ID};
@@ -94,6 +108,7 @@ class GeappliancesBridge : public Component {
   uint8_t client_queue_buffer_[1024];
 
   mqtt_bridge_t mqtt_bridge_;
+  polling_bridge_t polling_bridge_;
 
   uptime_monitor_t uptime_monitor_;
   
