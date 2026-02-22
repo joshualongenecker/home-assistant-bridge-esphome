@@ -89,7 +89,7 @@ geappliances_bridge:
   poll_interval: 10000  # Poll every 10 seconds (default)
 ```
 
-The polling interval can be adjusted from 1000ms (1 second) to 300000ms (5 minutes). The default is 10000ms (10 seconds).
+The polling interval can be adjusted from 1000ms (1 second) to 300000ms (300 seconds). The default is 10000ms (10 seconds).
 
 ### Auto-Generated Device ID
 

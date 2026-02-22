@@ -286,6 +286,7 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
   switch(signal) {
     case tiny_hsm_signal_entry:
       arm_polling_timer(self, self->polling_interval_ms);
+      // Intentional fallthrough: Start first poll immediately upon entering state
       __attribute__((fallthrough));
 
     case signal_timer_expired:
