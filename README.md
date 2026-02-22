@@ -17,29 +17,11 @@ Available from [FirstBuild](https://firstbuild.com/inventions/home-assistant-ada
 Add to your ESPHome YAML configuration:
 
 ```yaml
-packages:
-  esphome.esp_web_tools_example: github://esphome/firmware/esp-web-tools/esp32c3.yaml@main
-
-esphome:
-  name: gea-esphome
-  friendly_name: gea-esphome
-  name_add_mac_suffix: true
-  platformio_options:
-   board_build.flash_mode: dio
-
 esp32:
   board: seeed_xiao_esp32c3
   variant: esp32c3
   framework: 
     type: esp-idf
-
-api:
-  encryption:
-    key: !secret api_encryption_key
-
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
 
 # External component configuration
 external_components:
