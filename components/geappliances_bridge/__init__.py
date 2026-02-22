@@ -391,7 +391,11 @@ def categorize_erds_by_series(erds):
 
 
 def generate_erd_lists_cpp():
-    """Generate C++ code with ERD lists for polling."""
+    """Generate C++ code with ERD lists for polling.
+    Returns a tuple of (declarations_code, definitions_code).
+    Declarations go in the header via add_global().
+    Definitions go in a source context.
+    """
     common_erds, appliance_erds = parse_appliance_api_for_erds()
     
     if not common_erds:
@@ -404,11 +408,27 @@ def generate_erd_lists_cpp():
     # Generate common ERDs array
     common_erds_str = ', '.join(common_erd_list)
     
-    # Generate the ERD definitions as a standalone C++ source snippet
-    # that will be embedded directly into the generated code
-    code = f'''
+    # Generate declarations for header file
+    declarations = '''
+// Auto-generated ERD declarations from public-appliance-api-documentation
+#ifdef __cplusplus
+extern "C" {
+#endif
+  extern const tiny_erd_t common_erds[];
+  extern const size_t common_erd_count;
+  extern const tiny_erd_t energy_erds[];
+  extern const size_t energy_erd_count;
+#ifdef __cplusplus
+}
+#endif
+'''
+    
+    # Generate definitions for source file
+    definitions = f'''
 // Auto-generated ERD definitions from public-appliance-api-documentation
+#ifdef __cplusplus
 extern "C" {{
+#endif
   // Common ERDs that apply to all appliances (0x0000 series)
   const tiny_erd_t common_erds[] = {{ {common_erds_str} }};
   const size_t common_erd_count = {len(common_erd_list)};
@@ -429,22 +449,25 @@ extern "C" {{
     if energy_erds:
         energy_erd_list = sorted(list(energy_erds), key=lambda x: int(x, 16))
         energy_erds_str = ', '.join(energy_erd_list)
-        code += f'''
+        definitions += f'''
   // Energy and diagnostic ERDs (0xD000 series)
   const tiny_erd_t energy_erds[] = {{ {energy_erds_str} }};
   const size_t energy_erd_count = {len(energy_erd_list)};
 '''
     else:
-        code += '''
+        definitions += '''
   // No energy ERDs found
   const tiny_erd_t energy_erds[] = {};
   const size_t energy_erd_count = 0;
 '''
     
-    code += '}  // extern "C"\n'
+    definitions += '''#ifdef __cplusplus
+}
+#endif
+'''
     
-    # Generate appliance-specific ERD arrays by series
-    code += '\nnamespace {\n  // Appliance-specific ERD lists by feature type\n'
+    # Generate appliance-specific ERD arrays by series (in anonymous namespace)
+    definitions += '\nnamespace {\n  // Appliance-specific ERD lists by feature type\n'
     
     for feature_type, erds in sorted(appliance_erds.items()):
         # Group ERDs by series for this appliance type
@@ -462,12 +485,12 @@ extern "C" {{
             
             erd_str = ', '.join(erd_list)
             safe_feature_name = feature_type.replace('-', '_')
-            code += f'  constexpr tiny_erd_t appliance_type_{safe_feature_name}_series_{series}_erds[] = {{ {erd_str} }};\n'
-            code += f'  constexpr size_t appliance_type_{safe_feature_name}_series_{series}_erd_count = {len(erd_list)};\n\n'
+            definitions += f'  constexpr tiny_erd_t appliance_type_{safe_feature_name}_series_{series}_erds[] = {{ {erd_str} }};\n'
+            definitions += f'  constexpr size_t appliance_type_{safe_feature_name}_series_{series}_erd_count = {len(erd_list)};\n\n'
     
-    code += '}\n'
+    definitions += '}\n'
     
-    return code
+    return declarations, definitions
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -523,9 +546,19 @@ async def to_code(config):
     
     # Generate ERD lists for polling mode
     if mode == MODE_POLL:
-        erd_lists_code = generate_erd_lists_cpp()
+        declarations, definitions = generate_erd_lists_cpp()
         
-        # Add ERD definitions using add() instead of add_global()
-        # add() places code in main.cpp which is compiled as a source file
-        # This ensures the extern "C" definitions have proper linkage
-        cg.add(cg.RawExpression(erd_lists_code))
+        # Add declarations to the header (global scope)
+        cg.add_global(cg.RawStatement(declarations))
+        
+        # Write definitions to a source file in the component directory
+        # This file will be compiled by ESPHome
+        import os
+        component_dir = os.path.dirname(os.path.abspath(__file__))
+        erd_defs_path = os.path.join(component_dir, "geappliances_erd_definitions.cpp")
+        
+        with open(erd_defs_path, 'w') as f:
+            f.write('#include "tiny_gea_constants.h"\n\n')
+            f.write(definitions)
+        
+        _LOGGER.info("Generated ERD definitions file: %s", erd_defs_path)
