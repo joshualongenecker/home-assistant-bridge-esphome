@@ -166,6 +166,11 @@ extern "C" void esphome_mqtt_client_adapter_init(
 extern "C" void esphome_mqtt_client_adapter_notify_disconnected(
   esphome_mqtt_client_adapter_t* self)
 {
+  // Clear any pending registrations since they will need to be re-queued
+  if (self->pending_registrations != nullptr) {
+    self->pending_registrations->clear();
+  }
+  
   // Publish the disconnect event to notify the bridge
   // This will clear the ERD registry and trigger resubscription
   tiny_event_publish(&self->on_mqtt_disconnect_event, nullptr);
