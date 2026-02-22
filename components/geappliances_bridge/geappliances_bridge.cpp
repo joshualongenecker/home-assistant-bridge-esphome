@@ -111,7 +111,14 @@ void GeappliancesBridge::loop() {
 }
 
 void GeappliancesBridge::on_mqtt_connected_() {
-  ESP_LOGI(TAG, "MQTT connected, notifying bridge to reset subscriptions");
+  ESP_LOGI(TAG, "MQTT connected, flushing pending updates and resetting subscriptions");
+  
+  // Flush any pending ERD updates that were queued while MQTT was not connected
+  if (this->mqtt_bridge_initialized_) {
+    esphome_mqtt_client_adapter_notify_connected(&this->mqtt_client_adapter_);
+  }
+  
+  // Notify bridge to reset subscriptions
   this->notify_mqtt_disconnected_();
 }
 
