@@ -214,13 +214,10 @@ extern "C" void esphome_mqtt_client_adapter_process_registrations(
   // Peek at the next ERD without removing it yet
   tiny_erd_t erd = self->pending_registrations->front();
   
-  // Build topics more efficiently
-  char value_suffix[MAX_ERD_TOPIC_SUFFIX_LENGTH];
+  // Build write topic suffix
   char write_suffix[MAX_ERD_TOPIC_SUFFIX_LENGTH];
-  snprintf(value_suffix, sizeof(value_suffix), "/erd/0x%04x/value", erd);
   snprintf(write_suffix, sizeof(write_suffix), "/erd/0x%04x/write", erd);
   
-  std::string value_topic = build_topic(self, value_suffix);
   std::string write_topic = build_topic(self, write_suffix);
   
   // Subscribe to write topic for this ERD
