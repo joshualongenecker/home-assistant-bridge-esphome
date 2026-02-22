@@ -417,9 +417,12 @@ namespace {{
         
         # Generate arrays for each series (excluding common 0x0000 and energy 0xD000)
         for series, erd_list in sorted(series_dict.items()):
-            # Skip common and energy series (case-insensitive comparison)
-            series_lower = series.lower()
-            if series_lower == '0x0000' or series_lower == '0xd000':
+            # Skip common and energy series (compare as integers to avoid string case issues)
+            try:
+                series_int = int(series, 16)
+                if series_int == 0x0000 or series_int == 0xD000:
+                    continue
+            except (ValueError, TypeError):
                 continue
             
             erd_str = ', '.join(erd_list)

@@ -271,7 +271,9 @@ static void send_next_poll_read_request(polling_bridge_t* self)
     self->request_id++;
     tiny_gea3_erd_client_read(self->erd_client, &self->request_id, self->erd_host_address, self->erd_polling_list[self->erd_index]);
     arm_timer(self, retry_delay);
-    // Increment index after initiating the async read so that signal_read_completed can access erd_index - 1
+    // Increment index after initiating the async read request.
+    // When signal_read_completed is received, erd_index will point to the next ERD,
+    // so we use (erd_index - 1) to access the ERD that just completed reading.
     self->erd_index++;
   }
 }
@@ -304,8 +306,9 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
     case signal_read_completed:
       disarm_timer(self);
       reset_lost_appliance_timer(self);
-      // Ensure we have a valid index (should always be > 0 after a read completes)
-      if(self->erd_index > 0 && self->erd_index <= self->polling_list_count) {
+      // Verify we have a valid completed ERD index
+      // erd_index was incremented after starting the read, so the completed ERD is at (erd_index - 1)
+      if(self->erd_index > 0 && (self->erd_index - 1) < self->polling_list_count) {
         self->last_erd_polled_successfully = self->erd_polling_list[self->erd_index - 1];
       }
       mqtt_client_update_erd(
