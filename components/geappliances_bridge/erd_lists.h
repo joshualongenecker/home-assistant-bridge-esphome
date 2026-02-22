@@ -3,8 +3,8 @@
  * @brief Erd lists for various appliances
  */
 
-#ifndef Erdlists_h
-#define Erdlists_h
+#ifndef ERD_LISTS_H
+#define ERD_LISTS_H
 
 #include "tiny_erd.h"
 
@@ -5818,7 +5818,7 @@ const tiny_erd_t waterFilterErds[] = {
   0x801d,
   0x801e,
   0x801f,
-  0x8000,
+  0x8020,
   0x8021,
   0x8022,
   0x8023,
