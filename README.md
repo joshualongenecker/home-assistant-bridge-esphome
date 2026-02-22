@@ -82,7 +82,7 @@ The `device_id` parameter is **optional**. If not provided, the component will a
 
 The auto-generated device ID format is: `ApplianceTypeName_ModelNumber_SerialNumber`
 
-The appliance type names are automatically parsed from the [GE Appliances Public API Documentation](https://github.com/geappliances/public-appliance-api-documentation) submodule, ensuring compatibility with API updates.
+The appliance type names are automatically fetched from the [GE Appliances Public API Documentation](https://github.com/geappliances/public-appliance-api-documentation) during the ESPHome build process, ensuring compatibility with API updates.
 
 Example:
 ```yaml

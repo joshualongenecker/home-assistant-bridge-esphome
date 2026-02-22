@@ -49,8 +49,8 @@ def sanitize_appliance_name(name):
 
 
 def load_appliance_types():
-    """Load appliance type mappings from the submodule JSON file."""
-    # Get the path to the submodule JSON file
+    """Load appliance type mappings from the API documentation."""
+    # Try to load from submodule first (for local development)
     component_dir = os.path.dirname(__file__)
     json_path = os.path.join(
         component_dir, 
@@ -61,20 +61,39 @@ def load_appliance_types():
     )
     json_path = os.path.normpath(json_path)
     
-    if not os.path.exists(json_path):
-        _LOGGER.warning(
-            "Appliance API documentation JSON not found at %s. Using fallback mapping.", 
-            json_path
-        )
-        return {
-            0: "Unknown",
-            255: "Unknown"
-        }
+    data = None
     
+    # Try loading from local submodule first
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, 'r') as f:
+                data = json.load(f)
+            _LOGGER.info("Loaded appliance types from local submodule")
+        except Exception as e:
+            _LOGGER.warning("Failed to load from local submodule: %s", str(e))
+    
+    # If local load failed, fetch from GitHub
+    if data is None:
+        try:
+            import urllib.request
+            url = "https://raw.githubusercontent.com/geappliances/public-appliance-api-documentation/main/appliance_api_erd_definitions.json"
+            _LOGGER.info("Fetching appliance types from GitHub: %s", url)
+            
+            with urllib.request.urlopen(url, timeout=10) as response:
+                data = json.loads(response.read().decode('utf-8'))
+            _LOGGER.info("Successfully fetched appliance types from GitHub")
+        except Exception as e:
+            _LOGGER.error(
+                "Failed to fetch appliance API documentation from GitHub: %s. Using fallback mapping.", 
+                str(e)
+            )
+            return {
+                0: "Unknown",
+                255: "Unknown"
+            }
+    
+    # Parse the data
     try:
-        with open(json_path, 'r') as f:
-            data = json.load(f)
-        
         # Find the ERD with id "0x0008" (Appliance Type)
         for erd in data.get("erds", []):
             if erd.get("id") == "0x0008":
@@ -89,15 +108,13 @@ def load_appliance_types():
                         sanitized = sanitize_appliance_name(value)
                         mapping[int_key] = sanitized
                     
-                    _LOGGER.info("Loaded %d appliance type mappings from JSON", len(mapping))
+                    _LOGGER.info("Loaded %d appliance type mappings", len(mapping))
                     return mapping
     except Exception as e:
-        _LOGGER.error(
-            "Failed to parse appliance API documentation JSON: %s. Using fallback mapping.", 
-            str(e)
-        )
+        _LOGGER.error("Failed to parse appliance types: %s", str(e))
     
     # Fallback mapping
+    _LOGGER.warning("Using fallback appliance type mapping")
     return {
         0: "Unknown",
         255: "Unknown"
