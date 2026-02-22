@@ -25,7 +25,7 @@ jobs:
     - uses: SimenB/github-actions-cpu-cores@v1
       id: cpu-cores
 
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: 'recursive'
 
@@ -35,4 +35,4 @@ jobs:
         echo CPATH="$CPATH:$(brew --prefix)/include" >> $GITHUB_ENV
         echo LIBRARY_PATH="$LIBRARY_PATH:$(brew --prefix)/lib" >> $GITHUB_ENV
 
-    - run: make -j${{ steps.cpu-cores.outputs.count }}
+    - run: make test -j${{ steps.cpu-cores.outputs.count }}
