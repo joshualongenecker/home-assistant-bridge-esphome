@@ -328,9 +328,33 @@ def parse_appliance_api_for_erds():
             except Exception as e:
                 _LOGGER.warning("Failed to load from %s (%s): %s", location_name, json_path, str(e))
     
+    # If local paths failed, try fetching from GitHub as fallback
     if data is None:
-        _LOGGER.error("Could not find appliance_api.json for ERD polling")
-        return {}, {}
+        url = "https://raw.githubusercontent.com/geappliances/public-appliance-api-documentation/main/appliance_api.json"
+        _LOGGER.warning("Could not find local library. Fetching from GitHub as fallback: %s", url)
+        
+        try:
+            with urllib.request.urlopen(url, timeout=10) as response:
+                data = json.loads(response.read().decode('utf-8'))
+            _LOGGER.info("Successfully fetched appliance API from GitHub (fallback)")
+        except urllib.error.HTTPError as e:
+            _LOGGER.error(
+                "HTTP error fetching appliance API documentation (status %d): %s. Using minimal fallback.", 
+                e.code, str(e)
+            )
+            return {}, {}
+        except urllib.error.URLError as e:
+            _LOGGER.error(
+                "Network error fetching appliance API documentation: %s. Using minimal fallback.", 
+                str(e.reason)
+            )
+            return {}, {}
+        except Exception as e:
+            _LOGGER.error(
+                "Unexpected error fetching appliance API documentation: %s. Using minimal fallback.", 
+                str(e)
+            )
+            return {}, {}
     
     # Extract common ERDs
     common_erds = extract_erds_from_section(data.get('common', {}))
