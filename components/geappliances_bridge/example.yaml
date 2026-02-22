@@ -52,3 +52,29 @@ uart:
 geappliances_bridge:
   # device_id: "YourDeviceId"  # Optional: Uncomment to use a custom device ID
   uart_id: gea3_uart
+  
+  # Mode: "subscribe" (default) or "poll"
+  # - subscribe: ERDs are pushed from the appliance (lower latency, less network traffic)
+  # - poll: ERDs are polled at regular intervals (more reliable, works when subscribe fails)
+  # mode: subscribe  # Default mode - leave commented to use subscribe
+  # mode: poll  # Uncomment to use polling mode
+  
+  # poll_interval: 10000  # Polling interval in milliseconds (only used in poll mode, default: 10000 = 10 seconds)
+  
+  # Examples:
+  #
+  # Subscribe mode (default - automatically discovers and subscribes to ERD updates):
+  # geappliances_bridge:
+  #   uart_id: gea3_uart
+  #
+  # Poll mode with default 10 second interval:
+  # geappliances_bridge:
+  #   uart_id: gea3_uart
+  #   mode: poll
+  #
+  # Poll mode with custom 30 second interval:
+  # geappliances_bridge:
+  #   uart_id: gea3_uart
+  #   mode: poll
+  #   poll_interval: 30000
+

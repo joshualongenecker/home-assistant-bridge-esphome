@@ -2,7 +2,7 @@
 
 ESPHome external component for GE Appliances bridge using the GEA3 protocol.
 
-Subscribes to data hosted by a GE Appliances product using GEA3 and publishes it to an MQTT server under `geappliances/<device ID>`. ERDs are identified by 16-bit identifiers and the raw binary data is published as a hex string to `geappliances/<device ID>/erd/<ERD ID>/value`. Data can be written to an ERD by writing a hex string of the appropriate size to `geappliances/<device ID>/erd/<ERD ID>/write`.
+Communicates with GE Appliances products using GEA3 and publishes data to an MQTT server under `geappliances/<device ID>`. ERDs are identified by 16-bit identifiers and the raw binary data is published as a hex string to `geappliances/<device ID>/erd/<ERD ID>/value`. Data can be written to an ERD by writing a hex string of the appropriate size to `geappliances/<device ID>/erd/<ERD ID>/write`.
 
 This is intended to be used with the MQTT server provided by Home Assistant, but it should work with other MQTT servers.
 
@@ -48,7 +48,48 @@ uart:
 geappliances_bridge:
   # device_id: "YourDeviceId"  # Optional: Uncomment to use a custom device ID
   uart_id: gea3_uart
+  # mode: subscribe  # Optional: "subscribe" (default) or "poll"
+  # poll_interval: 10000  # Optional: Polling interval in ms (default: 10000, only used in poll mode)
 ```
+
+### Operation Modes
+
+The bridge supports two modes of operation:
+
+#### Subscribe Mode (Default)
+In subscribe mode, the bridge subscribes to ERD updates from the appliance. The appliance pushes updates when ERD values change.
+
+**Advantages:**
+- Lower latency - updates arrive immediately when values change
+- Less network traffic - only sends updates when values change
+- Lower power consumption
+
+**Use when:** Your appliance supports subscriptions and you want real-time updates.
+
+```yaml
+geappliances_bridge:
+  uart_id: gea3_uart
+  mode: subscribe  # or omit mode to use default
+```
+
+#### Poll Mode
+In poll mode, the bridge actively polls ERDs at regular intervals. On startup, it discovers which ERDs are available by probing all ERDs defined in the appliance API, then continuously polls those ERDs.
+
+**Advantages:**
+- More reliable - works even if subscriptions fail
+- Guaranteed update interval - you control how often data is read
+- Better for appliances that don't support subscriptions well
+
+**Use when:** Subscribe mode is unreliable or you need guaranteed update intervals.
+
+```yaml
+geappliances_bridge:
+  uart_id: gea3_uart
+  mode: poll
+  poll_interval: 10000  # Poll every 10 seconds (default)
+```
+
+The polling interval can be adjusted from 1000ms (1 second) to 300000ms (5 minutes). The default is 10000ms (10 seconds).
 
 ### Auto-Generated Device ID
 
