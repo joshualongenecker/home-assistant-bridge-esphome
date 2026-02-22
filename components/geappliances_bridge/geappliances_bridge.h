@@ -7,13 +7,13 @@
 
 extern "C" {
 #include "mqtt_bridge.h"
-#include "polling_bridge.h"
 #include "tiny_gea3_erd_client.h"
 #include "tiny_gea3_interface.h"
 #include "tiny_timer.h"
 #include "uptime_monitor.h"
 }
 
+#include "polling_bridge.h"
 #include "esphome_uart_adapter.h"
 #include "esphome_mqtt_client_adapter.h"
 
