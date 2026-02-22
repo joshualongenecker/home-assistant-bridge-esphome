@@ -41,6 +41,7 @@ class GeappliancesBridge : public Component {
   void initialize_mqtt_bridge_();
   std::string bytes_to_string_(const uint8_t* data, size_t size);
   std::string sanitize_for_mqtt_topic_(const std::string& input);
+  bool try_read_erd_with_retry_(tiny_erd_t erd, const char* erd_name);
 
   enum DeviceIdState {
     DEVICE_ID_STATE_IDLE,
