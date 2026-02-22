@@ -21,6 +21,9 @@ static constexpr size_t MAX_PENDING_UPDATES = 100;
 // Maximum number of pending ERD registrations to queue
 static constexpr size_t MAX_PENDING_REGISTRATIONS = 100;
 
+// Maximum length for ERD topic suffix (e.g., "/erd/0x7135/write" = 19 chars + null)
+static constexpr size_t MAX_ERD_TOPIC_SUFFIX_LENGTH = 48;
+
 static std::string build_topic(esphome_mqtt_client_adapter_t* self, const char* suffix)
 {
   return std::string("geappliances/") + *self->device_id + suffix;
@@ -212,8 +215,8 @@ extern "C" void esphome_mqtt_client_adapter_process_registrations(
   tiny_erd_t erd = self->pending_registrations->front();
   
   // Build topics more efficiently
-  char value_suffix[48];
-  char write_suffix[48];
+  char value_suffix[MAX_ERD_TOPIC_SUFFIX_LENGTH];
+  char write_suffix[MAX_ERD_TOPIC_SUFFIX_LENGTH];
   snprintf(value_suffix, sizeof(value_suffix), "/erd/0x%04x/value", erd);
   snprintf(write_suffix, sizeof(write_suffix), "/erd/0x%04x/write", erd);
   
@@ -265,8 +268,9 @@ extern "C" void esphome_mqtt_client_adapter_process_registrations(
     2  // QoS 2
   );
   
-  // Only remove from queue after successful subscription
-  // Note: subscribe() is void, so we assume it succeeded if no exception was thrown
+  // Remove from queue after subscription call completes
+  // Note: ESPHome's subscribe() returns void, so we cannot verify success and must
+  // remove from queue to avoid infinite retries. On reconnect, ERDs will be re-queued.
   self->pending_registrations->pop_front();
   
   ESP_LOGD(TAG, "Registered ERD 0x%04X", erd);
