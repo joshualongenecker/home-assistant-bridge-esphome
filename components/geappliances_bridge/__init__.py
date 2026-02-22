@@ -81,6 +81,7 @@ def load_appliance_types():
     
     # Try to find the JSON file in common locations
     search_paths = []
+    seen_paths = set()  # Track paths to avoid duplicates
     
     # Path 1: Local submodule (for local development)
     component_dir = os.path.dirname(__file__)
@@ -88,6 +89,7 @@ def load_appliance_types():
         component_dir, "..", "..", "lib", "public-appliance-api-documentation", json_filename
     ))
     search_paths.append(("local submodule", local_submodule_path))
+    seen_paths.add(local_submodule_path)
     
     # Path 2: ESPHome library cache in user's home directory
     home_dir = os.path.expanduser("~")
@@ -95,16 +97,18 @@ def load_appliance_types():
         home_dir, ".esphome", "external_files", "libraries", 
         "public-appliance-api-documentation", json_filename
     )
-    if esphome_cache_path not in [p[1] for p in search_paths]:
+    if esphome_cache_path not in seen_paths:
         search_paths.append(("ESPHome cache (home)", esphome_cache_path))
+        seen_paths.add(esphome_cache_path)
     
     # Path 3: ESPHome library cache in /config (Home Assistant add-on)
     config_esphome_cache_path = os.path.join(
         "/config", ".esphome", "external_files", "libraries",
         "public-appliance-api-documentation", json_filename
     )
-    if config_esphome_cache_path not in [p[1] for p in search_paths]:
+    if config_esphome_cache_path not in seen_paths:
         search_paths.append(("ESPHome cache (/config)", config_esphome_cache_path))
+        seen_paths.add(config_esphome_cache_path)
     
     # Path 4: ESPHome library cache relative to component
     # Sometimes ESPHome puts libraries relative to the build directory
@@ -112,16 +116,18 @@ def load_appliance_types():
         component_dir, "..", "..", ".esphome", "external_files", "libraries",
         "public-appliance-api-documentation", json_filename
     ))
-    if build_cache_path not in [p[1] for p in search_paths]:
+    if build_cache_path not in seen_paths:
         search_paths.append(("ESPHome cache (relative)", build_cache_path))
+        seen_paths.add(build_cache_path)
     
     # Path 5: Check parent directories for the library
     parent_dir = os.path.dirname(os.path.dirname(component_dir))
     alt_library_path = os.path.normpath(os.path.join(
         parent_dir, "lib", "public-appliance-api-documentation", json_filename
     ))
-    if alt_library_path not in [p[1] for p in search_paths]:
+    if alt_library_path not in seen_paths:
         search_paths.append(("parent library path", alt_library_path))
+        seen_paths.add(alt_library_path)
     
     # Try each path
     for location_name, json_path in search_paths:
