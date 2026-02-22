@@ -124,6 +124,11 @@ void GeappliancesBridge::loop() {
     this->bridge_init_state_ = BRIDGE_INIT_STATE_COMPLETE;
   }
 
+  // Process pending MQTT ERD registrations incrementally to avoid blocking
+  if (this->mqtt_bridge_initialized_) {
+    esphome_mqtt_client_adapter_process_registrations(&this->mqtt_client_adapter_);
+  }
+
   // Handle device ID generation state machine
   // Note: If state reaches DEVICE_ID_STATE_FAILED, device requires reboot to retry
   if (this->device_id_state_ == DEVICE_ID_STATE_READING_APPLIANCE_TYPE) {

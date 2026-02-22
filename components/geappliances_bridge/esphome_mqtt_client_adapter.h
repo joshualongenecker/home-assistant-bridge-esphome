@@ -19,6 +19,7 @@ typedef struct {
   tiny_event_t on_write_request_event;
   tiny_event_t on_mqtt_disconnect_event;
   std::deque<PendingErdUpdate>* pending_updates;
+  std::deque<tiny_erd_t>* pending_registrations;
 } esphome_mqtt_client_adapter_t;
 
 #ifdef __cplusplus
@@ -36,6 +37,9 @@ void esphome_mqtt_client_adapter_notify_connected(
   esphome_mqtt_client_adapter_t* self);
 
 void esphome_mqtt_client_adapter_destroy(
+  esphome_mqtt_client_adapter_t* self);
+
+void esphome_mqtt_client_adapter_process_registrations(
   esphome_mqtt_client_adapter_t* self);
 
 #ifdef __cplusplus
