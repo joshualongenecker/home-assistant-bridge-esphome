@@ -83,14 +83,14 @@ def load_appliance_types():
     # Path 1: Local submodule (for local development)
     component_dir = os.path.dirname(__file__)
     local_submodule_path = os.path.normpath(os.path.join(
-        component_dir, "..", "..", "public-appliance-api-documentation", json_filename
+        component_dir, "..", "..", "lib", "public-appliance-api-documentation", json_filename
     ))
     search_paths.append(("local submodule", local_submodule_path))
     
     # Path 2: ESPHome library download location (relative to component)
     # ESPHome typically puts libraries alongside the component
     library_path = os.path.normpath(os.path.join(
-        component_dir, "..", "..", "public-appliance-api-documentation", json_filename
+        component_dir, "..", "..", "lib", "public-appliance-api-documentation", json_filename
     ))
     if library_path not in [p[1] for p in search_paths]:
         search_paths.append(("library path", library_path))
@@ -98,7 +98,7 @@ def load_appliance_types():
     # Path 3: Check parent directories for the library
     parent_dir = os.path.dirname(os.path.dirname(component_dir))
     alt_library_path = os.path.normpath(os.path.join(
-        parent_dir, "public-appliance-api-documentation", json_filename
+        parent_dir, "lib", "public-appliance-api-documentation", json_filename
     ))
     if alt_library_path not in [p[1] for p in search_paths]:
         search_paths.append(("parent library path", alt_library_path))
