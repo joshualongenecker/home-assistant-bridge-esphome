@@ -3,8 +3,8 @@
  * @brief Polls ERDs and publishes them to an MQTT server.
  */
 
-#ifndef polling_bridge_h
-#define polling_bridge_h
+#ifndef POLLING_BRIDGE_H
+#define POLLING_BRIDGE_H
 
 #include "i_mqtt_client.h"
 #include "i_tiny_gea3_erd_client.h"
@@ -63,4 +63,4 @@ void polling_bridge_init(
 void polling_bridge_destroy(
   polling_bridge_t* self);
 
-#endif
+#endif  // POLLING_BRIDGE_H

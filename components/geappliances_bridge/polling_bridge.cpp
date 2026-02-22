@@ -270,7 +270,8 @@ static void send_next_poll_read_request(polling_bridge_t* self)
     self->request_id++;
     tiny_gea3_erd_client_read(self->erd_client, &self->request_id, self->erd_host_address, self->erd_polling_list[self->erd_index]);
     arm_timer(self, retry_delay);
-    self->erd_index++;  // Increment after starting the read to ensure valid array access in read_completed handler
+    // Increment index after initiating the async read so that signal_read_completed can access erd_index - 1
+    self->erd_index++;
   }
 }
 

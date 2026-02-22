@@ -412,8 +412,9 @@ namespace {{
         
         # Generate arrays for each series (excluding common 0x0000 and energy 0xD000)
         for series, erd_list in sorted(series_dict.items()):
-            if series == '0x0000' or series.upper() == '0XD000':
-                continue  # Skip common and energy series
+            # Skip common and energy series (case-insensitive comparison)
+            if series.upper() == '0X0000' or series.upper() == '0XD000':
+                continue
             
             erd_str = ', '.join(erd_list)
             safe_feature_name = feature_type.replace('-', '_')
