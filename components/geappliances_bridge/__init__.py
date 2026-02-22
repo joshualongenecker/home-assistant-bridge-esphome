@@ -385,7 +385,9 @@ namespace {{
     energy_erds = set()
     for erds in appliance_erds.values():
         for erd in erds:
-            if erd.startswith('0xD') or erd.startswith('0xd'):
+            # Check if ERD is in 0xD000 series (case-insensitive)
+            erd_lower = erd.lower()
+            if erd_lower.startswith('0xd'):
                 energy_erds.add(erd)
     
     if energy_erds:
