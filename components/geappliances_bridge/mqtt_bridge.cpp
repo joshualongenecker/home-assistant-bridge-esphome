@@ -1,6 +1,6 @@
 /*!
  * @file
- * @brief
+ * @brief MQTT bridge implementation for GE Appliances integration
  */
 
 extern "C" {
@@ -12,10 +12,11 @@ extern "C" {
 
 using namespace std;
 
+// GEA3 protocol constants
 enum {
-  erd_host_address = 0xC0,
-  resubscribe_delay = 1000,
-  subscription_retention_period = 30 * 1000
+  erd_host_address = 0xC0,  // Default address for GE appliance host
+  resubscribe_delay = 1000,  // Delay in ms before retrying subscription
+  subscription_retention_period = 30 * 1000  // Period in ms to retain subscription (30 seconds)
 };
 
 enum {
@@ -62,7 +63,6 @@ static tiny_hsm_result_t state_subscribed(tiny_hsm_t* hsm, tiny_hsm_signal_t sig
 static tiny_hsm_result_t state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data)
 {
   mqtt_bridge_t* self = container_of(mqtt_bridge_t, hsm, hsm);
-  (void)self;
 
   switch(signal) {
     case signal_subscription_publication_received: {

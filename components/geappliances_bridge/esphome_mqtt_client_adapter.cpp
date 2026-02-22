@@ -10,6 +10,7 @@ extern "C" {
 
 #include <cstdio>
 #include <string>
+#include <cctype>
 
 static const char *const TAG = "geappliances_bridge.mqtt";
 
@@ -39,13 +40,30 @@ static void register_erd(i_mqtt_client_t* _self, tiny_erd_t erd)
         // Parse hex string payload and trigger write request
         ESP_LOGD(TAG, "Write request for ERD 0x%04X: %s", erd, payload.c_str());
         
+        // Validate hex string format
+        if (payload.length() % 2 != 0) {
+          ESP_LOGW(TAG, "Invalid hex payload for ERD 0x%04X: odd length (%zu)", erd, payload.length());
+          return;
+        }
+        
         // Convert hex string to bytes
         std::vector<uint8_t> data;
+        data.reserve(payload.length() / 2);
         for (size_t i = 0; i < payload.length(); i += 2) {
-          if (i + 1 < payload.length()) {
-            char byte_str[3] = {payload[i], payload[i+1], '\0'};
-            data.push_back(static_cast<uint8_t>(strtol(byte_str, nullptr, 16)));
+          char byte_str[3] = {payload[i], payload[i+1], '\0'};
+          // Validate hex characters
+          if (!std::isxdigit(static_cast<unsigned char>(payload[i])) || 
+              !std::isxdigit(static_cast<unsigned char>(payload[i+1]))) {
+            ESP_LOGW(TAG, "Invalid hex characters in payload for ERD 0x%04X at position %zu", erd, i);
+            return;
           }
+          data.push_back(static_cast<uint8_t>(strtol(byte_str, nullptr, 16)));
+        }
+        
+        // Validate data size
+        if (data.size() == 0 || data.size() > 255) {
+          ESP_LOGW(TAG, "Invalid data size for ERD 0x%04X: %zu bytes", erd, data.size());
+          return;
         }
         
         // Publish write request event
@@ -164,4 +182,11 @@ extern "C" void esphome_mqtt_client_adapter_notify_disconnected(
   // Publish the disconnect event to notify the bridge
   // This will clear the ERD registry and trigger resubscription
   tiny_event_publish(&self->on_mqtt_disconnect_event, nullptr);
+}
+
+extern "C" void esphome_mqtt_client_adapter_destroy(
+  esphome_mqtt_client_adapter_t* self)
+{
+  delete self->device_id;
+  self->device_id = nullptr;
 }

@@ -1,6 +1,6 @@
 /*!
  * @file
- * @brief
+ * @brief Uptime monitor for publishing system uptime to MQTT
  */
 
 #include <inttypes.h>

@@ -110,7 +110,10 @@ void GeappliancesBridge::loop() {
     } else {
       // Failed to queue the read request, will retry on next loop
       this->read_retry_count_++;
-      if (this->read_retry_count_ % LOG_EVERY_N_RETRIES == 0) {
+      if (this->read_retry_count_ >= MAX_READ_RETRIES) {
+        ESP_LOGE(TAG, "Failed to read appliance type after %u retries, giving up", MAX_READ_RETRIES);
+        this->device_id_state_ = DEVICE_ID_STATE_FAILED;
+      } else if (this->read_retry_count_ % LOG_EVERY_N_RETRIES == 0) {
         ESP_LOGW(TAG, "Failed to queue appliance type read, retrying... (attempt %u)", this->read_retry_count_);
       }
     }
@@ -124,7 +127,10 @@ void GeappliancesBridge::loop() {
     } else {
       // Failed to queue the read request, will retry on next loop
       this->read_retry_count_++;
-      if (this->read_retry_count_ % LOG_EVERY_N_RETRIES == 0) {
+      if (this->read_retry_count_ >= MAX_READ_RETRIES) {
+        ESP_LOGE(TAG, "Failed to read model number after %u retries, giving up", MAX_READ_RETRIES);
+        this->device_id_state_ = DEVICE_ID_STATE_FAILED;
+      } else if (this->read_retry_count_ % LOG_EVERY_N_RETRIES == 0) {
         ESP_LOGW(TAG, "Failed to queue model number read, retrying... (attempt %u)", this->read_retry_count_);
       }
     }
@@ -138,7 +144,10 @@ void GeappliancesBridge::loop() {
     } else {
       // Failed to queue the read request, will retry on next loop
       this->read_retry_count_++;
-      if (this->read_retry_count_ % LOG_EVERY_N_RETRIES == 0) {
+      if (this->read_retry_count_ >= MAX_READ_RETRIES) {
+        ESP_LOGE(TAG, "Failed to read serial number after %u retries, giving up", MAX_READ_RETRIES);
+        this->device_id_state_ = DEVICE_ID_STATE_FAILED;
+      } else if (this->read_retry_count_ % LOG_EVERY_N_RETRIES == 0) {
         ESP_LOGW(TAG, "Failed to queue serial number read, retrying... (attempt %u)", this->read_retry_count_);
       }
     }
