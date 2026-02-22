@@ -199,6 +199,8 @@ extern "C" void esphome_mqtt_client_adapter_notify_disconnected(
 extern "C" void esphome_mqtt_client_adapter_destroy(
   esphome_mqtt_client_adapter_t* self)
 {
-  delete self->device_id;
-  self->device_id = nullptr;
+  if (self->device_id != nullptr) {
+    delete self->device_id;
+    self->device_id = nullptr;
+  }
 }

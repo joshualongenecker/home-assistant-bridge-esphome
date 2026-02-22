@@ -100,6 +100,7 @@ void GeappliancesBridge::loop() {
   tiny_gea3_interface_run(&this->gea3_interface_);
 
   // Handle device ID generation state machine
+  // Note: If state reaches DEVICE_ID_STATE_FAILED, device requires reboot to retry
   if (this->device_id_state_ == DEVICE_ID_STATE_READING_APPLIANCE_TYPE) {
     this->try_read_erd_with_retry_(ERD_APPLIANCE_TYPE, "appliance type");
   } else if (this->device_id_state_ == DEVICE_ID_STATE_READING_MODEL_NUMBER) {
@@ -280,6 +281,9 @@ void GeappliancesBridge::dump_config() {
     ESP_LOGCONFIG(TAG, "    Appliance Type: %u", this->appliance_type_);
     ESP_LOGCONFIG(TAG, "    Model Number: %s", this->model_number_.c_str());
     ESP_LOGCONFIG(TAG, "    Serial Number: %s", this->serial_number_.c_str());
+  }
+  if (this->device_id_state_ == DEVICE_ID_STATE_FAILED) {
+    ESP_LOGCONFIG(TAG, "  Device ID Generation: FAILED (see logs for details)");
   }
   ESP_LOGCONFIG(TAG, "  Client Address: 0x%02X", this->client_address_);
   ESP_LOGCONFIG(TAG, "  UART Baud Rate: %lu", baud);
