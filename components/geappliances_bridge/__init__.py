@@ -28,6 +28,13 @@ CONF_POLL_INTERVAL = "poll_interval"
 MODE_SUBSCRIBE = "subscribe"
 MODE_POLL = "poll"
 
+# ERD series constants
+ERD_SERIES_SIZE = 0x1000  # ERD series are grouped in 0x1000 increments
+COMMON_ERD_SERIES = 0x0000  # Common ERDs for all appliances
+ENERGY_ERD_SERIES = 0xD000  # Energy and diagnostic ERDs
+ENERGY_ERD_MIN = 0xD000  # Start of energy ERD range
+ENERGY_ERD_MAX = 0xDFFF  # End of energy ERD range
+
 geappliances_bridge_ns = cg.esphome_ns.namespace("geappliances_bridge")
 GeappliancesBridge = geappliances_bridge_ns.class_(
     "GeappliancesBridge", cg.Component
@@ -266,8 +273,8 @@ def get_erd_series(erd_hex):
     """Get the series prefix for an ERD (e.g., '0x0000', '0x1000', etc.)."""
     try:
         erd_int = int(erd_hex, 16)
-        # Round down to nearest 0x1000
-        series = (erd_int // 0x1000) * 0x1000
+        # Round down to nearest ERD series boundary
+        series = (erd_int // ERD_SERIES_SIZE) * ERD_SERIES_SIZE
         return f'0x{series:04X}'
     except (ValueError, TypeError):
         return None
@@ -381,14 +388,14 @@ namespace {{
   constexpr size_t common_erd_count = {len(common_erd_list)};
 '''
     
-    # Generate energy/diagnostic ERDs (0xD000 series)
+    # Generate energy/diagnostic ERDs (0xD000-0xDFFF series)
     energy_erds = set()
     for erds in appliance_erds.values():
         for erd in erds:
-            # Check if ERD is in 0xD000-0xDFFF range
+            # Check if ERD is in energy/diagnostic range
             try:
                 erd_value = int(erd, 16)
-                if 0xD000 <= erd_value <= 0xDFFF:
+                if ENERGY_ERD_MIN <= erd_value <= ENERGY_ERD_MAX:
                     energy_erds.add(erd)
             except (ValueError, TypeError):
                 continue
@@ -415,12 +422,12 @@ namespace {{
         # Group ERDs by series for this appliance type
         series_dict = categorize_erds_by_series(erds)
         
-        # Generate arrays for each series (excluding common 0x0000 and energy 0xD000)
+        # Generate arrays for each series (excluding common and energy ERDs)
         for series, erd_list in sorted(series_dict.items()):
             # Skip common and energy series (compare as integers for correctness)
             try:
                 series_int = int(series, 16)
-                if series_int == 0x0000 or series_int == 0xD000:
+                if series_int == COMMON_ERD_SERIES or series_int == ENERGY_ERD_SERIES:
                     continue
             except (ValueError, TypeError):
                 continue
