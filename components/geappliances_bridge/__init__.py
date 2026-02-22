@@ -404,13 +404,10 @@ def generate_erd_lists_cpp():
     # Generate common ERDs array
     common_erds_str = ', '.join(common_erd_list)
     
-    # For extern "C" definitions, we need them in a source file, not header
-    # Generate as a separate source file content
+    # Generate the ERD definitions as a standalone C++ source snippet
+    # that will be embedded directly into the generated code
     code = f'''
 // Auto-generated ERD definitions from public-appliance-api-documentation
-// This code should be in a .cpp file, not a header
-#ifdef GEAPPLIANCES_ERD_DEFINITIONS_IMPL
-
 extern "C" {{
   // Common ERDs that apply to all appliances (0x0000 series)
   const tiny_erd_t common_erds[] = {{ {common_erds_str} }};
@@ -444,8 +441,7 @@ extern "C" {{
   const size_t energy_erd_count = 0;
 '''
     
-    code += '}  // extern "C"\n\n'
-    code += '#endif  // GEAPPLIANCES_ERD_DEFINITIONS_IMPL\n'
+    code += '}  // extern "C"\n'
     
     # Generate appliance-specific ERD arrays by series
     code += '\nnamespace {\n  // Appliance-specific ERD lists by feature type\n'
@@ -528,9 +524,8 @@ async def to_code(config):
     # Generate ERD lists for polling mode
     if mode == MODE_POLL:
         erd_lists_code = generate_erd_lists_cpp()
-        # Add to build as a separate compilation unit to ensure definitions are linked
-        cg.add_build_flag("-DUSE_POLLING_ERD_LISTS")
-        # Prepend the ERD definitions to the component's main source file
-        # This ensures they are defined in a .cpp file with proper linkage
-        cg.add_define("GEAPPLIANCES_ERD_DEFINITIONS_IMPL")
-        cg.add_global(cg.RawStatement(erd_lists_code))
+        
+        # Add ERD definitions using add() instead of add_global()
+        # add() places code in main.cpp which is compiled as a source file
+        # This ensures the extern "C" definitions have proper linkage
+        cg.add(cg.RawExpression(erd_lists_code))
