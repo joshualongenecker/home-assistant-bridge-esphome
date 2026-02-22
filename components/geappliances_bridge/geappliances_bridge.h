@@ -33,7 +33,6 @@ class GeappliancesBridge : public Component {
 
   void set_uart(uart::UARTComponent *uart) { this->uart_ = uart; }
   void set_device_id(const std::string &device_id) { this->configured_device_id_ = device_id; }
-  void set_client_address(uint8_t address) { this->client_address_ = address; }
 
  protected:
   void on_mqtt_connected_();
