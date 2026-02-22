@@ -1,6 +1,6 @@
 /*!
  * @file
- * @brief
+ * @brief MQTT client interface for abstracting MQTT operations
  */
 
 #ifndef i_mqtt_client_h

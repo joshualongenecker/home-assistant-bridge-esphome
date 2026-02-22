@@ -25,6 +25,9 @@ void esphome_mqtt_client_adapter_init(
 void esphome_mqtt_client_adapter_notify_disconnected(
   esphome_mqtt_client_adapter_t* self);
 
+void esphome_mqtt_client_adapter_destroy(
+  esphome_mqtt_client_adapter_t* self);
+
 #ifdef __cplusplus
 }
 #endif

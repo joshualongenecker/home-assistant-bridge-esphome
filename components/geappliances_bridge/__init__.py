@@ -29,7 +29,17 @@ GeappliancesBridge = geappliances_bridge_ns.class_(
 
 
 def sanitize_appliance_name(name):
-    """Sanitize appliance type name for use in C++ strings."""
+    """Sanitize appliance type name for use in C++ identifiers.
+    
+    Replaces special characters with readable equivalents and removes
+    any non-alphanumeric characters to create valid C++ identifiers.
+    
+    Args:
+        name: The appliance type name to sanitize
+        
+    Returns:
+        A sanitized string suitable for use as a C++ identifier
+    """
     # Replace special characters with more readable equivalents
     replacements = {
         ' ': '',
@@ -50,7 +60,17 @@ def sanitize_appliance_name(name):
 
 
 def load_appliance_types():
-    """Load appliance type mappings from the API documentation library."""
+    """Load appliance type mappings from the API documentation library.
+    
+    Tries multiple locations to find the appliance type definitions JSON:
+    1. Local submodule directory (for development)
+    2. ESPHome library download location
+    3. Parent directories
+    4. GitHub as fallback
+    
+    Returns:
+        Dictionary mapping appliance type IDs (int) to names (str)
+    """
     # ESPHome downloads libraries to .esphome/external_files/libraries
     # We need to check multiple possible locations
     

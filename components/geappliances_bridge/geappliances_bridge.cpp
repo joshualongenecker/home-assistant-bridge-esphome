@@ -100,48 +100,13 @@ void GeappliancesBridge::loop() {
   tiny_gea3_interface_run(&this->gea3_interface_);
 
   // Handle device ID generation state machine
+  // Note: If state reaches DEVICE_ID_STATE_FAILED, device requires reboot to retry
   if (this->device_id_state_ == DEVICE_ID_STATE_READING_APPLIANCE_TYPE) {
-    // Request appliance type ERD
-    if (tiny_gea3_erd_client_read(&this->erd_client_.interface, &this->pending_request_id_, 
-                                   ERD_HOST_ADDRESS, ERD_APPLIANCE_TYPE)) {
-      ESP_LOGD(TAG, "Reading appliance type ERD 0x%04X", ERD_APPLIANCE_TYPE);
-      this->device_id_state_ = DEVICE_ID_STATE_IDLE; // Wait for response
-      this->read_retry_count_ = 0;
-    } else {
-      // Failed to queue the read request, will retry on next loop
-      this->read_retry_count_++;
-      if (this->read_retry_count_ % LOG_EVERY_N_RETRIES == 0) {
-        ESP_LOGW(TAG, "Failed to queue appliance type read, retrying... (attempt %u)", this->read_retry_count_);
-      }
-    }
+    this->try_read_erd_with_retry_(ERD_APPLIANCE_TYPE, "appliance type");
   } else if (this->device_id_state_ == DEVICE_ID_STATE_READING_MODEL_NUMBER) {
-    // Request model number ERD
-    if (tiny_gea3_erd_client_read(&this->erd_client_.interface, &this->pending_request_id_, 
-                                   ERD_HOST_ADDRESS, ERD_MODEL_NUMBER)) {
-      ESP_LOGD(TAG, "Reading model number ERD 0x%04X", ERD_MODEL_NUMBER);
-      this->device_id_state_ = DEVICE_ID_STATE_IDLE; // Wait for response
-      this->read_retry_count_ = 0;
-    } else {
-      // Failed to queue the read request, will retry on next loop
-      this->read_retry_count_++;
-      if (this->read_retry_count_ % LOG_EVERY_N_RETRIES == 0) {
-        ESP_LOGW(TAG, "Failed to queue model number read, retrying... (attempt %u)", this->read_retry_count_);
-      }
-    }
+    this->try_read_erd_with_retry_(ERD_MODEL_NUMBER, "model number");
   } else if (this->device_id_state_ == DEVICE_ID_STATE_READING_SERIAL_NUMBER) {
-    // Request serial number ERD
-    if (tiny_gea3_erd_client_read(&this->erd_client_.interface, &this->pending_request_id_, 
-                                   ERD_HOST_ADDRESS, ERD_SERIAL_NUMBER)) {
-      ESP_LOGD(TAG, "Reading serial number ERD 0x%04X", ERD_SERIAL_NUMBER);
-      this->device_id_state_ = DEVICE_ID_STATE_IDLE; // Wait for response
-      this->read_retry_count_ = 0;
-    } else {
-      // Failed to queue the read request, will retry on next loop
-      this->read_retry_count_++;
-      if (this->read_retry_count_ % LOG_EVERY_N_RETRIES == 0) {
-        ESP_LOGW(TAG, "Failed to queue serial number read, retrying... (attempt %u)", this->read_retry_count_);
-      }
-    }
+    this->try_read_erd_with_retry_(ERD_SERIAL_NUMBER, "serial number");
   }
 }
 
@@ -282,6 +247,27 @@ std::string GeappliancesBridge::sanitize_for_mqtt_topic_(const std::string& inpu
   return result;
 }
 
+bool GeappliancesBridge::try_read_erd_with_retry_(tiny_erd_t erd, const char* erd_name) {
+  if (tiny_gea3_erd_client_read(&this->erd_client_.interface, &this->pending_request_id_, 
+                                 ERD_HOST_ADDRESS, erd)) {
+    ESP_LOGD(TAG, "Reading %s ERD 0x%04X", erd_name, erd);
+    this->device_id_state_ = DEVICE_ID_STATE_IDLE; // Wait for response
+    this->read_retry_count_ = 0;
+    return true;
+  } else {
+    // Failed to queue the read request, will retry on next loop
+    this->read_retry_count_++;
+    if (this->read_retry_count_ >= MAX_READ_RETRIES) {
+      ESP_LOGE(TAG, "Failed to read %s after %u retries, giving up", erd_name, MAX_READ_RETRIES);
+      this->device_id_state_ = DEVICE_ID_STATE_FAILED;
+      return false;
+    } else if (this->read_retry_count_ % LOG_EVERY_N_RETRIES == 0) {
+      ESP_LOGW(TAG, "Failed to queue %s read, retrying... (attempt %u)", erd_name, this->read_retry_count_);
+    }
+    return false;
+  }
+}
+
 void GeappliancesBridge::dump_config() {
   ESP_LOGCONFIG(TAG, "GE Appliances Bridge:");
   if (!this->configured_device_id_.empty()) {
@@ -295,6 +281,9 @@ void GeappliancesBridge::dump_config() {
     ESP_LOGCONFIG(TAG, "    Appliance Type: %u", this->appliance_type_);
     ESP_LOGCONFIG(TAG, "    Model Number: %s", this->model_number_.c_str());
     ESP_LOGCONFIG(TAG, "    Serial Number: %s", this->serial_number_.c_str());
+  }
+  if (this->device_id_state_ == DEVICE_ID_STATE_FAILED) {
+    ESP_LOGCONFIG(TAG, "  Device ID Generation: FAILED (see logs for details)");
   }
   ESP_LOGCONFIG(TAG, "  Client Address: 0x%02X", this->client_address_);
   ESP_LOGCONFIG(TAG, "  UART Baud Rate: %lu", baud);
