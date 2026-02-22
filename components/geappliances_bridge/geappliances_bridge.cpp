@@ -186,8 +186,11 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
         std::string sanitized_model = this->sanitize_for_mqtt_topic_(this->model_number_);
         std::string sanitized_serial = this->sanitize_for_mqtt_topic_(this->serial_number_);
         
-        // Generate device ID using std::to_string for safer conversion
-        this->generated_device_id_ = std::to_string(this->appliance_type_) + "_" + 
+        // Convert appliance type to string name using generated function
+        std::string appliance_type_name = appliance_type_to_string(this->appliance_type_);
+        
+        // Generate device ID with appliance type name
+        this->generated_device_id_ = appliance_type_name + "_" + 
                                      sanitized_model + "_" + 
                                      sanitized_serial;
         this->final_device_id_ = this->generated_device_id_;

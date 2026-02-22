@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/mqtt/mqtt_client.h"
+#include <string>
 
 extern "C" {
 #include "mqtt_bridge.h"
@@ -14,6 +15,9 @@ extern "C" {
 
 #include "esphome_uart_adapter.h"
 #include "esphome_mqtt_client_adapter.h"
+
+// Forward declaration of the generated function
+std::string appliance_type_to_string(uint8_t appliance_type);
 
 namespace esphome {
 namespace geappliances_bridge {
