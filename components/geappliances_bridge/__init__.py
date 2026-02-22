@@ -11,6 +11,8 @@ import json
 import os
 import re
 import logging
+import urllib.request
+import urllib.error
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -74,17 +76,34 @@ def load_appliance_types():
     
     # If local load failed, fetch from GitHub
     if data is None:
+        url = "https://raw.githubusercontent.com/geappliances/public-appliance-api-documentation/main/appliance_api_erd_definitions.json"
+        _LOGGER.info("Fetching appliance types from GitHub: %s", url)
+        
         try:
-            import urllib.request
-            url = "https://raw.githubusercontent.com/geappliances/public-appliance-api-documentation/main/appliance_api_erd_definitions.json"
-            _LOGGER.info("Fetching appliance types from GitHub: %s", url)
-            
             with urllib.request.urlopen(url, timeout=10) as response:
                 data = json.loads(response.read().decode('utf-8'))
             _LOGGER.info("Successfully fetched appliance types from GitHub")
+        except urllib.error.HTTPError as e:
+            _LOGGER.error(
+                "HTTP error fetching appliance API documentation (status %d): %s. Using fallback mapping.", 
+                e.code, str(e)
+            )
+            return {
+                0: "Unknown",
+                255: "Unknown"
+            }
+        except urllib.error.URLError as e:
+            _LOGGER.error(
+                "Network error fetching appliance API documentation: %s. Using fallback mapping.", 
+                str(e.reason)
+            )
+            return {
+                0: "Unknown",
+                255: "Unknown"
+            }
         except Exception as e:
             _LOGGER.error(
-                "Failed to fetch appliance API documentation from GitHub: %s. Using fallback mapping.", 
+                "Unexpected error fetching appliance API documentation: %s. Using fallback mapping.", 
                 str(e)
             )
             return {
