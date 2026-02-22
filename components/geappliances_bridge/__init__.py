@@ -94,7 +94,7 @@ def load_appliance_types():
     # Path 2: ESPHome library cache in user's home directory
     home_dir = os.path.expanduser("~")
     esphome_cache_path = os.path.join(
-        home_dir, ".esphome", "external_files", "libraries", 
+        home_dir, ".esphome", "external_files", "libraries",
         "public-appliance-api-documentation", json_filename
     )
     if esphome_cache_path not in seen_paths:
