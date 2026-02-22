@@ -113,10 +113,12 @@ static void update_erd(i_mqtt_client_t* _self, tiny_erd_t erd, const void* value
     mqtt_client->publish(topic, hex_payload, 2, true);  // QoS 2, retain
   } else {
     // Queue the update for later when MQTT connects
-    if (self->pending_updates->size() < MAX_PENDING_UPDATES) {
+    if (self->pending_updates != nullptr && self->pending_updates->size() < MAX_PENDING_UPDATES) {
       self->pending_updates->push_back({topic, hex_payload});
       ESP_LOGD(TAG, "MQTT not connected, queued ERD update for 0x%04X (queue size: %zu)", 
                erd, self->pending_updates->size());
+    } else if (self->pending_updates == nullptr) {
+      ESP_LOGW(TAG, "Pending updates queue not initialized, dropping ERD update for 0x%04X", erd);
     } else {
       ESP_LOGW(TAG, "Pending update queue full, dropping ERD update for 0x%04X", erd);
     }

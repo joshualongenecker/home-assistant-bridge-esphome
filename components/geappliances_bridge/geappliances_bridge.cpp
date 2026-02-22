@@ -119,6 +119,9 @@ void GeappliancesBridge::on_mqtt_connected_() {
   }
   
   // Notify bridge to reset subscriptions
+  // Note: This notifies the bridge as if MQTT disconnected, which triggers the bridge
+  // to clear its ERD registry and resubscribe. This ensures all ERDs are re-registered
+  // and subscriptions are fresh after reconnection.
   this->notify_mqtt_disconnected_();
 }
 
