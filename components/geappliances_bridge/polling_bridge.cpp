@@ -18,7 +18,8 @@ enum {
   erd_host_address_broadcast = tiny_gea_broadcast_address,
   erd_host_address_default = 0xC0,
   retry_delay = 100,
-  appliance_lost_timeout = 60000
+  appliance_lost_timeout = 60000,
+  max_polling_retries = 3
 };
 
 enum {
@@ -290,7 +291,7 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       break;
 
     case signal_polling_timer_expired:
-      if((self->erd_index >= self->polling_list_count) || (self->polling_retries >= 3)) {
+      if((self->erd_index >= self->polling_list_count) || (self->polling_retries >= max_polling_retries)) {
         self->erd_index = 0;
         self->polling_retries = 0;
         send_next_poll_read_request(self);

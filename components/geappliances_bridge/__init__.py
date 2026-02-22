@@ -385,10 +385,13 @@ namespace {{
     energy_erds = set()
     for erds in appliance_erds.values():
         for erd in erds:
-            # Check if ERD is in 0xD000 series (case-insensitive)
-            erd_lower = erd.lower()
-            if erd_lower.startswith('0xd'):
-                energy_erds.add(erd)
+            # Check if ERD is in 0xD000-0xDFFF series (case-insensitive)
+            try:
+                erd_value = int(erd, 16)
+                if 0xD000 <= erd_value <= 0xDFFF:
+                    energy_erds.add(erd)
+            except (ValueError, TypeError):
+                continue
     
     if energy_erds:
         energy_erd_list = sorted(list(energy_erds), key=lambda x: int(x, 16))
