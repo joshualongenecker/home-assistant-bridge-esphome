@@ -78,7 +78,7 @@ class GeappliancesBridge : public Component {
   bool mqtt_bridge_initialized_{false};
   
   BridgeMode bridge_mode_{BRIDGE_MODE_SUBSCRIBE};
-  uint32_t poll_interval_ms_{10000};  // Default 10 seconds
+  uint32_t poll_interval_ms_{10000};  // Default 10 seconds (valid range: 1000-300000 ms = 1-300 seconds)
   
   DeviceIdState device_id_state_{DEVICE_ID_STATE_IDLE};
   BridgeInitState bridge_init_state_{BRIDGE_INIT_STATE_WAITING_FOR_DEVICE_ID};

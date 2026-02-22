@@ -269,7 +269,7 @@ def get_erd_series(erd_hex):
         # Round down to nearest 0x1000
         series = (erd_int // 0x1000) * 0x1000
         return f'0x{series:04X}'
-    except:
+    except (ValueError, TypeError):
         return None
 
 

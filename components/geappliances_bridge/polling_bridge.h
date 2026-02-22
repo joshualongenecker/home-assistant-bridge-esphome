@@ -11,6 +11,9 @@
 #include "tiny_hsm.h"
 #include "tiny_timer.h"
 
+// Maximum number of ERDs that can be added to the polling list
+#define MAX_POLLING_LIST_SIZE 512
+
 typedef struct {
   tiny_timer_group_t* timer_group;
   i_tiny_gea3_erd_client_t* erd_client;
@@ -38,7 +41,7 @@ typedef struct {
   size_t erd_index;
   
   // Polling list
-  tiny_erd_t erd_polling_list[512];
+  tiny_erd_t erd_polling_list[MAX_POLLING_LIST_SIZE];
   size_t polling_list_count;
   size_t polling_retries;
   tiny_erd_t last_erd_polled_successfully;
