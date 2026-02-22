@@ -17,7 +17,8 @@ using namespace std;
 enum {
   erd_host_address = 0xC0,  // Default address for GE appliance host
   retry_delay = 100,         // Delay in ms before retrying read
-  appliance_lost_timeout = 60000  // 60 seconds timeout for appliance loss
+  appliance_lost_timeout = 60000,  // 60 seconds timeout for appliance loss
+  max_polling_retries = 3    // Maximum retries before restarting polling cycle
 };
 
 enum {
@@ -168,11 +169,12 @@ static void add_erd_to_polling_list(mqtt_bridge_polling_t* self, tiny_erd_t erd)
   if(erd_set(self).find(erd) == erd_set(self).end()) {
     mqtt_client_register_erd(self->mqtt_client, erd);
     erd_set(self).insert(erd);
-  }
-  
-  if (self->polling_list_count < POLLING_LIST_MAX_SIZE) {
-    self->erd_polling_list[self->polling_list_count] = erd;
-    self->polling_list_count++;
+    
+    // Only add to polling list if not already present and there's space
+    if (self->polling_list_count < POLLING_LIST_MAX_SIZE) {
+      self->erd_polling_list[self->polling_list_count] = erd;
+      self->polling_list_count++;
+    }
   }
 }
 
@@ -285,7 +287,7 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       break;
 
     case signal_polling_timer_expired:
-      if((self->erd_index >= self->polling_list_count) || (self->polling_retries >= 3)) {
+      if((self->erd_index >= self->polling_list_count) || (self->polling_retries >= max_polling_retries)) {
         self->erd_index = 0;
         self->polling_retries = 0;
         send_next_poll_read_request(self);
