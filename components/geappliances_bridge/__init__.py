@@ -385,7 +385,7 @@ namespace {{
     energy_erds = set()
     for erds in appliance_erds.values():
         for erd in erds:
-            # Check if ERD is in 0xD000-0xDFFF series (case-insensitive)
+            # Check if ERD is in 0xD000-0xDFFF range
             try:
                 erd_value = int(erd, 16)
                 if 0xD000 <= erd_value <= 0xDFFF:
@@ -417,7 +417,7 @@ namespace {{
         
         # Generate arrays for each series (excluding common 0x0000 and energy 0xD000)
         for series, erd_list in sorted(series_dict.items()):
-            # Skip common and energy series (compare as integers to avoid string case issues)
+            # Skip common and energy series (compare as integers for correctness)
             try:
                 series_int = int(series, 16)
                 if series_int == 0x0000 or series_int == 0xD000:

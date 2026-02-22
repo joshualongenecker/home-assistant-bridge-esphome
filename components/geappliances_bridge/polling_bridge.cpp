@@ -306,8 +306,10 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
     case signal_read_completed:
       disarm_timer(self);
       reset_lost_appliance_timer(self);
-      // Verify we have a valid completed ERD index
-      // erd_index was incremented after starting the read, so the completed ERD is at (erd_index - 1)
+      // After initiating a read, erd_index is incremented to point to the next ERD.
+      // Therefore, the ERD that just completed is at index (erd_index - 1).
+      // Verify bounds: erd_index > 0 ensures we have a previous index,
+      // and (erd_index - 1) < polling_list_count ensures it's within the array.
       if(self->erd_index > 0 && (self->erd_index - 1) < self->polling_list_count) {
         self->last_erd_polled_successfully = self->erd_polling_list[self->erd_index - 1];
       }
