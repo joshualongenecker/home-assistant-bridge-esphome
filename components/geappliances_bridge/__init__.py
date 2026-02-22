@@ -10,6 +10,9 @@ from esphome.const import (
 import json
 import os
 import re
+import logging
+
+_LOGGER = logging.getLogger(__name__)
 
 CODEOWNERS = ["@joshualongenecker"]
 DEPENDENCIES = ["uart", "mqtt"]
@@ -22,6 +25,27 @@ geappliances_bridge_ns = cg.esphome_ns.namespace("geappliances_bridge")
 GeappliancesBridge = geappliances_bridge_ns.class_(
     "GeappliancesBridge", cg.Component
 )
+
+
+def sanitize_appliance_name(name):
+    """Sanitize appliance type name for use in C++ strings."""
+    # Replace special characters with more readable equivalents
+    replacements = {
+        ' ': '',
+        '/': '',
+        '&': 'And',
+        '-': '',
+        '(': '',
+        ')': '',
+    }
+    
+    result = name
+    for old, new in replacements.items():
+        result = result.replace(old, new)
+    
+    # Remove any remaining non-alphanumeric characters
+    result = re.sub(r'[^a-zA-Z0-9]', '', result)
+    return result
 
 
 def load_appliance_types():
@@ -38,7 +62,10 @@ def load_appliance_types():
     json_path = os.path.normpath(json_path)
     
     if not os.path.exists(json_path):
-        # Fallback: return a basic mapping if JSON not found
+        _LOGGER.warning(
+            "Appliance API documentation JSON not found at %s. Using fallback mapping.", 
+            json_path
+        )
         return {
             0: "Unknown",
             255: "Unknown"
@@ -59,14 +86,16 @@ def load_appliance_types():
                     mapping = {}
                     for key, value in values.items():
                         int_key = int(key)
-                        # Sanitize the string value for use as a C++ identifier/string
-                        # Remove special characters and spaces
-                        sanitized = re.sub(r'[^a-zA-Z0-9]', '', value.replace(' ', '').replace('/', '').replace('&', 'And'))
+                        sanitized = sanitize_appliance_name(value)
                         mapping[int_key] = sanitized
+                    
+                    _LOGGER.info("Loaded %d appliance type mappings from JSON", len(mapping))
                     return mapping
     except Exception as e:
-        # If parsing fails, return basic mapping
-        pass
+        _LOGGER.error(
+            "Failed to parse appliance API documentation JSON: %s. Using fallback mapping.", 
+            str(e)
+        )
     
     # Fallback mapping
     return {
@@ -77,14 +106,14 @@ def load_appliance_types():
 
 def generate_appliance_type_function(appliance_types):
     """Generate C++ code for the appliance type to string function."""
-    # Generate switch cases
+    # Generate switch cases with consistent indentation
     cases = []
     for type_id, type_name in sorted(appliance_types.items()):
         cases.append(f'    case {type_id}: return "{type_name}";')
     
     cases_str = "\n".join(cases)
     
-    # Generate the function
+    # Generate the function with consistent 2-space indentation
     function_code = f'''
 std::string appliance_type_to_string(uint8_t appliance_type) {{
   // Auto-generated from public-appliance-api-documentation
