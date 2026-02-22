@@ -2,6 +2,9 @@
 components/geappliances_bridge/secrets.yaml
 components/geappliances_bridge/.esphome/
 
+# Test build artifacts
+build/
+
 # IDE
 .vscode/
 .DS_Store
