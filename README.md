@@ -78,7 +78,7 @@ The appliance type names are loaded from the [GE Appliances Public API Documenta
 
 Generated device ID example: `Dishwasher_ZL4200ABC_12345678` (for appliance type 6 - Dishwasher)
 
-See [components/geappliances_bridge/example.yaml](components/geappliances_bridge/example.yaml) for the complete configuration example.
+See [doc/example.yaml](doc/example.yaml) for the complete configuration example.
 
 ## Development
 
