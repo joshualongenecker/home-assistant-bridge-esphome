@@ -6,6 +6,7 @@
 #include "gea2_mqtt_bridge.h"
 #include "gea2_appliance_erds.h"
 #include "esphome/core/log.h"
+#include "esphome/core/helpers.h"
 
 extern "C" {
 #include "i_tiny_gea2_erd_client.h"
