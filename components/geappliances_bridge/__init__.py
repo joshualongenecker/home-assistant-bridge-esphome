@@ -245,11 +245,11 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(GeappliancesBridge),
         cv.GenerateID(CONF_UART_ID): cv.use_id(uart.UARTComponent),
         cv.Optional(CONF_DEVICE_ID): cv.string,
-        cv.Optional(CONF_MODE, default=MODE_AUTO): cv.enum(
+        cv.Optional(CONF_MODE, default=MODE_AUTO_VALUE): cv.enum(
             {
-                MODE_POLL: MODE_POLL,
-                MODE_SUBSCRIBE: MODE_SUBSCRIBE,
-                MODE_AUTO: MODE_AUTO,
+                MODE_POLL: MODE_POLL_VALUE,
+                MODE_SUBSCRIBE: MODE_SUBSCRIBE_VALUE,
+                MODE_AUTO: MODE_AUTO_VALUE,
             },
             upper=False
         ),
@@ -278,15 +278,8 @@ async def to_code(config):
     if CONF_DEVICE_ID in config:
         cg.add(var.set_device_id(config[CONF_DEVICE_ID]))
     
-    # Set mode configuration
-    mode = config[CONF_MODE]
-    if mode == MODE_POLL:
-        cg.add(var.set_mode(MODE_POLL_VALUE))
-    elif mode == MODE_SUBSCRIBE:
-        cg.add(var.set_mode(MODE_SUBSCRIBE_VALUE))
-    elif mode == MODE_AUTO:
-        cg.add(var.set_mode(MODE_AUTO_VALUE))
-    
+    # Set mode configuration (config[CONF_MODE] is now an integer from cv.enum)
+    cg.add(var.set_mode(config[CONF_MODE]))
     cg.add(var.set_polling_interval(config[CONF_POLLING_INTERVAL]))
     
     # Load appliance types from JSON and generate C++ mapping function
