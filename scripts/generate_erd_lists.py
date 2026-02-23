@@ -22,16 +22,16 @@ def categorize_erds(erds: List[Dict]) -> Dict[str, List[int]]:
     Categorize ERDs by hex range into appliance types.
     
     Ranges:
-    0x0000 to 0x0FFF: common Erds (all appliance types)
-    0x1000 to 0x1FFF: refrigeration Erds
-    0x2000 to 0x2FFF: laundry Erds
-    0x3000 to 0x3FFF: dishwasher Erds
-    0x4000 to 0x4FFF: waterHeater Erds
-    0x5000 to 0x5FFF: range Erds (ie, stoves, cooktops, ovens, etc)
-    0x7000 to 0x7FFF: air conditioning Erds (ie, mini split, Zoneline, etc)
-    0x8000 to 0x8FFF: water filter Erds
-    0x9000 to 0x9FFF: small appliance Erds (ie, coffee makers, etc)
-    0xd000 to 0xdFFF: energy Erds (all appliance types)
+    0x0000 to 0x0FFF: common ERDs (all appliance types)
+    0x1000 to 0x1FFF: refrigeration ERDs
+    0x2000 to 0x2FFF: laundry ERDs
+    0x3000 to 0x3FFF: dishwasher ERDs
+    0x4000 to 0x4FFF: waterHeater ERDs
+    0x5000 to 0x5FFF: range ERDs (i.e., stoves, cooktops, ovens, etc)
+    0x7000 to 0x7FFF: air conditioning ERDs (i.e., mini split, Zoneline, etc)
+    0x8000 to 0x8FFF: water filter ERDs
+    0x9000 to 0x9FFF: small appliance ERDs (i.e., coffee makers, etc)
+    0xD000 to 0xDFFF: energy ERDs (all appliance types)
     """
     categories = {
         'common': set(),
@@ -67,7 +67,7 @@ def categorize_erds(erds: List[Dict]) -> Dict[str, List[int]]:
             categories['waterFilter'].add(erd_id)
         elif 0x9000 <= erd_id <= 0x9FFF:
             categories['smallAppliance'].add(erd_id)
-        elif 0xd000 <= erd_id <= 0xdFFF:
+        elif 0xD000 <= erd_id <= 0xDFFF:
             categories['energy'].add(erd_id)
     
     # Convert sets to sorted lists
@@ -107,16 +107,16 @@ def generate_header(categories: Dict[str, List[int]]) -> str:
     
     # Generate each category
     category_info = [
-        ('common', 'commonErds', 'commonErdCount', '0x0000 to 0x0FFF: common Erds (all appliance types)'),
-        ('refrigeration', 'refrigerationErds', 'refrigerationErdCount', '0x1000 to 0x1FFF: refrigeration Erds'),
-        ('laundry', 'laundryErds', 'laundryErdCount', '0x2000 to 0x2FFF: laundry Erds'),
-        ('dishWasher', 'dishWasherErds', 'dishWasherErdCount', '0x3000 to 0x3FFF: dishwasher Erds'),
-        ('waterHeater', 'waterHeaterErds', 'waterHeaterErdCount', '0x4000 to 0x4FFF: waterHeater Erds'),
-        ('range', 'rangeErds', 'rangeErdCount', '0x5000 to 0x5FFF: range Erds (stoves, cooktops, ovens, etc)'),
-        ('airConditioning', 'airConditioningErds', 'airConditioningErdCount', '0x7000 to 0x7FFF: air conditioning Erds (mini split, Zoneline, etc)'),
-        ('waterFilter', 'waterFilterErds', 'waterFilterErdCount', '0x8000 to 0x8FFF: water filter Erds'),
-        ('smallAppliance', 'smallApplianceErds', 'smallApplianceErdCount', '0x9000 to 0x9FFF: small appliance Erds (coffee makers, etc)'),
-        ('energy', 'energyErds', 'energyErdCount', '0xd000 to 0xdFFF: energy Erds (all appliance types)')
+        ('common', 'commonErds', 'commonErdCount', '0x0000 to 0x0FFF: common ERDs (all appliance types)'),
+        ('refrigeration', 'refrigerationErds', 'refrigerationErdCount', '0x1000 to 0x1FFF: refrigeration ERDs'),
+        ('laundry', 'laundryErds', 'laundryErdCount', '0x2000 to 0x2FFF: laundry ERDs'),
+        ('dishWasher', 'dishWasherErds', 'dishWasherErdCount', '0x3000 to 0x3FFF: dishwasher ERDs'),
+        ('waterHeater', 'waterHeaterErds', 'waterHeaterErdCount', '0x4000 to 0x4FFF: waterHeater ERDs'),
+        ('range', 'rangeErds', 'rangeErdCount', '0x5000 to 0x5FFF: range ERDs (stoves, cooktops, ovens, etc)'),
+        ('airConditioning', 'airConditioningErds', 'airConditioningErdCount', '0x7000 to 0x7FFF: air conditioning ERDs (mini split, Zoneline, etc)'),
+        ('waterFilter', 'waterFilterErds', 'waterFilterErdCount', '0x8000 to 0x8FFF: water filter ERDs'),
+        ('smallAppliance', 'smallApplianceErds', 'smallApplianceErdCount', '0x9000 to 0x9FFF: small appliance ERDs (coffee makers, etc)'),
+        ('energy', 'energyErds', 'energyErdCount', '0xD000 to 0xDFFF: energy ERDs (all appliance types)')
     ]
     
     for category_key, array_name, count_name, description in category_info:

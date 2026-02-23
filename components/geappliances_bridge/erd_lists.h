@@ -11,7 +11,7 @@
 
 #include "tiny_erd.h"
 
-// 0x0000 to 0x0FFF: common Erds (all appliance types)
+// 0x0000 to 0x0FFF: common ERDs (all appliance types)
 const tiny_erd_t commonErds[] = {
   0x0001,
   0x0002,
@@ -97,7 +97,7 @@ const tiny_erd_t commonErds[] = {
 };
 const uint16_t commonErdCount = sizeof(commonErds) / sizeof(commonErds[0]);
 
-// 0x1000 to 0x1FFF: refrigeration Erds
+// 0x1000 to 0x1FFF: refrigeration ERDs
 const tiny_erd_t refrigerationErds[] = {
   0x1004,
   0x1005,
@@ -357,7 +357,7 @@ const tiny_erd_t refrigerationErds[] = {
 };
 const uint16_t refrigerationErdCount = sizeof(refrigerationErds) / sizeof(refrigerationErds[0]);
 
-// 0x2000 to 0x2FFF: laundry Erds
+// 0x2000 to 0x2FFF: laundry ERDs
 const tiny_erd_t laundryErds[] = {
   0x2000,
   0x2001,
@@ -792,7 +792,7 @@ const tiny_erd_t laundryErds[] = {
 };
 const uint16_t laundryErdCount = sizeof(laundryErds) / sizeof(laundryErds[0]);
 
-// 0x3000 to 0x3FFF: dishwasher Erds
+// 0x3000 to 0x3FFF: dishwasher ERDs
 const tiny_erd_t dishWasherErds[] = {
   0x3000,
   0x3001,
@@ -944,7 +944,7 @@ const tiny_erd_t dishWasherErds[] = {
 };
 const uint16_t dishWasherErdCount = sizeof(dishWasherErds) / sizeof(dishWasherErds[0]);
 
-// 0x4000 to 0x4FFF: waterHeater Erds
+// 0x4000 to 0x4FFF: waterHeater ERDs
 const tiny_erd_t waterHeaterErds[] = {
   0x4008,
   0x4009,
@@ -1013,7 +1013,7 @@ const tiny_erd_t waterHeaterErds[] = {
 };
 const uint16_t waterHeaterErdCount = sizeof(waterHeaterErds) / sizeof(waterHeaterErds[0]);
 
-// 0x5000 to 0x5FFF: range Erds (stoves, cooktops, ovens, etc)
+// 0x5000 to 0x5FFF: range ERDs (stoves, cooktops, ovens, etc)
 const tiny_erd_t rangeErds[] = {
   0x5000,
   0x5001,
@@ -1526,7 +1526,7 @@ const tiny_erd_t rangeErds[] = {
 };
 const uint16_t rangeErdCount = sizeof(rangeErds) / sizeof(rangeErds[0]);
 
-// 0x7000 to 0x7FFF: air conditioning Erds (mini split, Zoneline, etc)
+// 0x7000 to 0x7FFF: air conditioning ERDs (mini split, Zoneline, etc)
 const tiny_erd_t airConditioningErds[] = {
   0x7000,
   0x7001,
@@ -1834,7 +1834,7 @@ const tiny_erd_t airConditioningErds[] = {
 };
 const uint16_t airConditioningErdCount = sizeof(airConditioningErds) / sizeof(airConditioningErds[0]);
 
-// 0x8000 to 0x8FFF: water filter Erds
+// 0x8000 to 0x8FFF: water filter ERDs
 const tiny_erd_t waterFilterErds[] = {
   0x8004,
   0x8005,
@@ -1847,7 +1847,7 @@ const tiny_erd_t waterFilterErds[] = {
 };
 const uint16_t waterFilterErdCount = sizeof(waterFilterErds) / sizeof(waterFilterErds[0]);
 
-// 0x9000 to 0x9FFF: small appliance Erds (coffee makers, etc)
+// 0x9000 to 0x9FFF: small appliance ERDs (coffee makers, etc)
 const tiny_erd_t smallApplianceErds[] = {
   0x9000,
   0x9001,
@@ -2122,7 +2122,7 @@ const tiny_erd_t smallApplianceErds[] = {
 };
 const uint16_t smallApplianceErdCount = sizeof(smallApplianceErds) / sizeof(smallApplianceErds[0]);
 
-// 0xd000 to 0xdFFF: energy Erds (all appliance types)
+// 0xD000 to 0xDFFF: energy ERDs (all appliance types)
 const tiny_erd_t energyErds[] = {
   0xd001,
   0xd002,
