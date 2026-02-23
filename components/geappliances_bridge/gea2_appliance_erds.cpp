@@ -7,6 +7,7 @@
 
 #include "gea2_appliance_erds.h"
 #include "erd_lists.h"
+#include <cstddef>
 
 // Wrap common ERDs
 static const gea2_erd_list_t common_erd_list = { commonErds, commonErdCount };
