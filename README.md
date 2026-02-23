@@ -109,6 +109,17 @@ See [components/geappliances_bridge/example.yaml](components/geappliances_bridge
 
 ## Development
 
+### ERD List Generation
+
+The component uses an auto-generated ERD list (`erd_lists.h`) based on the [GE Appliances Public API Documentation](https://github.com/geappliances/public-appliance-api-documentation). The ERD list is automatically generated during the build process from `appliance_api_erd_definitions.json`.
+
+**To manually regenerate the ERD list:**
+```bash
+python3 scripts/generate_erd_lists.py
+```
+
+The generation script categorizes ERDs by appliance type based on their hex address ranges (common, refrigeration, laundry, dishwasher, water heater, range, air conditioning, water filter, small appliance, and energy ERDs). See [scripts/README.md](scripts/README.md) for more details.
+
 ### Running Tests
 
 This project includes unit tests for the core bridge functionality. The tests are built using CppUTest.

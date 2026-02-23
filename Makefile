@@ -41,6 +41,16 @@ LDLIBS := -lstdc++ -lCppUTest -lCppUTestExt -lm
 
 BUILD_DEPS += $(MAKEFILE_LIST)
 
+# Generate erd_lists.h from JSON before building
+ERD_LISTS_HEADER := components/geappliances_bridge/erd_lists.h
+ERD_DEFINITIONS_JSON := lib/public-appliance-api-documentation/appliance_api_erd_definitions.json
+
+$(ERD_LISTS_HEADER): $(ERD_DEFINITIONS_JSON) scripts/generate_erd_lists.py
+	@echo Generating $@...
+	@python3 scripts/generate_erd_lists.py
+
+BUILD_DEPS += $(ERD_LISTS_HEADER)
+
 .PHONY: test
 test: $(BUILD_DIR)/$(TARGET)
 	@echo Running tests...
