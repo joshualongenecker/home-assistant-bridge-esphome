@@ -53,6 +53,7 @@ geappliances_bridge:
   # device_id: "YourDeviceId"  # Optional: Uncomment to use a custom device ID
   uart_id: gea3_uart
   
-  # Polling mode configuration (optional)
-  # polling_mode: false  # Default: false (uses subscription mode)
-  # polling_interval: 10000  # Default: 10000 ms (10 seconds), only used when polling_mode is true
+  # Mode configuration (optional)
+  # mode: auto  # Default: auto (tries subscription first, falls back to polling if no ERD responses in 30s)
+  #              Options: auto, subscribe, poll
+  # polling_interval: 10000  # Default: 10000 ms (10 seconds), used when in polling mode

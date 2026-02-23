@@ -23,6 +23,14 @@ std::string appliance_type_to_string(uint8_t appliance_type);
 namespace esphome {
 namespace geappliances_bridge {
 
+// Operation mode for the bridge
+// Note: These enum values must match MODE_*_VALUE constants in __init__.py
+enum BridgeMode {
+  BRIDGE_MODE_POLL = 0,       // Always use polling mode
+  BRIDGE_MODE_SUBSCRIBE = 1,  // Always use subscription mode
+  BRIDGE_MODE_AUTO = 2        // Auto: try subscription, fallback to polling
+};
+
 class GeappliancesBridge : public Component {
  public:
   static constexpr unsigned long baud = 230400;
@@ -34,7 +42,7 @@ class GeappliancesBridge : public Component {
 
   void set_uart(uart::UARTComponent *uart) { this->uart_ = uart; }
   void set_device_id(const std::string &device_id) { this->configured_device_id_ = device_id; }
-  void set_polling_mode(bool polling_mode) { this->polling_mode_ = polling_mode; }
+  void set_mode(uint8_t mode) { this->mode_ = static_cast<BridgeMode>(mode); }
   void set_polling_interval(uint32_t polling_interval) { this->polling_interval_ms_ = polling_interval; }
 
  protected:
@@ -42,6 +50,7 @@ class GeappliancesBridge : public Component {
   void notify_mqtt_disconnected_();
   void handle_erd_client_activity_(const tiny_gea3_erd_client_on_activity_args_t* args);
   void initialize_mqtt_bridge_();
+  void check_subscription_activity_();
   std::string bytes_to_string_(const uint8_t* data, size_t size);
   std::string sanitize_for_mqtt_topic_(const std::string& input);
   bool try_read_erd_with_retry_(tiny_erd_t erd, const char* erd_name);
@@ -68,8 +77,14 @@ class GeappliancesBridge : public Component {
   uint8_t client_address_{0xE4};
   bool mqtt_was_connected_{false};
   bool mqtt_bridge_initialized_{false};
-  bool polling_mode_{false};
+  BridgeMode mode_{BRIDGE_MODE_AUTO};
   uint32_t polling_interval_ms_{10000};
+  
+  // Auto mode fallback tracking
+  bool subscription_mode_active_{false};
+  bool subscription_activity_detected_{false};
+  uint32_t subscription_start_time_{0};
+  static constexpr uint32_t SUBSCRIPTION_TIMEOUT_MS = 30000; // 30 seconds
   
   DeviceIdState device_id_state_{DEVICE_ID_STATE_IDLE};
   BridgeInitState bridge_init_state_{BRIDGE_INIT_STATE_WAITING_FOR_DEVICE_ID};
