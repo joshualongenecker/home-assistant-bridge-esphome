@@ -29,6 +29,11 @@ MODE_POLL = "poll"
 MODE_SUBSCRIBE = "subscribe"
 MODE_AUTO = "auto"
 
+# Mode enum values (must match BridgeMode enum in C++)
+MODE_POLL_VALUE = 0
+MODE_SUBSCRIBE_VALUE = 1
+MODE_AUTO_VALUE = 2
+
 geappliances_bridge_ns = cg.esphome_ns.namespace("geappliances_bridge")
 GeappliancesBridge = geappliances_bridge_ns.class_(
     "GeappliancesBridge", cg.Component
@@ -276,11 +281,11 @@ async def to_code(config):
     # Set mode configuration
     mode = config[CONF_MODE]
     if mode == MODE_POLL:
-        cg.add(var.set_mode(0))  # 0 = Poll
+        cg.add(var.set_mode(MODE_POLL_VALUE))
     elif mode == MODE_SUBSCRIBE:
-        cg.add(var.set_mode(1))  # 1 = Subscribe
+        cg.add(var.set_mode(MODE_SUBSCRIBE_VALUE))
     elif mode == MODE_AUTO:
-        cg.add(var.set_mode(2))  # 2 = Auto
+        cg.add(var.set_mode(MODE_AUTO_VALUE))
     
     cg.add(var.set_polling_interval(config[CONF_POLLING_INTERVAL]))
     

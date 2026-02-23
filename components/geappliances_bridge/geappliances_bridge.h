@@ -24,6 +24,7 @@ namespace esphome {
 namespace geappliances_bridge {
 
 // Operation mode for the bridge
+// Note: These enum values must match MODE_*_VALUE constants in __init__.py
 enum BridgeMode {
   BRIDGE_MODE_POLL = 0,       // Always use polling mode
   BRIDGE_MODE_SUBSCRIBE = 1,  // Always use subscription mode
