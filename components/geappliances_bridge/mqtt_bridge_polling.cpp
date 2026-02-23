@@ -42,12 +42,6 @@ static const tiny_erd_t common_erds[] = {
 };
 static const uint16_t common_erd_count = sizeof(common_erds) / sizeof(common_erds[0]);
 
-// Energy-related ERDs
-static const tiny_erd_t energy_erds[] = {
-  0x004b, 0x004c, 0x004d
-};
-static const uint16_t energy_erd_count = sizeof(energy_erds) / sizeof(energy_erds[0]);
-
 static void arm_timer(mqtt_bridge_polling_t* self, tiny_timer_ticks_t ticks)
 {
   tiny_timer_start(
@@ -229,8 +223,8 @@ static tiny_hsm_result_t state_add_energy_erds(tiny_hsm_t* hsm, tiny_hsm_signal_
 
   switch(signal) {
     case tiny_hsm_signal_entry:
-      self->appliance_erd_list = energy_erds;
-      self->appliance_erd_list_count = energy_erd_count;
+      self->appliance_erd_list = energyErds;
+      self->appliance_erd_list_count = energyErdCount;
       self->erd_index = 0;
 
       tiny_gea3_erd_client_read(self->erd_client, &self->request_id, self->erd_host_address, self->appliance_erd_list[self->erd_index]);
