@@ -6,14 +6,27 @@ on:
       - main
       - develop
   pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - assigned
+      - unassigned
 
 jobs:
   compile-test:
     name: Compile ESPHome Configuration
     runs-on: ubuntu-latest
-    
     permissions:
       contents: read
+
+    # ✅ Only gate PR runs — allow normal pushes to main/develop
+    if: |
+      github.event_name == 'push' ||
+      contains(
+        join(github.event.pull_request.assignees.*.login, ','),
+        'your-username'
+      )
 
     steps:
       - name: Checkout repository
