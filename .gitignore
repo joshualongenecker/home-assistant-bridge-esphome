@@ -1,6 +1,8 @@
 # ESPHome build artifacts
 components/geappliances_bridge/secrets.yaml
 components/geappliances_bridge/.esphome/
+doc/secrets.yaml
+doc/.esphome/
 __pycache__/
 *.pyc
 
