@@ -224,6 +224,9 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
   }
 
   ESP_LOGI(TAG, "Initializing MQTT bridge with device ID: %s", this->final_device_id_.c_str());
+  ESP_LOGI(TAG, "Using %s mode with polling interval: %u ms", 
+           this->polling_mode_ ? "polling" : "subscription",
+           this->polling_interval_ms_);
 
   // Initialize MQTT client adapter
   esphome_mqtt_client_adapter_init(&this->mqtt_client_adapter_, this->final_device_id_.c_str());
@@ -234,12 +237,21 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
     &this->timer_group_,
     &this->mqtt_client_adapter_.interface);
 
-  // Initialize MQTT bridge
-  mqtt_bridge_init(
-    &this->mqtt_bridge_,
-    &this->timer_group_,
-    &this->erd_client_.interface,
-    &this->mqtt_client_adapter_.interface);
+  // Initialize MQTT bridge based on mode
+  if (this->polling_mode_) {
+    mqtt_bridge_polling_init(
+      &this->mqtt_bridge_polling_,
+      &this->timer_group_,
+      &this->erd_client_.interface,
+      &this->mqtt_client_adapter_.interface,
+      this->polling_interval_ms_);
+  } else {
+    mqtt_bridge_init(
+      &this->mqtt_bridge_,
+      &this->timer_group_,
+      &this->erd_client_.interface,
+      &this->mqtt_client_adapter_.interface);
+  }
 
   this->mqtt_bridge_initialized_ = true;
   ESP_LOGI(TAG, "MQTT bridge initialized successfully");
@@ -323,6 +335,10 @@ void GeappliancesBridge::dump_config() {
   }
   ESP_LOGCONFIG(TAG, "  Client Address: 0x%02X", this->client_address_);
   ESP_LOGCONFIG(TAG, "  UART Baud Rate: %lu", baud);
+  ESP_LOGCONFIG(TAG, "  Mode: %s", this->polling_mode_ ? "Polling" : "Subscription");
+  if (this->polling_mode_) {
+    ESP_LOGCONFIG(TAG, "  Polling Interval: %u ms", this->polling_interval_ms_);
+  }
 }
 
 float GeappliancesBridge::get_setup_priority() const {

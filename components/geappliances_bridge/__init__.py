@@ -21,6 +21,8 @@ DEPENDENCIES = ["uart", "mqtt"]
 AUTO_LOAD = []
 
 CONF_DEVICE_ID = "device_id"
+CONF_POLLING_MODE = "polling_mode"
+CONF_POLLING_INTERVAL = "polling_interval"
 
 geappliances_bridge_ns = cg.esphome_ns.namespace("geappliances_bridge")
 GeappliancesBridge = geappliances_bridge_ns.class_(
@@ -233,6 +235,8 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(GeappliancesBridge),
         cv.GenerateID(CONF_UART_ID): cv.use_id(uart.UARTComponent),
         cv.Optional(CONF_DEVICE_ID): cv.string,
+        cv.Optional(CONF_POLLING_MODE, default=False): cv.boolean,
+        cv.Optional(CONF_POLLING_INTERVAL, default=10000): cv.positive_int,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -256,6 +260,10 @@ async def to_code(config):
     # Set device ID if provided, otherwise it will be auto-generated
     if CONF_DEVICE_ID in config:
         cg.add(var.set_device_id(config[CONF_DEVICE_ID]))
+    
+    # Set polling mode configuration
+    cg.add(var.set_polling_mode(config[CONF_POLLING_MODE]))
+    cg.add(var.set_polling_interval(config[CONF_POLLING_INTERVAL]))
     
     # Load appliance types from JSON and generate C++ mapping function
     appliance_types = load_appliance_types()

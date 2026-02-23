@@ -7,6 +7,7 @@
 
 extern "C" {
 #include "mqtt_bridge.h"
+#include "mqtt_bridge_polling.h"
 #include "tiny_gea3_erd_client.h"
 #include "tiny_gea3_interface.h"
 #include "tiny_timer.h"
@@ -33,6 +34,8 @@ class GeappliancesBridge : public Component {
 
   void set_uart(uart::UARTComponent *uart) { this->uart_ = uart; }
   void set_device_id(const std::string &device_id) { this->configured_device_id_ = device_id; }
+  void set_polling_mode(bool polling_mode) { this->polling_mode_ = polling_mode; }
+  void set_polling_interval(uint32_t polling_interval) { this->polling_interval_ms_ = polling_interval; }
 
  protected:
   void on_mqtt_connected_();
@@ -65,6 +68,8 @@ class GeappliancesBridge : public Component {
   uint8_t client_address_{0xE4};
   bool mqtt_was_connected_{false};
   bool mqtt_bridge_initialized_{false};
+  bool polling_mode_{false};
+  uint32_t polling_interval_ms_{10000};
   
   DeviceIdState device_id_state_{DEVICE_ID_STATE_IDLE};
   BridgeInitState bridge_init_state_{BRIDGE_INIT_STATE_WAITING_FOR_DEVICE_ID};
@@ -94,6 +99,7 @@ class GeappliancesBridge : public Component {
   uint8_t client_queue_buffer_[1024];
 
   mqtt_bridge_t mqtt_bridge_;
+  mqtt_bridge_polling_t mqtt_bridge_polling_;
 
   uptime_monitor_t uptime_monitor_;
   

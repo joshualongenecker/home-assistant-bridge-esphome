@@ -50,6 +50,33 @@ geappliances_bridge:
   uart_id: gea3_uart
 ```
 
+### Polling vs Subscription Mode
+
+The component supports two modes for retrieving data from the appliance:
+
+1. **Subscription Mode (Default)** - The adapter subscribes to ERD updates from the appliance. The appliance pushes changes as they occur.
+
+2. **Polling Mode** - The adapter actively polls the appliance for ERD values at a configurable interval.
+
+#### Configuration Options
+
+```yaml
+geappliances_bridge:
+  uart_id: gea3_uart
+  polling_mode: false  # Default: false (subscription mode)
+  polling_interval: 10000  # Default: 10000 ms (10 seconds), only used when polling_mode is true
+```
+
+**When to use Polling Mode:**
+- If subscription mode is not reliably working with your appliance
+- If you want explicit control over update frequency
+- For appliances that may not support subscription mode properly
+
+**Subscription Mode Benefits:**
+- Lower network overhead
+- Real-time updates when values change
+- Recommended for most use cases
+
 ### Auto-Generated Device ID
 
 The `device_id` parameter is **optional**. If not provided, the component will automatically generate a device ID by reading the following ERDs from the appliance:
