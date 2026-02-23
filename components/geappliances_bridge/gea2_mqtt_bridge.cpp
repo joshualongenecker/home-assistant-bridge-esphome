@@ -189,6 +189,7 @@ void Gea2MqttBridge::send_next_poll_read_request() {
                              erd_polling_list_[erd_index_]);
   arm_timer(retry_delay);
 }
+
 // State machine implementations
 
 tiny_hsm_result_t Gea2MqttBridge::state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data) {
@@ -424,6 +425,7 @@ tiny_hsm_result_t Gea2MqttBridge::state_poll_erds_from_list(tiny_hsm_t* hsm, tin
   
   return tiny_hsm_result_signal_consumed;
 }
+
 // Initialization and destroy
 
 static const tiny_hsm_state_descriptor_t hsm_state_descriptors[] = {

@@ -24,7 +24,9 @@ const gea2_erd_list_t* gea2_get_energy_erd_list(void) {
 
 // Map appliance types to their ERD groups using existing lists
 const gea2_erd_list_t* gea2_get_appliance_erd_list(uint8_t appliance_type) {
-  static gea2_erd_list_t appliance_lists[55];  // Max appliance type is 0x36 = 54
+  // Maximum appliance type is 0x36 (54 decimal), so we need 55 entries (0-54)
+  static constexpr size_t MAX_APPLIANCE_TYPE_COUNT = 55;
+  static gea2_erd_list_t appliance_lists[MAX_APPLIANCE_TYPE_COUNT];
   
   // Initialize the mapping (only done once)
   static bool initialized = false;
@@ -87,7 +89,7 @@ const gea2_erd_list_t* gea2_get_appliance_erd_list(uint8_t appliance_type) {
     initialized = true;
   }
   
-  if (appliance_type >= 55) {
+  if (appliance_type >= MAX_APPLIANCE_TYPE_COUNT) {
     appliance_type = 0;  // Default to water heater
   }
   
