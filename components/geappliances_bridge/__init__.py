@@ -23,6 +23,9 @@ AUTO_LOAD = []
 CONF_DEVICE_ID = "device_id"
 CONF_MODE = "mode"
 CONF_POLLING_INTERVAL = "polling_interval"
+CONF_GEA2_UART_ID = "gea2_uart_id"
+CONF_GEA2_POLLING_INTERVAL = "gea2_polling_interval"
+CONF_GEA2_DEVICE_ID = "gea2_device_id"
 
 # Mode options
 MODE_POLL = "poll"
@@ -254,6 +257,10 @@ CONFIG_SCHEMA = cv.Schema(
             upper=False
         ),
         cv.Optional(CONF_POLLING_INTERVAL, default=10000): cv.positive_int,
+        # GEA2 configuration (optional)
+        cv.Optional(CONF_GEA2_UART_ID): cv.use_id(uart.UARTComponent),
+        cv.Optional(CONF_GEA2_POLLING_INTERVAL, default=3000): cv.positive_int,
+        cv.Optional(CONF_GEA2_DEVICE_ID): cv.string,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -270,7 +277,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Get UART component reference
+    # Get UART component reference for GEA3
     uart_component = await cg.get_variable(config[CONF_UART_ID])
     cg.add(var.set_uart(uart_component))
 
@@ -281,6 +288,15 @@ async def to_code(config):
     # Set mode configuration (config[CONF_MODE] is now an integer from cv.enum)
     cg.add(var.set_mode(config[CONF_MODE]))
     cg.add(var.set_polling_interval(config[CONF_POLLING_INTERVAL]))
+    
+    # GEA2 configuration (optional)
+    if CONF_GEA2_UART_ID in config:
+        gea2_uart_component = await cg.get_variable(config[CONF_GEA2_UART_ID])
+        cg.add(var.set_gea2_uart(gea2_uart_component))
+        cg.add(var.set_gea2_polling_interval(config[CONF_GEA2_POLLING_INTERVAL]))
+        
+        if CONF_GEA2_DEVICE_ID in config:
+            cg.add(var.set_gea2_device_id(config[CONF_GEA2_DEVICE_ID]))
     
     # Load appliance types from JSON and generate C++ mapping function
     appliance_types = load_appliance_types()

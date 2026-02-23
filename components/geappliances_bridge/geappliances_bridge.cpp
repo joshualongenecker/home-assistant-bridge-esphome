@@ -76,6 +76,47 @@ void GeappliancesBridge::setup() {
     this->bridge_init_state_ = BRIDGE_INIT_STATE_WAITING_FOR_MQTT;
   }
 
+  // Initialize GEA2 if configured
+  if (this->gea2_uart_ != nullptr) {
+    this->gea2_enabled_ = true;
+    ESP_LOGI(TAG, "GEA2 enabled, initializing GEA2 components...");
+    
+    // Initialize GEA2 UART adapter
+    esphome_uart_adapter_init(&this->gea2_uart_adapter_, &this->timer_group_, this->gea2_uart_);
+    
+    // Initialize GEA2 interface
+    static const tiny_gea2_erd_client_configuration_t gea2_client_configuration = {
+      .request_timeout = 250,
+      .request_retries = 10
+    };
+    
+    tiny_gea2_interface_init(
+      &this->gea2_interface_,
+      &this->gea2_uart_adapter_.interface,
+      esphome_time_source_init(),
+      nullptr,  // msec_interrupt (not used in ESPHome)
+      this->gea2_client_address_,
+      this->gea2_send_queue_buffer_,
+      sizeof(this->gea2_send_queue_buffer_),
+      this->gea2_receive_buffer_,
+      sizeof(this->gea2_receive_buffer_),
+      false,
+      1);
+    
+    // Initialize GEA2 ERD client
+    tiny_gea2_erd_client_init(
+      &this->gea2_erd_client_,
+      &this->timer_group_,
+      &this->gea2_interface_.interface,
+      this->gea2_client_queue_buffer_,
+      sizeof(this->gea2_client_queue_buffer_),
+      &gea2_client_configuration);
+    
+    ESP_LOGI(TAG, "GEA2 components initialized, waiting for MQTT to initialize bridge");
+  } else {
+    ESP_LOGI(TAG, "GEA2 disabled (no gea2_uart_id configured)");
+  }
+
   ESP_LOGCONFIG(TAG, "GE Appliances Bridge setup complete");
 }
 
@@ -116,12 +157,23 @@ void GeappliancesBridge::loop() {
   // Run GEA3 interface
   tiny_gea3_interface_run(&this->gea3_interface_);
 
+  // Run GEA2 interface if enabled
+  if (this->gea2_enabled_) {
+    tiny_gea2_interface_run(&this->gea2_interface_);
+  }
+
   // Initialize MQTT bridge when device ID is ready and MQTT is connected
   if (this->bridge_init_state_ == BRIDGE_INIT_STATE_WAITING_FOR_MQTT && 
       mqtt_client != nullptr && mqtt_client->is_connected()) {
     ESP_LOGI(TAG, "Device ID ready and MQTT connected, initializing MQTT bridge");
     this->initialize_mqtt_bridge_();
     this->bridge_init_state_ = BRIDGE_INIT_STATE_COMPLETE;
+  }
+
+  // Initialize GEA2 MQTT bridge when MQTT is connected (only once)
+  if (this->gea2_enabled_ && !this->gea2_bridge_initialized_ && 
+      mqtt_client != nullptr && mqtt_client->is_connected()) {
+    this->initialize_gea2_bridge_();
   }
 
   // Check for subscription activity timeout in auto mode
@@ -402,7 +454,7 @@ void GeappliancesBridge::dump_config() {
     ESP_LOGCONFIG(TAG, "  Device ID Generation: FAILED (see logs for details)");
   }
   ESP_LOGCONFIG(TAG, "  Client Address: 0x%02X", this->client_address_);
-  ESP_LOGCONFIG(TAG, "  UART Baud Rate: %lu", baud);
+  ESP_LOGCONFIG(TAG, "  UART Baud Rate: %lu", gea3_baud);
   
   // Display mode
   const char* mode_str = "Unknown";
@@ -422,11 +474,60 @@ void GeappliancesBridge::dump_config() {
   if (this->mode_ == BRIDGE_MODE_POLL || !this->subscription_mode_active_) {
     ESP_LOGCONFIG(TAG, "  Polling Interval: %u ms", this->polling_interval_ms_);
   }
+  
+  // Display GEA2 configuration if enabled
+  if (this->gea2_enabled_) {
+    ESP_LOGCONFIG(TAG, "GEA2 Bridge:");
+    ESP_LOGCONFIG(TAG, "  Enabled: YES");
+    if (!this->gea2_device_id_.empty()) {
+      ESP_LOGCONFIG(TAG, "  Device ID: %s", this->gea2_device_id_.c_str());
+    } else {
+      ESP_LOGCONFIG(TAG, "  Device ID: Auto-generated (gea2_<device>)");
+    }
+    ESP_LOGCONFIG(TAG, "  UART Baud Rate: %lu", gea2_baud);
+    ESP_LOGCONFIG(TAG, "  Polling Interval: %u ms", this->gea2_polling_interval_ms_);
+  } else {
+    ESP_LOGCONFIG(TAG, "GEA2 Bridge: Disabled (no gea2_uart_id configured)");
+  }
 }
 
 float GeappliancesBridge::get_setup_priority() const {
   // Run after UART (priority 600) and MQTT (priority 50)
   return setup_priority::DATA;  // Priority 600
+}
+
+void GeappliancesBridge::initialize_gea2_bridge_() {
+  if (this->gea2_bridge_initialized_) {
+    return;
+  }
+
+  ESP_LOGI(TAG, "Initializing GEA2 MQTT bridge");
+  
+  // Determine device ID for GEA2
+  std::string gea2_device_id;
+  if (!this->gea2_device_id_.empty()) {
+    gea2_device_id = this->gea2_device_id_;
+  } else if (!this->final_device_id_.empty()) {
+    // Use GEA3 device ID with gea2_ prefix
+    gea2_device_id = "gea2_" + this->final_device_id_;
+  } else {
+    // Fallback to generic name
+    gea2_device_id = "gea2_appliance";
+  }
+  
+  ESP_LOGI(TAG, "GEA2 Device ID: %s", gea2_device_id.c_str());
+  
+  // Initialize GEA2 MQTT client adapter
+  esphome_mqtt_client_adapter_init(&this->gea2_mqtt_client_adapter_, gea2_device_id.c_str());
+  
+  // Initialize GEA2 MQTT bridge
+  this->gea2_mqtt_bridge_.init(
+    &this->timer_group_,
+    &this->gea2_erd_client_.interface,
+    &this->gea2_mqtt_client_adapter_.interface);
+  
+  this->gea2_bridge_initialized_ = true;
+  ESP_LOGI(TAG, "GEA2 MQTT bridge initialized successfully");
 }
 
 }  // namespace geappliances_bridge
