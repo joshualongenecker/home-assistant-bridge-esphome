@@ -1,0 +1,45 @@
+name: ESPHome Compilation Test
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+
+jobs:
+  compile-test:
+    name: Compile ESPHome Configuration
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ESPHome
+        run: |
+          pip install --upgrade pip
+          pip install esphome
+
+      - name: Copy test secrets
+        run: |
+          cp doc/test-secrets.yaml doc/secrets.yaml
+
+      - name: Compile example configuration
+        run: |
+          esphome compile doc/test-compile.yaml
+
+      - name: Clean up secrets
+        if: always()
+        run: |
+          rm -f doc/secrets.yaml
