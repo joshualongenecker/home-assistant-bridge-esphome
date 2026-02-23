@@ -46,76 +46,37 @@ uart:
 
 # GE Appliances Bridge component
 geappliances_bridge:
-  # device_id: "YourDeviceId"  # Optional: Uncomment to use a custom device ID
   uart_id: gea3_uart
+  # device_id: "YourDeviceId"   # Default: auto generated    Uncomment to use a custom device ID
+  # mode: auto                  # Default: auto              Options: auto, subscribe, poll
+  # polling_interval: 10000     # Default: 10000 ms (10 seconds), used when in polling mode
 ```
 
-### Operation Modes
+## Configurable Parameters
 
-The component supports three modes for retrieving data from the appliance:
+### Mode
+
+The `mode` parameter is **optional**. 
 
 1. **Auto Mode (Default)** - The adapter starts with subscription mode and automatically falls back to polling mode if no ERD responses are received within 30 seconds. This provides the best of both worlds: real-time updates when possible, with automatic fallback for compatibility.
 
 2. **Subscribe Mode** - The adapter subscribes to ERD updates from the appliance. The appliance pushes changes as they occur.
 
-3. **Poll Mode** - The adapter actively polls the appliance for ERD values at a configurable interval.
-
-#### Configuration Options
-
-```yaml
-geappliances_bridge:
-  uart_id: gea3_uart
-  mode: auto  # Default: auto. Options: auto, subscribe, poll
-  polling_interval: 10000  # Default: 10000 ms (10 seconds), used when in polling mode
-```
-
-**Mode Recommendations:**
-- **auto** (Default) - Recommended for most use cases. Provides automatic compatibility detection.
-- **subscribe** - Use if you know your appliance supports subscription mode and want to ensure it stays in that mode.
-- **poll** - Use if you know your appliance requires polling mode or you want explicit control over update frequency.
-
-**Auto Mode Benefits:**
-- Automatic compatibility detection
-- No manual configuration required
-- Falls back to polling if subscription doesn't work
-
-**Subscribe Mode Benefits:**
-- Lower network overhead
-- Real-time updates when values change
-- Best for appliances with reliable subscription support
-
-**Poll Mode Benefits:**
-- Explicit control over update frequency
-- Guaranteed compatibility with all appliances
-- Predictable network traffic
+3. **Poll Mode** - The adapter actively polls the appliance for ERD values at a configurable interval `polling_interval`
 
 ### Auto-Generated Device ID
 
 The `device_id` parameter is **optional**. If not provided, the component will automatically generate a device ID by reading the following ERDs from the appliance:
 
-- **Appliance Type** (ERD 0x0008) - Single byte enum (converted to string name, e.g., "Dishwasher")
-- **Model Number** (ERD 0x0001) - 32 byte string
-- **Serial Number** (ERD 0x0002) - 32 byte string
+- **Appliance Type** (ERD 0x0008)
+- **Model Number** (ERD 0x0001)
+- **Serial Number** (ERD 0x0002)
 
 The auto-generated device ID format is: `ApplianceTypeName_ModelNumber_SerialNumber`
 
-The appliance type names are loaded from the [GE Appliances Public API Documentation](https://github.com/geappliances/public-appliance-api-documentation) library during the ESPHome build process. The library is automatically downloaded and cached like other dependencies, giving you control over when to update the appliance type definitions.
-
-Example:
-```yaml
-# Auto-generate device ID (recommended)
-geappliances_bridge:
-  uart_id: gea3_uart
-  
-# Or use a custom device ID
-geappliances_bridge:
-  device_id: "my_custom_id"
-  uart_id: gea3_uart
-```
+The appliance type names are loaded from the [GE Appliances Public API Documentation](https://github.com/geappliances/public-appliance-api-documentation) library during the ESPHome build process
 
 Generated device ID example: `Dishwasher_ZL4200ABC_12345678` (for appliance type 6 - Dishwasher)
-
-**Note:** The required libraries (`tiny`, `tiny-gea-api`, and `public-appliance-api-documentation`) are automatically fetched and compiled by ESPHome during the build process.
 
 See [components/geappliances_bridge/example.yaml](components/geappliances_bridge/example.yaml) for the complete configuration example.
 
@@ -123,7 +84,7 @@ See [components/geappliances_bridge/example.yaml](components/geappliances_bridge
 
 ### ERD List Generation
 
-The component uses an auto-generated ERD list (`erd_lists.h`) based on the [GE Appliances Public API Documentation](https://github.com/geappliances/public-appliance-api-documentation). The ERD list is automatically generated during the build process from `appliance_api_erd_definitions.json`.
+When polling, the device uses an auto-generated ERD list (`erd_lists.h`) based on the [GE Appliances Public API Documentation](https://github.com/geappliances/public-appliance-api-documentation). The ERD list is automatically generated during the build process from `appliance_api_erd_definitions.json`.
 
 **To manually regenerate the ERD list:**
 ```bash
