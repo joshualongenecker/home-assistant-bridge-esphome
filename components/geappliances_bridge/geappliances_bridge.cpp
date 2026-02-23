@@ -124,6 +124,11 @@ void GeappliancesBridge::loop() {
     this->bridge_init_state_ = BRIDGE_INIT_STATE_COMPLETE;
   }
 
+  // Check for subscription activity timeout in auto mode
+  if (this->mode_ == BRIDGE_MODE_AUTO && this->subscription_mode_active_) {
+    this->check_subscription_activity_();
+  }
+
   // Handle device ID generation state machine
   // Note: If state reaches DEVICE_ID_STATE_FAILED, device requires reboot to retry
   if (this->device_id_state_ == DEVICE_ID_STATE_READING_APPLIANCE_TYPE) {
@@ -160,6 +165,19 @@ void GeappliancesBridge::notify_mqtt_disconnected_() {
 }
 
 void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_on_activity_args_t* args) {
+  // Track subscription activity for auto mode
+  if (this->mode_ == BRIDGE_MODE_AUTO && this->subscription_mode_active_) {
+    // Check if this is a subscription publication (ERD data received from subscription)
+    if (this->mqtt_bridge_initialized_ && 
+        args->address == ERD_HOST_ADDRESS &&
+        args->type == tiny_gea3_erd_client_activity_type_subscription_publication_received) {
+      if (!this->subscription_activity_detected_) {
+        ESP_LOGI(TAG, "Subscription activity detected - subscription mode is working");
+        this->subscription_activity_detected_ = true;
+      }
+    }
+  }
+
   // Only process read responses for device ID ERDs before MQTT bridge is initialized
   if (!this->mqtt_bridge_initialized_ && args->address == ERD_HOST_ADDRESS) {
     if (args->type == tiny_gea3_erd_client_activity_type_read_completed) {
@@ -224,9 +242,26 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
   }
 
   ESP_LOGI(TAG, "Initializing MQTT bridge with device ID: %s", this->final_device_id_.c_str());
-  ESP_LOGI(TAG, "Using %s mode with polling interval: %u ms", 
-           this->polling_mode_ ? "polling" : "subscription",
-           this->polling_interval_ms_);
+  
+  // Determine the actual mode to use for initialization
+  bool use_polling = false;
+  const char* mode_name = "unknown";
+  
+  if (this->mode_ == BRIDGE_MODE_POLL) {
+    use_polling = true;
+    mode_name = "polling";
+  } else if (this->mode_ == BRIDGE_MODE_SUBSCRIBE) {
+    use_polling = false;
+    mode_name = "subscription";
+  } else if (this->mode_ == BRIDGE_MODE_AUTO) {
+    use_polling = false;
+    mode_name = "auto (starting with subscription)";
+    this->subscription_mode_active_ = true;
+    this->subscription_activity_detected_ = false;
+    this->subscription_start_time_ = millis();
+  }
+  
+  ESP_LOGI(TAG, "Using %s mode with polling interval: %u ms", mode_name, this->polling_interval_ms_);
 
   // Initialize MQTT client adapter
   esphome_mqtt_client_adapter_init(&this->mqtt_client_adapter_, this->final_device_id_.c_str());
@@ -238,7 +273,7 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
     &this->mqtt_client_adapter_.interface);
 
   // Initialize MQTT bridge based on mode
-  if (this->polling_mode_) {
+  if (use_polling) {
     mqtt_bridge_polling_init(
       &this->mqtt_bridge_polling_,
       &this->timer_group_,
@@ -316,6 +351,36 @@ bool GeappliancesBridge::try_read_erd_with_retry_(tiny_erd_t erd, const char* er
   }
 }
 
+void GeappliancesBridge::check_subscription_activity_() {
+  // If we already detected activity, no need to check
+  if (this->subscription_activity_detected_) {
+    return;
+  }
+  
+  // Check if timeout has elapsed
+  uint32_t elapsed = millis() - this->subscription_start_time_;
+  if (elapsed >= SUBSCRIPTION_TIMEOUT_MS) {
+    ESP_LOGW(TAG, "No subscription activity detected after %u seconds, falling back to polling mode", 
+             SUBSCRIPTION_TIMEOUT_MS / 1000);
+    
+    // Destroy the subscription bridge
+    mqtt_bridge_destroy(&this->mqtt_bridge_);
+    
+    // Initialize polling bridge
+    mqtt_bridge_polling_init(
+      &this->mqtt_bridge_polling_,
+      &this->timer_group_,
+      &this->erd_client_.interface,
+      &this->mqtt_client_adapter_.interface,
+      this->polling_interval_ms_);
+    
+    // Mark that we're no longer in subscription mode
+    this->subscription_mode_active_ = false;
+    
+    ESP_LOGI(TAG, "Successfully switched to polling mode");
+  }
+}
+
 void GeappliancesBridge::dump_config() {
   ESP_LOGCONFIG(TAG, "GE Appliances Bridge:");
   if (!this->configured_device_id_.empty()) {
@@ -335,8 +400,23 @@ void GeappliancesBridge::dump_config() {
   }
   ESP_LOGCONFIG(TAG, "  Client Address: 0x%02X", this->client_address_);
   ESP_LOGCONFIG(TAG, "  UART Baud Rate: %lu", baud);
-  ESP_LOGCONFIG(TAG, "  Mode: %s", this->polling_mode_ ? "Polling" : "Subscription");
-  if (this->polling_mode_) {
+  
+  // Display mode
+  const char* mode_str = "Unknown";
+  if (this->mode_ == BRIDGE_MODE_POLL) {
+    mode_str = "Polling";
+  } else if (this->mode_ == BRIDGE_MODE_SUBSCRIBE) {
+    mode_str = "Subscription";
+  } else if (this->mode_ == BRIDGE_MODE_AUTO) {
+    if (this->subscription_mode_active_) {
+      mode_str = "Auto (Subscription)";
+    } else {
+      mode_str = "Auto (Polling - fallback)";
+    }
+  }
+  ESP_LOGCONFIG(TAG, "  Mode: %s", mode_str);
+  
+  if (this->mode_ == BRIDGE_MODE_POLL || !this->subscription_mode_active_) {
     ESP_LOGCONFIG(TAG, "  Polling Interval: %u ms", this->polling_interval_ms_);
   }
 }

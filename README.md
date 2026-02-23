@@ -50,32 +50,44 @@ geappliances_bridge:
   uart_id: gea3_uart
 ```
 
-### Polling vs Subscription Mode
+### Operation Modes
 
-The component supports two modes for retrieving data from the appliance:
+The component supports three modes for retrieving data from the appliance:
 
-1. **Subscription Mode (Default)** - The adapter subscribes to ERD updates from the appliance. The appliance pushes changes as they occur.
+1. **Auto Mode (Default)** - The adapter starts with subscription mode and automatically falls back to polling mode if no ERD responses are received within 30 seconds. This provides the best of both worlds: real-time updates when possible, with automatic fallback for compatibility.
 
-2. **Polling Mode** - The adapter actively polls the appliance for ERD values at a configurable interval.
+2. **Subscribe Mode** - The adapter subscribes to ERD updates from the appliance. The appliance pushes changes as they occur.
+
+3. **Poll Mode** - The adapter actively polls the appliance for ERD values at a configurable interval.
 
 #### Configuration Options
 
 ```yaml
 geappliances_bridge:
   uart_id: gea3_uart
-  polling_mode: false  # Default: false (subscription mode)
-  polling_interval: 10000  # Default: 10000 ms (10 seconds), only used when polling_mode is true
+  mode: auto  # Default: auto. Options: auto, subscribe, poll
+  polling_interval: 10000  # Default: 10000 ms (10 seconds), used when in polling mode
 ```
 
-**When to use Polling Mode:**
-- If subscription mode is not reliably working with your appliance
-- If you want explicit control over update frequency
-- For appliances that may not support subscription mode properly
+**Mode Recommendations:**
+- **auto** (Default) - Recommended for most use cases. Provides automatic compatibility detection.
+- **subscribe** - Use if you know your appliance supports subscription mode and want to ensure it stays in that mode.
+- **poll** - Use if you know your appliance requires polling mode or you want explicit control over update frequency.
 
-**Subscription Mode Benefits:**
+**Auto Mode Benefits:**
+- Automatic compatibility detection
+- No manual configuration required
+- Falls back to polling if subscription doesn't work
+
+**Subscribe Mode Benefits:**
 - Lower network overhead
 - Real-time updates when values change
-- Recommended for most use cases
+- Best for appliances with reliable subscription support
+
+**Poll Mode Benefits:**
+- Explicit control over update frequency
+- Guaranteed compatibility with all appliances
+- Predictable network traffic
 
 ### Auto-Generated Device ID
 
