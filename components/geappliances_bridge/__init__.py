@@ -245,7 +245,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(GeappliancesBridge),
         cv.GenerateID(CONF_UART_ID): cv.use_id(uart.UARTComponent),
         cv.Optional(CONF_DEVICE_ID): cv.string,
-        cv.Optional(CONF_MODE, default=MODE_AUTO_VALUE): cv.enum(
+        cv.Optional(CONF_MODE, default=MODE_AUTO): cv.enum(
             {
                 MODE_POLL: MODE_POLL_VALUE,
                 MODE_SUBSCRIBE: MODE_SUBSCRIBE_VALUE,

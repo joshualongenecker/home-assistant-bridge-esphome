@@ -358,7 +358,9 @@ void GeappliancesBridge::check_subscription_activity_() {
   }
   
   // Check if timeout has elapsed
-  // Note: Unsigned subtraction wraps correctly even when millis() overflows
+  // Note: Unsigned subtraction wraps correctly even when millis() overflows (every ~49.7 days).
+  // This assumes the timeout check occurs at least once per overflow period, which is guaranteed
+  // since the timeout is 30 seconds and loop() runs continuously.
   uint32_t elapsed = millis() - this->subscription_start_time_;
   if (elapsed >= SUBSCRIPTION_TIMEOUT_MS) {
     ESP_LOGW(TAG, "No subscription activity detected after %u seconds, falling back to polling mode", 
