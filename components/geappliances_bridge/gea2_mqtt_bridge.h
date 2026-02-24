@@ -36,8 +36,7 @@ class Gea2MqttBridge {
 
   void destroy();
 
- private:
-  // State machine states
+  // State machine states (public for use in hsm_state_descriptors[])
   static tiny_hsm_result_t state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
   static tiny_hsm_result_t state_identify_appliance(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
   static tiny_hsm_result_t state_add_common_erds(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
@@ -45,6 +44,7 @@ class Gea2MqttBridge {
   static tiny_hsm_result_t state_add_appliance_erds(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
   static tiny_hsm_result_t state_poll_erds_from_list(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
 
+ private:
   // Helper functions
   bool valid_polling_list_loaded();
   void save_polling_list_to_nv_store();
