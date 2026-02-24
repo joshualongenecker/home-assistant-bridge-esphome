@@ -402,7 +402,16 @@ void GeappliancesBridge::dump_config() {
     ESP_LOGCONFIG(TAG, "  Device ID Generation: FAILED (see logs for details)");
   }
   ESP_LOGCONFIG(TAG, "  Client Address: 0x%02X", this->client_address_);
-  ESP_LOGCONFIG(TAG, "  UART Baud Rate: %lu", baud);
+  
+  // Display UART configuration
+  ESP_LOGCONFIG(TAG, "  UART Configuration:");
+  if (!this->uart_tx_pin_.empty()) {
+    ESP_LOGCONFIG(TAG, "    TX Pin: %s", this->uart_tx_pin_.c_str());
+  }
+  if (!this->uart_rx_pin_.empty()) {
+    ESP_LOGCONFIG(TAG, "    RX Pin: %s", this->uart_rx_pin_.c_str());
+  }
+  ESP_LOGCONFIG(TAG, "    Baud Rate: %u", this->uart_baud_rate_);
   
   // Display mode
   const char* mode_str = "Unknown";

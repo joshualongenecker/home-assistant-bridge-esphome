@@ -3,9 +3,13 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins
 from esphome.components import uart, mqtt
+from esphome.core import CORE
 from esphome.const import (
     CONF_ID,
     CONF_UART_ID,
+    CONF_BAUD_RATE,
+    CONF_TX_PIN,
+    CONF_RX_PIN,
 )
 import json
 import os
@@ -273,6 +277,33 @@ async def to_code(config):
     # Get UART component reference
     uart_component = await cg.get_variable(config[CONF_UART_ID])
     cg.add(var.set_uart(uart_component))
+
+    # Get UART configuration from global config to pass pin information
+    # This allows the component to display the actual UART configuration in logs
+    uart_id = config[CONF_UART_ID]
+    if CORE.config and "uart" in CORE.config:
+        uart_configs = CORE.config["uart"]
+        # uart_configs might be a single dict or a list of dicts
+        if not isinstance(uart_configs, list):
+            uart_configs = [uart_configs]
+        
+        # Find the UART config that matches our ID
+        for uart_config in uart_configs:
+            if uart_config.get(CONF_ID) == uart_id:
+                # Extract pin information and baud rate
+                if CONF_TX_PIN in uart_config:
+                    tx_pin_str = str(uart_config[CONF_TX_PIN])
+                    cg.add(var.set_uart_tx_pin(tx_pin_str))
+                
+                if CONF_RX_PIN in uart_config:
+                    rx_pin_str = str(uart_config[CONF_RX_PIN])
+                    cg.add(var.set_uart_rx_pin(rx_pin_str))
+                
+                if CONF_BAUD_RATE in uart_config:
+                    baud_rate = uart_config[CONF_BAUD_RATE]
+                    cg.add(var.set_uart_baud_rate(baud_rate))
+                
+                break
 
     # Set device ID if provided, otherwise it will be auto-generated
     if CONF_DEVICE_ID in config:

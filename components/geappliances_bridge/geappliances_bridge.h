@@ -33,8 +33,6 @@ enum BridgeMode {
 
 class GeappliancesBridge : public Component {
  public:
-  static constexpr unsigned long baud = 230400;
-
   void setup() override;
   void loop() override;
   void dump_config() override;
@@ -44,6 +42,9 @@ class GeappliancesBridge : public Component {
   void set_device_id(const std::string &device_id) { this->configured_device_id_ = device_id; }
   void set_mode(uint8_t mode) { this->mode_ = static_cast<BridgeMode>(mode); }
   void set_polling_interval(uint32_t polling_interval) { this->polling_interval_ms_ = polling_interval; }
+  void set_uart_tx_pin(const std::string &tx_pin) { this->uart_tx_pin_ = tx_pin; }
+  void set_uart_rx_pin(const std::string &rx_pin) { this->uart_rx_pin_ = rx_pin; }
+  void set_uart_baud_rate(uint32_t baud_rate) { this->uart_baud_rate_ = baud_rate; }
 
  protected:
   void on_mqtt_connected_();
@@ -79,6 +80,11 @@ class GeappliancesBridge : public Component {
   bool mqtt_bridge_initialized_{false};
   BridgeMode mode_{BRIDGE_MODE_AUTO};
   uint32_t polling_interval_ms_{10000};
+  
+  // UART configuration for logging/display
+  std::string uart_tx_pin_;
+  std::string uart_rx_pin_;
+  uint32_t uart_baud_rate_{230400};  // Default baud rate
   
   // Auto mode fallback tracking
   bool subscription_mode_active_{false};
