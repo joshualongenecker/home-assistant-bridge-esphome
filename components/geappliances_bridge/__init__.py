@@ -252,7 +252,7 @@ def format_pin_for_display(pin):
         pin: Pin configuration which can be a string, int, or pin object
         
     Returns:
-        Formatted pin string (e.g., "GPIO21")
+        str: Formatted pin string (e.g., "GPIO21")
     """
     # Pin might be a string (e.g., "GPIO21"), int (e.g., 21), or a pin object
     if hasattr(pin, 'number'):
@@ -261,11 +261,8 @@ def format_pin_for_display(pin):
     elif isinstance(pin, int):
         # Integer pin number
         return f"GPIO{pin}"
-    elif isinstance(pin, str):
-        # String representation (might already include GPIO prefix)
-        return str(pin)
     else:
-        # Fallback to string representation
+        # String or other type - convert to string
         return str(pin)
 
 
