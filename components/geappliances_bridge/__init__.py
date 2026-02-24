@@ -292,11 +292,33 @@ async def to_code(config):
             if uart_config.get(CONF_ID) == uart_id:
                 # Extract pin information and baud rate
                 if CONF_TX_PIN in uart_config:
-                    tx_pin_str = str(uart_config[CONF_TX_PIN])
+                    tx_pin = uart_config[CONF_TX_PIN]
+                    # Pin might be a string (e.g., "GPIO21") or a pin object
+                    # Extract the most useful representation for logging
+                    if hasattr(tx_pin, 'number'):
+                        # Pin object with number attribute
+                        tx_pin_str = f"GPIO{tx_pin.number}"
+                    elif isinstance(tx_pin, (int, str)):
+                        # Already a simple value
+                        tx_pin_str = str(tx_pin)
+                    else:
+                        # Fallback to string representation
+                        tx_pin_str = str(tx_pin)
                     cg.add(var.set_uart_tx_pin(tx_pin_str))
                 
                 if CONF_RX_PIN in uart_config:
-                    rx_pin_str = str(uart_config[CONF_RX_PIN])
+                    rx_pin = uart_config[CONF_RX_PIN]
+                    # Pin might be a string (e.g., "GPIO20") or a pin object
+                    # Extract the most useful representation for logging
+                    if hasattr(rx_pin, 'number'):
+                        # Pin object with number attribute
+                        rx_pin_str = f"GPIO{rx_pin.number}"
+                    elif isinstance(rx_pin, (int, str)):
+                        # Already a simple value
+                        rx_pin_str = str(rx_pin)
+                    else:
+                        # Fallback to string representation
+                        rx_pin_str = str(rx_pin)
                     cg.add(var.set_uart_rx_pin(rx_pin_str))
                 
                 if CONF_BAUD_RATE in uart_config:
