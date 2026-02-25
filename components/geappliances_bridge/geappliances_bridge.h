@@ -88,6 +88,7 @@ class GeappliancesBridge : public Component {
   std::string generated_device_id_;
   std::string final_device_id_;
   uint8_t client_address_{0xE4};
+  bool gea3_enabled_{false};
   bool mqtt_was_connected_{false};
   bool mqtt_bridge_initialized_{false};
   BridgeMode mode_{BRIDGE_MODE_AUTO};

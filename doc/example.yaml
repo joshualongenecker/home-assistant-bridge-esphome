@@ -56,8 +56,10 @@ uart:
   #   baud_rate: 19200
 
 # GE Appliances Bridge component
+# NOTE: At least one of uart_id (GEA3) or gea2_uart_id (GEA2) must be configured.
+# You can use GEA3 only, GEA2 only, or both simultaneously.
 geappliances_bridge:
-  # GEA3 configuration (newer appliances)
+  # GEA3 configuration (newer appliances) - comment out uart_id for GEA2-only setup
   uart_id: gea3_uart
   # device_id: "YourDeviceId"   # Optional: Uncomment to use a custom device ID
   # mode: auto                  # Default: auto   Options: auto, subscribe, poll
