@@ -2,6 +2,21 @@
 # This file contains the setup steps required for Copilot to successfully compile ESPHome
 # These steps allow Copilot to debug build issues and test changes to the ESPHome component
 
+# Copilot Coding Agent Setup Steps for ESPHome Compilation
+# This file is automatically executed when the Copilot coding agent starts.
+# It sets up the environment so the agent can compile and test ESPHome configurations.
+#
+# Format: GitHub Actions-style steps with 'name' and 'run' fields.
+steps:
+  - name: "Initialize Git submodules"
+    run: git submodule update --init --recursive
+  - name: "Install ESPHome"
+    run: |
+      pip3 install --upgrade pip
+      pip3 install esphome
+  - name: "Setup test secrets"
+    run: cp doc/test-secrets.yaml doc/secrets.yaml
+
 setup_steps:
   - name: Initialize Git Submodules
     description: Initialize and update all git submodules required for the build
