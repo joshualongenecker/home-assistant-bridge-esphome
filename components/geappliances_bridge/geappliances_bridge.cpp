@@ -16,6 +16,7 @@ static const tiny_gea3_erd_client_configuration_t client_configuration = {
 static constexpr tiny_erd_t ERD_MODEL_NUMBER = 0x0001;
 static constexpr tiny_erd_t ERD_SERIAL_NUMBER = 0x0002;
 static constexpr tiny_erd_t ERD_APPLIANCE_TYPE = 0x0008;
+// GEA3 appliance host address (GEA2 uses 0xA0, defined in gea2_mqtt_bridge.cpp)
 static constexpr uint8_t ERD_HOST_ADDRESS = 0xC0;
 
 void GeappliancesBridge::setup() {
