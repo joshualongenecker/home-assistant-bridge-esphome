@@ -159,8 +159,8 @@ bool Gea2MqttBridge::send_next_read_request() {
   bool more_erds_to_try = (erd_index_ < appliance_erd_list_count_);
   if (more_erds_to_try) {
     request_id_++;
-    ESP_LOGD(TAG, "GEA2 TX: Src=0xE4 Dst=0x%02X ERD=0x%04X (READ_REQUEST - DISCOVERY)", 
-             erd_host_address_, appliance_erd_list_[erd_index_]);
+    ESP_LOGD(TAG, "GEA2 TX: Cmd=0xF0 Src=0xE4 Dst=0x%02X ERD=0x%04X ReqID=%d (READ_REQUEST - DISCOVERY)", 
+             erd_host_address_, appliance_erd_list_[erd_index_], request_id_);
     tiny_gea2_erd_client_read(erd_client_, &request_id_, erd_host_address_, 
                                appliance_erd_list_[erd_index_]);
     arm_timer(retry_delay);
@@ -189,8 +189,8 @@ void Gea2MqttBridge::send_next_poll_read_request() {
     erd_index_ = 0;
   }
   request_id_++;
-  ESP_LOGD(TAG, "GEA2 TX: Src=0xE4 Dst=0x%02X ERD=0x%04X (READ_REQUEST)", 
-           erd_host_address_, erd_polling_list_[erd_index_]);
+  ESP_LOGD(TAG, "GEA2 TX: Cmd=0xF0 Src=0xE4 Dst=0x%02X ERD=0x%04X ReqID=%d (READ_REQUEST - POLL)", 
+           erd_host_address_, erd_polling_list_[erd_index_], request_id_);
   tiny_gea2_erd_client_read(erd_client_, &request_id_, erd_host_address_,
                              erd_polling_list_[erd_index_]);
   arm_timer(retry_delay);
@@ -204,8 +204,14 @@ tiny_hsm_result_t Gea2MqttBridge::state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t s
   switch(signal) {
     case signal_write_requested: {
       auto args = reinterpret_cast<const mqtt_client_on_write_request_args_t*>(data);
-      ESP_LOGD(TAG, "GEA2 TX: Src=0xE4 Dst=0x%02X ERD=0x%04X Size=%d (WRITE_REQUEST)", 
-               self->erd_host_address_, args->erd, args->size);
+      // Log write request with hex dump of data
+      char hex_str[256];
+      int offset = 0;
+      for (uint8_t i = 0; i < args->size && offset < (int)sizeof(hex_str) - 3; i++) {
+        offset += snprintf(hex_str + offset, sizeof(hex_str) - offset, "%02X ", args->value[i]);
+      }
+      ESP_LOGD(TAG, "GEA2 TX: Cmd=0xF1 Src=0xE4 Dst=0x%02X ERD=0x%04X Size=%d ReqID=%d Data=[%s](WRITE_REQUEST)", 
+               self->erd_host_address_, args->erd, args->size, self->request_id_, hex_str);
       tiny_gea2_erd_client_write(self->erd_client_, &self->request_id_, self->erd_host_address_,
                                   args->erd, args->value, args->size);
       break;
@@ -234,7 +240,7 @@ tiny_hsm_result_t Gea2MqttBridge::state_identify_appliance(tiny_hsm_t* hsm, tiny
       
     case signal_timer_expired:
       // Use broadcast address (0xFF) to discover all appliances on the bus
-      ESP_LOGD(TAG, "GEA2 TX: Src=0xE4 Dst=0xFF ERD=0x0008 (READ_REQUEST - BROADCAST)");
+      ESP_LOGD(TAG, "GEA2 TX: Cmd=0xF0 Src=0xE4 Dst=0xFF ERD=0x0008 ReqID=%d (READ_REQUEST - BROADCAST)", self->request_id_);
       tiny_gea2_erd_client_read(self->erd_client_, &self->request_id_, 0xFF, 0x0008);
       self->arm_timer(retry_delay);
       break;
@@ -285,8 +291,8 @@ tiny_hsm_result_t Gea2MqttBridge::state_add_common_erds(tiny_hsm_t* hsm, tiny_hs
       ESP_LOGI(TAG, "Looking for %d common ERDs", self->appliance_erd_list_count_);
       self->erd_index_ = 0;
       self->polling_list_count_ = 0;
-      ESP_LOGD(TAG, "GEA2 TX: Src=0xE4 Dst=0x%02X ERD=0x%04X (READ_REQUEST - DISCOVERY)", 
-               self->erd_host_address_, self->appliance_erd_list_[self->erd_index_]);
+      ESP_LOGD(TAG, "GEA2 TX: Cmd=0xF0 Src=0xE4 Dst=0x%02X ERD=0x%04X ReqID=%d (READ_REQUEST - DISCOVERY)", 
+               self->erd_host_address_, self->appliance_erd_list_[self->erd_index_], self->request_id_);
       tiny_gea2_erd_client_read(self->erd_client_, &self->request_id_, self->erd_host_address_,
                                  self->appliance_erd_list_[self->erd_index_]);
       self->arm_timer(retry_delay);
@@ -486,26 +492,34 @@ void Gea2MqttBridge::init(
       
       // Log all raw GEA2 bus activity
       switch(args->type) {
-        case tiny_gea2_erd_client_activity_type_read_completed:
-          ESP_LOGD(TAG, "GEA2 RX: Src=0x%02X Dst=0xE4 ERD=0x%04X Size=%d (READ_RESPONSE)", 
-                   args->address, args->read_completed.erd, args->read_completed.data_size);
+        case tiny_gea2_erd_client_activity_type_read_completed: {
+          // Log read response with hex dump of data
+          char hex_str[256];
+          int offset = 0;
+          for (uint8_t i = 0; i < args->read_completed.data_size && offset < (int)sizeof(hex_str) - 3; i++) {
+            offset += snprintf(hex_str + offset, sizeof(hex_str) - offset, "%02X ", 
+                             ((const uint8_t*)args->read_completed.data)[i]);
+          }
+          ESP_LOGD(TAG, "GEA2 RX: Cmd=0xF0 Src=0x%02X Dst=0xE4 ERD=0x%04X Size=%d Data=[%s](READ_RESPONSE)", 
+                   args->address, args->read_completed.erd, args->read_completed.data_size, hex_str);
           tiny_hsm_send_signal(&self->hsm_, signal_read_completed, args);
           break;
+        }
           
         case tiny_gea2_erd_client_activity_type_read_failed:
-          ESP_LOGD(TAG, "GEA2 READ_FAILED: Dst=0x%02X ERD=0x%04X Reason=%d", 
+          ESP_LOGD(TAG, "GEA2 READ_FAILED: Cmd=0xF0 Dst=0x%02X ERD=0x%04X Reason=%d", 
                    args->address, args->read_failed.erd, args->read_failed.reason);
           tiny_hsm_send_signal(&self->hsm_, signal_read_failed, args);
           break;
           
         case tiny_gea2_erd_client_activity_type_write_completed:
-          ESP_LOGD(TAG, "GEA2 RX: Src=0x%02X Dst=0xE4 ERD=0x%04X (WRITE_RESPONSE)", 
+          ESP_LOGD(TAG, "GEA2 RX: Cmd=0xF1 Src=0x%02X Dst=0xE4 ERD=0x%04X (WRITE_RESPONSE)", 
                    args->address, args->write_completed.erd);
           mqtt_client_update_erd_write_result(self->mqtt_client_, args->write_completed.erd, true, 0);
           break;
           
         case tiny_gea2_erd_client_activity_type_write_failed:
-          ESP_LOGD(TAG, "GEA2 WRITE_FAILED: Dst=0x%02X ERD=0x%04X Reason=%d", 
+          ESP_LOGD(TAG, "GEA2 WRITE_FAILED: Cmd=0xF1 Dst=0x%02X ERD=0x%04X Reason=%d", 
                    args->address, args->write_failed.erd, args->write_failed.reason);
           mqtt_client_update_erd_write_result(self->mqtt_client_, args->write_failed.erd, false, 
                                                 args->write_failed.reason);
