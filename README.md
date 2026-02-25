@@ -134,3 +134,16 @@ The tests cover:
 - Subscription management
 - ERD publication handling
 - Uptime monitoring
+- **Application-level integration tests** (simulated appliance testing)
+
+#### Simulated Application Testing
+
+The project includes simulated application-level tests that validate complete workflows without physical hardware:
+
+- **Device ID generation** - Simulating ERD reads for appliance identification
+- **Subscription mode** - Testing ERD publications and MQTT publishing
+- **Polling mode** - Testing periodic ERD polling
+- **MQTT write forwarding** - Testing write requests from Home Assistant
+- **Error handling** - Testing failure scenarios and retry logic
+
+See [test/simulation/README.md](test/simulation/README.md) for detailed information about the simulation testing framework and examples of how to create comprehensive appliance simulation tests.
