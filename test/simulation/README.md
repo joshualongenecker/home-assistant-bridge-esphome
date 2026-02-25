@@ -5,10 +5,12 @@ This directory contains application-level integration tests that simulate the co
 ## Overview
 
 The simulation testing framework allows testing of:
+- **Configuration-based testing** - Different YAML configuration scenarios
 - Complete application workflows (device ID generation, subscription, polling)
 - GEA3/GEA2 protocol interactions with mock appliance responses
 - MQTT bridge behavior with simulated ERD reads/writes
 - Mode switching (subscription mode fallback to polling mode)
+- Multiple appliance types (dishwashers, refrigerators, washers)
 
 ## Architecture
 
@@ -25,6 +27,18 @@ These doubles allow simulating:
 
 ## Test Structure
 
+### `configuration_tests.cpp`
+
+Comprehensive configuration-based tests that simulate different YAML scenarios:
+
+- **Subscription Mode Tests** - Various appliance types (dishwasher, refrigerator, washer)
+- **Polling Mode Tests** - Different polling intervals (5s, 10s, 30s)
+- **ERD Handling** - Multiple ERD sizes and rapid updates
+- **MQTT Write Requests** - Forwarding writes from Home Assistant
+- **Mixed Scenarios** - Real-world appliance behavior patterns
+
+Each test documents the YAML configuration it simulates.
+
 ### `application_level_test.cpp`
 
 Contains high-level integration tests that validate complete workflows:
@@ -34,6 +48,10 @@ Contains high-level integration tests that validate complete workflows:
 - **Polling Mode** - Tests periodic ERD polling and MQTT publishing
 - **MQTT Write Forwarding** - Tests MQTT write requests being forwarded to the appliance
 - **Mode Fallback** - Tests automatic fallback from subscription to polling mode
+
+### `appliance_simulation_examples.cpp`
+
+Example tests showing advanced simulation patterns and multi-step workflows.
 
 ## Running the Tests
 
@@ -69,34 +87,81 @@ To add new simulation tests:
 
 ## Example Test Scenario
 
-Here's an example of testing the complete subscription workflow:
+Here's an example of testing a specific YAML configuration:
+
+```yaml
+# YAML Configuration being tested
+geappliances_bridge:
+  uart_id: gea3_uart
+  mode: subscribe
+```
 
 ```cpp
-TEST(application_level, subscription_workflow)
+// Test implementation
+TEST(configuration_based_tests, subscription_mode_dishwasher)
 {
   // Initialize bridge in subscription mode
-  initialize_mqtt_bridge_subscription_mode();
+  configure_subscription_mode();
+  simulate_subscription_added();
   
-  // Expect subscription request
+  // Simulate dishwasher cycle state change
+  uint8_t cycle_state[] = {0x01};
+  
   mock()
-    .expectOneCall("subscribe")
-    .withParameter("address", appliance_address)
-    .andReturnValue(true);
+    .expectOneCall("register_erd")
+    .withParameter("erd", ERD_CYCLE_STATE);
   
-  // Simulate subscription confirmed
-  simulate_subscription_added(appliance_address);
-  
-  // Simulate ERD publication
-  uint8_t data[] = {0x12, 0x34};
   mock()
-    .expectOneCall("publish")
-    .withParameter("erd", test_erd);
+    .expectOneCall("update_erd")
+    .withParameter("erd", ERD_CYCLE_STATE)
+    .withMemoryBufferParameter("value", cycle_state, sizeof(cycle_state));
   
-  simulate_erd_publication(test_erd, data, sizeof(data));
+  simulate_erd_publication(ERD_CYCLE_STATE, cycle_state, sizeof(cycle_state));
   
   mock().checkExpectations();
 }
 ```
+
+## Configuration Scenarios Tested
+
+The test suite covers various YAML configuration scenarios:
+
+1. **Subscription Mode with Different Appliances**
+   ```yaml
+   geappliances_bridge:
+     uart_id: gea3_uart
+     mode: subscribe
+   ```
+   - Dishwasher cycle operations
+   - Refrigerator temperature monitoring
+   - Washer/dryer status updates
+
+2. **Polling Mode with Different Intervals**
+   ```yaml
+   geappliances_bridge:
+     uart_id: gea3_uart
+     mode: poll
+     polling_interval: 10000  # or 5000, 30000
+   ```
+   - Fast polling (5 seconds) for responsive appliances
+   - Default polling (10 seconds) for balanced performance
+   - Slow polling (30 seconds) for reduced network traffic
+
+3. **Auto Mode** (future implementation)
+   ```yaml
+   geappliances_bridge:
+     uart_id: gea3_uart
+     mode: auto
+   ```
+   - Start with subscription, fallback to polling if no activity
+
+4. **Custom Device ID**
+   ```yaml
+   geappliances_bridge:
+     uart_id: gea3_uart
+     device_id: "MyCustomID"
+   ```
+   - Use configured ID instead of auto-generation
 
 ## Future Enhancements
 

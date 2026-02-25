@@ -8,13 +8,24 @@ This document summarizes the implementation of simulated application-level testi
 
 ### 1. Testing Infrastructure
 
-Created a new simulation testing framework in `test/simulation/` that enables:
+Created a comprehensive simulation testing framework in `test/simulation/` that enables:
 
+- **Configuration-based testing** with different YAML scenarios
 - **Application-level integration testing** without physical hardware
 - **Realistic appliance simulation** using existing test doubles
 - **Complete workflow validation** from MQTT to GEA3 protocol and back
 
 ### 2. Core Components
+
+#### `configuration_tests.cpp` (NEW - 10 comprehensive tests)
+Validates different YAML configuration scenarios:
+- **Subscription mode** with dishwasher, refrigerator, and washer appliances
+- **Polling mode** with fast (5s), default (10s), and slow (30s) intervals
+- **Mixed ERD handling** - Various data sizes and rapid update scenarios
+- **MQTT write forwarding** - Home Assistant to appliance communication
+- **Subscription retention** - Long-running subscription behavior
+
+Each test documents the YAML configuration it validates.
 
 #### `test/simulation/application_level_test.cpp`
 Basic integration tests demonstrating:
@@ -104,11 +115,33 @@ mock().expectOneCall("update_erd")
 ## Test Coverage
 
 Current test suite includes:
-- 28 total tests (17 original + 5 basic + 6 example scenarios)
-- 49 assertions
+- **38 total tests** (17 original + 5 basic + 6 examples + 10 configuration tests)
+- **81 assertions** validating behavior
 - All tests passing
 - Covers both subscription and polling modes
-- Demonstrates multi-step workflows
+- Tests multiple appliance types and configurations
+- Validates different YAML configuration scenarios
+
+### Configuration Coverage
+
+The comprehensive configuration tests validate:
+
+1. **Subscription Mode Scenarios**
+   - Dishwasher cycle and door status
+   - Refrigerator temperatures and ice maker
+   - Washer cycle and time remaining
+   - Rapid ERD updates
+   - Mixed ERD data sizes
+
+2. **Polling Mode Scenarios**
+   - Fast polling (5 second interval)
+   - Default polling (10 second interval)
+   - Slow polling (30 second interval)
+
+3. **Communication Patterns**
+   - MQTT write request forwarding
+   - Subscription retention
+   - Multiple concurrent ERD updates
 
 ## Future Enhancements
 
@@ -157,12 +190,14 @@ make clean && make test
 test/
 ├── simulation/
 │   ├── README.md                          # Detailed documentation
+│   ├── IMPLEMENTATION_SUMMARY.md          # This file
+│   ├── configuration_tests.cpp            # Comprehensive YAML config tests (NEW)
 │   ├── application_level_test.cpp         # Basic integration tests
-│   └── appliance_simulation_examples.cpp  # Comprehensive examples
+│   └── appliance_simulation_examples.cpp  # Advanced examples
 ├── tests/
-│   ├── mqtt_bridge_test.cpp              # Original unit tests
-│   └── uptime_monitor_test.cpp           # Original unit tests
-└── test_runner.cpp                        # CppUTest main
+│   ├── mqtt_bridge_test.cpp               # Original unit tests
+│   └── uptime_monitor_test.cpp            # Original unit tests
+└── test_runner.cpp                         # CppUTest main
 ```
 
 ## Conclusion
@@ -171,12 +206,14 @@ This implementation provides a solid foundation for simulated application-level 
 
 - ✅ Enables testing without physical hardware
 - ✅ Validates complete application workflows
+- ✅ **Tests different YAML configuration scenarios**
+- ✅ **Covers multiple appliance types and behaviors**
 - ✅ Uses existing test infrastructure efficiently
 - ✅ Is well-documented and easy to extend
 - ✅ Includes practical examples
 - ✅ Integrates seamlessly with the build system
 
-The simulation testing framework allows developers to validate GEA bridge behavior early in development, test edge cases easily, and prevent regressions - all without requiring physical access to appliances.
+The simulation testing framework allows developers to validate GEA bridge behavior early in development, test edge cases easily, and prevent regressions - all without requiring physical access to appliances. **The comprehensive configuration tests ensure that various YAML configuration scenarios work correctly across different appliance types and operational modes.**
 
 ## References
 
