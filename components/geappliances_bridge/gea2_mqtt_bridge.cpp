@@ -207,8 +207,9 @@ tiny_hsm_result_t Gea2MqttBridge::state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t s
       // Log write request with hex dump of data
       char hex_str[256];
       int offset = 0;
+      const uint8_t* data_bytes = static_cast<const uint8_t*>(args->value);
       for (uint8_t i = 0; i < args->size && offset < (int)sizeof(hex_str) - 3; i++) {
-        offset += snprintf(hex_str + offset, sizeof(hex_str) - offset, "%02X ", args->value[i]);
+        offset += snprintf(hex_str + offset, sizeof(hex_str) - offset, "%02X ", data_bytes[i]);
       }
       ESP_LOGD(TAG, "GEA2 TX: Cmd=0xF1 Src=0xE4 Dst=0x%02X ERD=0x%04X Size=%d ReqID=%d Data=[%s](WRITE_REQUEST)", 
                self->erd_host_address_, args->erd, args->size, self->request_id_, hex_str);
