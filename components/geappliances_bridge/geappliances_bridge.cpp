@@ -512,6 +512,7 @@ void GeappliancesBridge::dump_config() {
   if (this->gea2_enabled_) {
     ESP_LOGCONFIG(TAG, "GEA2 Bridge:");
     ESP_LOGCONFIG(TAG, "  Enabled: YES");
+    ESP_LOGCONFIG(TAG, "  Board Address: 0x%02X", this->gea2_client_address_);
     if (!this->gea2_device_id_.empty()) {
       ESP_LOGCONFIG(TAG, "  Device ID: %s", this->gea2_device_id_.c_str());
     } else {

@@ -54,6 +54,7 @@ class GeappliancesBridge : public Component {
   void set_gea2_uart(uart::UARTComponent *uart) { this->gea2_uart_ = uart; }
   void set_gea2_device_id(const std::string &device_id) { this->gea2_device_id_ = device_id; }
   void set_gea2_polling_interval(uint32_t polling_interval) { this->gea2_polling_interval_ms_ = polling_interval; }
+  void set_gea2_address(uint8_t address) { this->gea2_client_address_ = address; }
 
  protected:
   void on_mqtt_connected_();

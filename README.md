@@ -87,6 +87,7 @@ geappliances_bridge:
   gea2_uart_id: gea2_uart
   # gea2_device_id: "MyGEA2Device"    # Optional: custom device ID, default: auto-generated
   # gea2_polling_interval: 3000       # Default: 3000 ms (3 seconds)
+  # gea2_address: 0xE4                # Default: 0xE4 - board address on the GEA2 bus
 ```
 
 ### Both GEA3 and GEA2 Configuration
@@ -163,6 +164,10 @@ The `gea2_device_id` parameter is **optional**. If not provided, the component w
 The `gea2_polling_interval` parameter is **optional**. Default: 3000 ms (3 seconds).
 
 GEA2 polling is slower than GEA3 due to the lower baud rate (19200 vs 230400). The component automatically discovers available ERDs by polling and stores them in non-volatile storage (NVS) to persist across reboots.
+
+#### gea2_address
+
+The `gea2_address` parameter is **optional**. Default: `0xE4`. This is the board's address on the GEA2 bus — the address the ESP32 uses as its source address when communicating with the appliance. Most users won't need to change this.
 
 **ERD Discovery Process:**
 1. Polls for appliance type (ERD 0x0008) to identify the appliance

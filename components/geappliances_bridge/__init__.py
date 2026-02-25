@@ -26,6 +26,7 @@ CONF_POLLING_INTERVAL = "polling_interval"
 CONF_GEA2_UART_ID = "gea2_uart_id"
 CONF_GEA2_POLLING_INTERVAL = "gea2_polling_interval"
 CONF_GEA2_DEVICE_ID = "gea2_device_id"
+CONF_GEA2_ADDRESS = "gea2_address"
 
 # Mode options
 MODE_POLL = "poll"
@@ -271,6 +272,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_GEA2_UART_ID): cv.use_id(uart.UARTComponent),
             cv.Optional(CONF_GEA2_POLLING_INTERVAL, default=3000): cv.positive_int,
             cv.Optional(CONF_GEA2_DEVICE_ID): cv.string,
+            cv.Optional(CONF_GEA2_ADDRESS, default=0xE4): cv.hex_uint8_t,
         }
     ).extend(cv.COMPONENT_SCHEMA),
     _validate_at_least_one_uart,
@@ -307,6 +309,7 @@ async def to_code(config):
         gea2_uart_component = await cg.get_variable(config[CONF_GEA2_UART_ID])
         cg.add(var.set_gea2_uart(gea2_uart_component))
         cg.add(var.set_gea2_polling_interval(config[CONF_GEA2_POLLING_INTERVAL]))
+        cg.add(var.set_gea2_address(config[CONF_GEA2_ADDRESS]))
         
         if CONF_GEA2_DEVICE_ID in config:
             cg.add(var.set_gea2_device_id(config[CONF_GEA2_DEVICE_ID]))
