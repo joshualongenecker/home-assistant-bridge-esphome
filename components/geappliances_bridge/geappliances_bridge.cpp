@@ -16,7 +16,7 @@ static const tiny_gea3_erd_client_configuration_t client_configuration = {
 static constexpr tiny_erd_t ERD_MODEL_NUMBER = 0x0001;
 static constexpr tiny_erd_t ERD_SERIAL_NUMBER = 0x0002;
 static constexpr tiny_erd_t ERD_APPLIANCE_TYPE = 0x0008;
-// GEA3 appliance host address (GEA2 uses 0xA0, defined in gea2_mqtt_bridge.cpp)
+// GEA3 appliance host address (GEA2 host address is configurable via gea2_address, default 0xA0)
 static constexpr uint8_t ERD_HOST_ADDRESS = 0xC0;
 
 void GeappliancesBridge::setup() {
@@ -117,7 +117,7 @@ void GeappliancesBridge::setup() {
       &this->gea2_uart_adapter_.interface,
       esphome_time_source_init(),
       &this->gea2_fake_msec_interrupt_.interface,
-      this->gea2_client_address_,
+      0xE4,  // Board/client address (fixed)
       this->gea2_send_queue_buffer_,
       sizeof(this->gea2_send_queue_buffer_),
       this->gea2_receive_buffer_,
@@ -512,7 +512,7 @@ void GeappliancesBridge::dump_config() {
   if (this->gea2_enabled_) {
     ESP_LOGCONFIG(TAG, "GEA2 Bridge:");
     ESP_LOGCONFIG(TAG, "  Enabled: YES");
-    ESP_LOGCONFIG(TAG, "  Board Address: 0x%02X", this->gea2_client_address_);
+    ESP_LOGCONFIG(TAG, "  Appliance Host Address: 0x%02X", this->gea2_host_address_);
     if (!this->gea2_device_id_.empty()) {
       ESP_LOGCONFIG(TAG, "  Device ID: %s", this->gea2_device_id_.c_str());
     } else {
@@ -558,7 +558,8 @@ void GeappliancesBridge::initialize_gea2_bridge_() {
   this->gea2_mqtt_bridge_.init(
     &this->timer_group_,
     &this->gea2_erd_client_.interface,
-    &this->gea2_mqtt_client_adapter_.interface);
+    &this->gea2_mqtt_client_adapter_.interface,
+    this->gea2_host_address_);
   
   this->gea2_bridge_initialized_ = true;
   ESP_LOGI(TAG, "GEA2 MQTT bridge initialized successfully");

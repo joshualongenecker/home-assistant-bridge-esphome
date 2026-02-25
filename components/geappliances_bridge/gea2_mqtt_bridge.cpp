@@ -19,9 +19,6 @@ namespace geappliances_bridge {
 
 static const char *const TAG = "gea2_mqtt_bridge";
 
-// GEA2 appliance host address (GEA3 uses 0xC0)
-static constexpr uint8_t GEA2_HOST_ADDRESS = 0xA0;
-
 enum {
   retry_delay = 3000,
   appliance_lost_timeout = 60000,
@@ -226,7 +223,6 @@ tiny_hsm_result_t Gea2MqttBridge::state_identify_appliance(tiny_hsm_t* hsm, tiny
   
   switch(signal) {
     case tiny_hsm_signal_entry:
-      self->erd_host_address_ = GEA2_HOST_ADDRESS;
       __attribute__((fallthrough));
       
     case signal_timer_expired:
@@ -449,12 +445,14 @@ static const tiny_hsm_configuration_t hsm_configuration = {
 void Gea2MqttBridge::init(
     tiny_timer_group_t* timer_group,
     i_tiny_gea2_erd_client_t* erd_client,
-    i_mqtt_client_t* mqtt_client) {
+    i_mqtt_client_t* mqtt_client,
+    uint8_t host_address) {
   ESP_LOGI(TAG, "GEA2 Bridge init start");
   
   timer_group_ = timer_group;
   erd_client_ = erd_client;
   mqtt_client_ = mqtt_client;
+  erd_host_address_ = host_address;
   
   start_mqtt_info_timer();
   

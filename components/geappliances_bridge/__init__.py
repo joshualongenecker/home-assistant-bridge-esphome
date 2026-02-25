@@ -272,7 +272,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_GEA2_UART_ID): cv.use_id(uart.UARTComponent),
             cv.Optional(CONF_GEA2_POLLING_INTERVAL, default=3000): cv.positive_int,
             cv.Optional(CONF_GEA2_DEVICE_ID): cv.string,
-            cv.Optional(CONF_GEA2_ADDRESS, default=0xE4): cv.hex_uint8_t,
+            cv.Optional(CONF_GEA2_ADDRESS, default=0xA0): cv.hex_uint8_t,
         }
     ).extend(cv.COMPONENT_SCHEMA),
     _validate_at_least_one_uart,

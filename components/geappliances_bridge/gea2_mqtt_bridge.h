@@ -32,7 +32,8 @@ class Gea2MqttBridge {
   void init(
     tiny_timer_group_t* timer_group,
     i_tiny_gea2_erd_client_t* erd_client,
-    i_mqtt_client_t* mqtt_client);
+    i_mqtt_client_t* mqtt_client,
+    uint8_t host_address);
 
   void destroy();
 

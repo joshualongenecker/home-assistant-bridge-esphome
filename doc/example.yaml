@@ -69,4 +69,4 @@ geappliances_bridge:
   # gea2_uart_id: gea2_uart
   # gea2_device_id: "MyGEA2Device"    # Optional: custom device ID for GEA2
   # gea2_polling_interval: 3000       # Default: 3000 ms (3 seconds)
-  # gea2_address: 0xE4                # Default: 0xE4 - board address on the GEA2 bus
+  # gea2_address: 0xA0                # Default: 0xA0 - appliance host address on the GEA2 bus
