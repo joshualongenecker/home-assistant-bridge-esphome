@@ -102,11 +102,21 @@ void GeappliancesBridge::setup() {
       .request_retries = 10
     };
     
+    // Create fake millisecond interrupt required by GEA2 interface
+    // The GEA2 protocol needs a periodic 1ms tick for its internal timing
+    tiny_event_init(&this->gea2_fake_msec_interrupt_);
+    tiny_timer_start_periodic(
+      &this->timer_group_, &this->gea2_fake_msec_timer_, 1, &this->gea2_fake_msec_interrupt_,
+      +[](void* context) {
+        auto msec_interrupt = reinterpret_cast<tiny_event_t*>(context);
+        tiny_event_publish(msec_interrupt, nullptr);
+      });
+    
     tiny_gea2_interface_init(
       &this->gea2_interface_,
       &this->gea2_uart_adapter_.interface,
       esphome_time_source_init(),
-      nullptr,  // msec_interrupt (not used in ESPHome)
+      &this->gea2_fake_msec_interrupt_.interface,
       this->gea2_client_address_,
       this->gea2_send_queue_buffer_,
       sizeof(this->gea2_send_queue_buffer_),

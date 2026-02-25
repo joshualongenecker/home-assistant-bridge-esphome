@@ -12,6 +12,7 @@ extern "C" {
 #include "tiny_gea3_interface.h"
 #include "tiny_gea2_erd_client.h"
 #include "tiny_gea2_interface.h"
+#include "tiny_event.h"
 #include "tiny_timer.h"
 #include "uptime_monitor.h"
 }
@@ -144,6 +145,9 @@ class GeappliancesBridge : public Component {
 
   esphome_uart_adapter_t gea2_uart_adapter_;
   esphome_mqtt_client_adapter_t gea2_mqtt_client_adapter_;
+
+  tiny_event_t gea2_fake_msec_interrupt_;
+  tiny_timer_t gea2_fake_msec_timer_;
 
   tiny_gea2_interface_t gea2_interface_;
   uint8_t gea2_receive_buffer_[255];
