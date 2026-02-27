@@ -157,18 +157,16 @@ void GeappliancesBridge::loop() {
     tiny_gea2_interface_run(&this->gea2_interface_);
   }
 
-  // Enforce startup delay for higher-level operations only
+  // Track startup delay (non-blocking)
   if (!this->startup_delay_complete_) {
     // Note: Unsigned subtraction wraps correctly even when millis() overflows after ~49 days
     if (millis() - this->startup_time_ >= STARTUP_DELAY_MS) {
       this->startup_delay_complete_ = true;
       ESP_LOGI(TAG, "Startup delay complete, beginning normal operation");
-    } else {
-      return;
     }
   }
 
-  // Check MQTT connection state
+  // Check MQTT connection state (always runs, even during startup delay)
   auto mqtt_client = mqtt::global_mqtt_client;
   if (mqtt_client != nullptr) {
     bool is_connected = mqtt_client->is_connected();
@@ -184,6 +182,14 @@ void GeappliancesBridge::loop() {
     }
     
     this->mqtt_was_connected_ = is_connected;
+  }
+
+  // All operations below require the startup delay to have elapsed.
+  // During the delay, only low-level processing (timer group, interfaces)
+  // and MQTT connection tracking run. ERD reads, bridge init, and
+  // subscriptions are deferred until the bus has stabilized.
+  if (!this->startup_delay_complete_) {
+    return;
   }
 
   // Initialize GEA3 MQTT bridge when device ID is ready and MQTT is connected
