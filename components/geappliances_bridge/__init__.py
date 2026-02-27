@@ -23,6 +23,10 @@ AUTO_LOAD = []
 CONF_DEVICE_ID = "device_id"
 CONF_MODE = "mode"
 CONF_POLLING_INTERVAL = "polling_interval"
+CONF_GEA2_UART_ID = "gea2_uart_id"
+CONF_GEA2_POLLING_INTERVAL = "gea2_polling_interval"
+CONF_GEA2_DEVICE_ID = "gea2_device_id"
+CONF_GEA2_ADDRESS = "gea2_address"
 
 # Mode options
 MODE_POLL = "poll"
@@ -240,22 +244,39 @@ std::string appliance_type_to_string(uint8_t appliance_type) {{
 '''
     return function_code
 
-CONFIG_SCHEMA = cv.Schema(
-    {
-        cv.GenerateID(): cv.declare_id(GeappliancesBridge),
-        cv.GenerateID(CONF_UART_ID): cv.use_id(uart.UARTComponent),
-        cv.Optional(CONF_DEVICE_ID): cv.string,
-        cv.Optional(CONF_MODE, default=MODE_AUTO): cv.enum(
-            {
-                MODE_POLL: MODE_POLL_VALUE,
-                MODE_SUBSCRIBE: MODE_SUBSCRIBE_VALUE,
-                MODE_AUTO: MODE_AUTO_VALUE,
-            },
-            upper=False
-        ),
-        cv.Optional(CONF_POLLING_INTERVAL, default=10000): cv.positive_int,
-    }
-).extend(cv.COMPONENT_SCHEMA)
+def _validate_at_least_one_uart(config):
+    """Validate that at least one of uart_id or gea2_uart_id is configured."""
+    if CONF_UART_ID not in config and CONF_GEA2_UART_ID not in config:
+        raise cv.Invalid(
+            "At least one of 'uart_id' (GEA3) or 'gea2_uart_id' (GEA2) must be configured"
+        )
+    return config
+
+
+CONFIG_SCHEMA = cv.All(
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.declare_id(GeappliancesBridge),
+            cv.Optional(CONF_UART_ID): cv.use_id(uart.UARTComponent),
+            cv.Optional(CONF_DEVICE_ID): cv.string,
+            cv.Optional(CONF_MODE, default=MODE_AUTO): cv.enum(
+                {
+                    MODE_POLL: MODE_POLL_VALUE,
+                    MODE_SUBSCRIBE: MODE_SUBSCRIBE_VALUE,
+                    MODE_AUTO: MODE_AUTO_VALUE,
+                },
+                upper=False
+            ),
+            cv.Optional(CONF_POLLING_INTERVAL, default=10000): cv.positive_int,
+            # GEA2 configuration (optional)
+            cv.Optional(CONF_GEA2_UART_ID): cv.use_id(uart.UARTComponent),
+            cv.Optional(CONF_GEA2_POLLING_INTERVAL, default=3000): cv.positive_int,
+            cv.Optional(CONF_GEA2_DEVICE_ID): cv.string,
+            cv.Optional(CONF_GEA2_ADDRESS, default=0xA0): cv.hex_uint8_t,
+        }
+    ).extend(cv.COMPONENT_SCHEMA),
+    _validate_at_least_one_uart,
+)
 
 
 async def to_code(config):
@@ -270,9 +291,10 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Get UART component reference
-    uart_component = await cg.get_variable(config[CONF_UART_ID])
-    cg.add(var.set_uart(uart_component))
+    # Get UART component reference for GEA3 (optional)
+    if CONF_UART_ID in config:
+        uart_component = await cg.get_variable(config[CONF_UART_ID])
+        cg.add(var.set_uart(uart_component))
 
     # Set device ID if provided, otherwise it will be auto-generated
     if CONF_DEVICE_ID in config:
@@ -281,6 +303,16 @@ async def to_code(config):
     # Set mode configuration (config[CONF_MODE] is now an integer from cv.enum)
     cg.add(var.set_mode(config[CONF_MODE]))
     cg.add(var.set_polling_interval(config[CONF_POLLING_INTERVAL]))
+    
+    # GEA2 configuration (optional)
+    if CONF_GEA2_UART_ID in config:
+        gea2_uart_component = await cg.get_variable(config[CONF_GEA2_UART_ID])
+        cg.add(var.set_gea2_uart(gea2_uart_component))
+        cg.add(var.set_gea2_polling_interval(config[CONF_GEA2_POLLING_INTERVAL]))
+        cg.add(var.set_gea2_address(config[CONF_GEA2_ADDRESS]))
+        
+        if CONF_GEA2_DEVICE_ID in config:
+            cg.add(var.set_gea2_device_id(config[CONF_GEA2_DEVICE_ID]))
     
     # Load appliance types from JSON and generate C++ mapping function
     appliance_types = load_appliance_types()

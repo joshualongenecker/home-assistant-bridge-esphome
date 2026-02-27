@@ -44,16 +44,29 @@ mqtt:
   discovery: true
   discovery_prefix: homeassistant
 
-# UART configuration for GEA3 communication
+# UART configuration for GEA3 communication (newer appliances)
+# UART configuration for both GEA3 and GEA2
 uart:
-  id: gea3_uart
-  tx_pin: GPIO21 #D6 on Xiao ESP32-C3
-  rx_pin: GPIO20 #D7 on Xiao ESP32-C3
-  baud_rate: 230400
+  - id: gea3_uart
+    tx_pin: GPIO21  # D6 on Xiao ESP32-C3
+    rx_pin: GPIO20  # D7 on Xiao ESP32-C3
+    baud_rate: 230400
+  
+  # GEA2 UART configuration (older appliances)
+  - id: gea2_uart
+    tx_pin: GPIO8   # D9 on Xiao ESP32-C3
+    rx_pin: GPIO9   # D10 on Xiao ESP32-C3
+    baud_rate: 19200
 
 # GE Appliances Bridge component
 geappliances_bridge:
+  # GEA3 configuration (newer appliances)
   uart_id: gea3_uart
   # device_id: "YourDeviceId"   # Optional: Uncomment to use a custom device ID
   # mode: auto                  # Default: auto   Options: auto, subscribe, poll
   # polling_interval: 10000     # Default: 10000 ms (10 seconds), used when in polling mode
+  
+  # GEA2 configuration (older appliances) - enabled for compilation testing
+  gea2_uart_id: gea2_uart
+  gea2_device_id: "TestGEA2Device"
+  gea2_polling_interval: 3000

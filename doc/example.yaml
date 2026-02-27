@@ -29,7 +29,7 @@ esp32:
 
 # External component configuration
 external_components:
-  - source: github://joshualongenecker/home-assistant-bridge@develop
+  - source: github://joshualongenecker/home-assistant-bridge-esphome@develop
     components: [ geappliances_bridge ]
 
 # MQTT configuration for Home Assistant
@@ -41,16 +41,32 @@ mqtt:
   discovery: true
   discovery_prefix: homeassistant
 
-# UART configuration for GEA3 communication
+# UART configuration for GEA3 communication (newer appliances)
+# UART configuration for both GEA3 and GEA2
 uart:
-  id: gea3_uart
-  tx_pin: GPIO21 #D6 on Xiao ESP32-C3
-  rx_pin: GPIO20 #D7 on Xiao ESP32-C3
-  baud_rate: 230400
+  - id: gea3_uart
+    tx_pin: GPIO21  # D6 on Xiao ESP32-C3
+    rx_pin: GPIO20  # D7 on Xiao ESP32-C3
+    baud_rate: 230400
+  
+  # Uncomment the following section for GEA2 support (older appliances)
+  # - id: gea2_uart
+  #   tx_pin: GPIO8   # D9 on Xiao ESP32-C3 (or any available GPIO)
+  #   rx_pin: GPIO9   # D10 on Xiao ESP32-C3 (or any available GPIO)
+  #   baud_rate: 19200
 
 # GE Appliances Bridge component
+# NOTE: At least one of uart_id (GEA3) or gea2_uart_id (GEA2) must be configured.
+# You can use GEA3 only, GEA2 only, or both simultaneously.
 geappliances_bridge:
+  # GEA3 configuration (newer appliances) - comment out uart_id for GEA2-only setup
   uart_id: gea3_uart
   # device_id: "YourDeviceId"   # Optional: Uncomment to use a custom device ID
   # mode: auto                  # Default: auto   Options: auto, subscribe, poll
   # polling_interval: 10000     # Default: 10000 ms (10 seconds), used when in polling mode
+  
+  # GEA2 configuration (older appliances) - uncomment to enable
+  # gea2_uart_id: gea2_uart
+  # gea2_device_id: "MyGEA2Device"    # Optional: custom device ID for GEA2
+  # gea2_polling_interval: 3000       # Default: 3000 ms (3 seconds)
+  # gea2_address: 0xA0                # Default: 0xA0 - appliance host address on the GEA2 bus
