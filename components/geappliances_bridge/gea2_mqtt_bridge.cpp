@@ -46,7 +46,6 @@ Gea2MqttBridge::Gea2MqttBridge()
       erd_set_(nullptr),
       request_id_(0),
       erd_host_address_(0xFF),
-      configured_host_address_(0xA0),
       appliance_type_(0),
       appliance_erd_list_(nullptr),
       appliance_erd_list_count_(0),
@@ -237,12 +236,12 @@ tiny_hsm_result_t Gea2MqttBridge::state_identify_appliance(tiny_hsm_t* hsm, tiny
   
   switch(signal) {
     case tiny_hsm_signal_entry:
+      self->erd_host_address_ = tiny_gea_broadcast_address;
       __attribute__((fallthrough));
       
     case signal_timer_expired:
-      // Use broadcast address (0xFF) to discover all appliances on the bus
-      ESP_LOGD(TAG, "GEA2 TX: Cmd=0xF0 Src=0xE4 Dst=0xFF ERD=0x0008 ReqID=%d (READ_REQUEST - BROADCAST)", self->request_id_);
-      tiny_gea2_erd_client_read(self->erd_client_, &self->request_id_, 0xFF, 0x0008);
+      ESP_LOGD(TAG, "GEA2 TX: Cmd=0xF0 Src=0xE4 Dst=0x%02X ERD=0x0008 ReqID=%d (READ_REQUEST - BROADCAST)", self->erd_host_address_, self->request_id_);
+      tiny_gea2_erd_client_read(self->erd_client_, &self->request_id_, self->erd_host_address_, 0x0008);
       self->arm_timer(retry_delay);
       break;
       
@@ -250,22 +249,11 @@ tiny_hsm_result_t Gea2MqttBridge::state_identify_appliance(tiny_hsm_t* hsm, tiny
       self->disarm_retry_timer();
       self->disarm_lost_appliance_timer();
       if (args->read_completed.erd == 0x0008) {
-        // Log every responding address for debugging
-        ESP_LOGD(TAG, "Appliance responded from GEA address: 0x%02X", args->address);
-        
-        // If we haven't set an address yet, or if this matches our configured address, use it
-        if (self->erd_host_address_ == 0xFF || args->address == self->configured_host_address_) {
-          self->erd_host_address_ = args->address;
-          ESP_LOGI(TAG, "Using GEA address 0x%02X for subsequent communication", self->erd_host_address_);
-          
-          self->appliance_type_ = reinterpret_cast<const uint8_t*>(args->read_completed.data)[0];
-          ESP_LOGI(TAG, "Appliance type: 0x%02X", self->appliance_type_);
-          tiny_hsm_transition(hsm, state_add_common_erds);
-        } else {
-          // Log other responding addresses but don't use them
-          ESP_LOGI(TAG, "Additional appliance detected at 0x%02X (not using - already locked to 0x%02X)",
-                   args->address, self->erd_host_address_);
-        }
+        self->erd_host_address_ = args->address;
+        ESP_LOGI(TAG, "Appliance responded from GEA address: 0x%02X", self->erd_host_address_);
+        self->appliance_type_ = reinterpret_cast<const uint8_t*>(args->read_completed.data)[0];
+        ESP_LOGI(TAG, "Appliance type: 0x%02X", self->appliance_type_);
+        tiny_hsm_transition(hsm, state_add_common_erds);
       }
       break;
       
@@ -479,9 +467,8 @@ void Gea2MqttBridge::init(
   timer_group_ = timer_group;
   erd_client_ = erd_client;
   mqtt_client_ = mqtt_client;
-  configured_host_address_ = host_address;
-  // Start with broadcast address - will be set to actual address during discovery
-  erd_host_address_ = 0xFF;
+  // erd_host_address_ starts at broadcast; will be updated during discovery
+  erd_host_address_ = tiny_gea_broadcast_address;
   
   start_mqtt_info_timer();
   

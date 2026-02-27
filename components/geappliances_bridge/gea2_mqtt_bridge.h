@@ -79,7 +79,6 @@ class Gea2MqttBridge {
   std::set<tiny_erd_t>* erd_set_;
   tiny_gea2_erd_client_request_id_t request_id_;
   uint8_t erd_host_address_;           // Actual address being used (discovered via broadcast)
-  uint8_t configured_host_address_;    // Configured preferred address (from config)
   uint8_t appliance_type_;
   const tiny_erd_t* appliance_erd_list_;
   uint16_t appliance_erd_list_count_;
