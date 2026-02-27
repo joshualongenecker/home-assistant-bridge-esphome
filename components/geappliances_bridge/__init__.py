@@ -21,6 +21,7 @@ DEPENDENCIES = ["uart", "mqtt"]
 AUTO_LOAD = []
 
 CONF_DEVICE_ID = "device_id"
+CONF_GEA2_UART_ID = "gea2_uart_id"
 CONF_MODE = "mode"
 CONF_POLLING_INTERVAL = "polling_interval"
 
@@ -244,6 +245,7 @@ CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(GeappliancesBridge),
         cv.GenerateID(CONF_UART_ID): cv.use_id(uart.UARTComponent),
+        cv.Optional(CONF_GEA2_UART_ID): cv.use_id(uart.UARTComponent),
         cv.Optional(CONF_DEVICE_ID): cv.string,
         cv.Optional(CONF_MODE, default=MODE_AUTO): cv.enum(
             {
@@ -270,9 +272,14 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Get UART component reference
+    # Get GEA3 UART component reference
     uart_component = await cg.get_variable(config[CONF_UART_ID])
     cg.add(var.set_uart(uart_component))
+
+    # Get optional GEA2 UART component reference
+    if CONF_GEA2_UART_ID in config:
+        gea2_uart_component = await cg.get_variable(config[CONF_GEA2_UART_ID])
+        cg.add(var.set_gea2_uart(gea2_uart_component))
 
     # Set device ID if provided, otherwise it will be auto-generated
     if CONF_DEVICE_ID in config:
