@@ -143,14 +143,27 @@ void GeappliancesBridge::setup() {
 }
 
 void GeappliancesBridge::loop() {
-  // Enforce startup delay to allow WiFi to establish and capture early debug messages
+  // Always run timer group and interfaces to keep communication layers active.
+  // This matches the reference implementation where bridge.loop() always runs
+  // the timer group and interface on every iteration. Skipping these during
+  // startup would cause UART RX bytes to accumulate and corrupt the GEA2 FSM.
+  tiny_timer_group_run(&this->timer_group_);
+  
+  if (this->gea3_enabled_) {
+    tiny_gea3_interface_run(&this->gea3_interface_);
+  }
+
+  if (this->gea2_enabled_) {
+    tiny_gea2_interface_run(&this->gea2_interface_);
+  }
+
+  // Enforce startup delay for higher-level operations only
   if (!this->startup_delay_complete_) {
     // Note: Unsigned subtraction wraps correctly even when millis() overflows after ~49 days
     if (millis() - this->startup_time_ >= STARTUP_DELAY_MS) {
       this->startup_delay_complete_ = true;
       ESP_LOGI(TAG, "Startup delay complete, beginning normal operation");
     } else {
-      // Skip all processing during startup delay
       return;
     }
   }
@@ -171,19 +184,6 @@ void GeappliancesBridge::loop() {
     }
     
     this->mqtt_was_connected_ = is_connected;
-  }
-
-  // Run timer group
-  tiny_timer_group_run(&this->timer_group_);
-  
-  // Run GEA3 interface if enabled
-  if (this->gea3_enabled_) {
-    tiny_gea3_interface_run(&this->gea3_interface_);
-  }
-
-  // Run GEA2 interface if enabled
-  if (this->gea2_enabled_) {
-    tiny_gea2_interface_run(&this->gea2_interface_);
   }
 
   // Initialize GEA3 MQTT bridge when device ID is ready and MQTT is connected
