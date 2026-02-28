@@ -219,9 +219,8 @@ TEST(mqtt_bridge_polling, should_register_and_poll_erd_whose_discovery_response_
   after(polling_interval);
 
   // Late discovery response for late_erd arrives before polled_erd responds.
-  // Bridge registers it, publishes its value, then immediately reads the
-  // newly-registered ERD (now at the next position in the polling list).
-  should_register_erd(late_erd);
+  // Bridge publishes its value and immediately reads the newly-registered ERD
+  // (now at the next position in the polling list).
   should_update_erd(late_erd, uint8_t(0xAB));
   should_request_read(0xC0, late_erd);
   when_a_poll_read_completes(0xC0, late_erd, uint8_t(0xAB));
@@ -255,7 +254,6 @@ TEST(mqtt_bridge_polling, should_register_and_poll_late_erd_when_only_publish_on
 
   // New ERD: always published on first read; bridge immediately reads the
   // newly-registered ERD (appended to the polling list).
-  should_register_erd(late_erd);
   should_update_erd(late_erd, uint8_t(0xCD));
   should_request_read(0xC0, late_erd);
   when_a_poll_read_completes(0xC0, late_erd, uint8_t(0xCD));
