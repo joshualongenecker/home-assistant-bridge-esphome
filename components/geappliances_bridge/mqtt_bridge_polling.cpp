@@ -10,7 +10,10 @@ extern "C" {
 }
 
 #include "erd_lists.h"
+#include <cstring>
+#include <map>
 #include <set>
+#include <vector>
 
 using namespace std;
 
@@ -75,6 +78,11 @@ static void disarm_timer(mqtt_bridge_polling_t* self)
 static set<tiny_erd_t>& erd_set(mqtt_bridge_polling_t* self)
 {
   return *reinterpret_cast<set<tiny_erd_t>*>(self->erd_set);
+}
+
+static map<tiny_erd_t, vector<uint8_t>>& erd_cache(mqtt_bridge_polling_t* self)
+{
+  return *reinterpret_cast<map<tiny_erd_t, vector<uint8_t>>*>(self->erd_cache);
 }
 
 static tiny_hsm_result_t state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
@@ -322,6 +330,7 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
 
   switch(signal) {
     case tiny_hsm_signal_entry:
+      erd_cache(self).clear();
       arm_polling_timer(self, self->polling_interval_ms);
       __attribute__((fallthrough));
 
@@ -344,11 +353,25 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
     case signal_read_completed:
       disarm_timer(self);
       reset_lost_appliance_timer(self);
-      mqtt_client_update_erd(
-        self->mqtt_client,
-        args->read_completed.erd,
-        args->read_completed.data,
-        args->read_completed.data_size);
+      {
+        tiny_erd_t erd = args->read_completed.erd;
+        const uint8_t* data = reinterpret_cast<const uint8_t*>(args->read_completed.data);
+        uint8_t data_size = args->read_completed.data_size;
+        auto& cache = erd_cache(self);
+        auto it = cache.find(erd);
+        bool data_changed;
+        if(it == cache.end()) {
+          data_changed = true;
+        }
+        else {
+          data_changed = (it->second.size() != data_size) ||
+            (memcmp(it->second.data(), data, data_size) != 0);
+        }
+        if(data_changed) {
+          cache[erd] = vector<uint8_t>(data, data + data_size);
+          mqtt_client_update_erd(self->mqtt_client, erd, data, data_size);
+        }
+      }
 
       send_next_poll_read_request(self);
       break;
@@ -394,6 +417,7 @@ void mqtt_bridge_polling_init(
   self->mqtt_client = mqtt_client;
   self->polling_interval_ms = polling_interval_ms;
   self->erd_set = reinterpret_cast<void*>(new set<tiny_erd_t>());
+  self->erd_cache = reinterpret_cast<void*>(new map<tiny_erd_t, vector<uint8_t>>());
 
   tiny_event_subscription_init(
     &self->erd_client_activity_subscription, self, +[](void* context, const void* _args) {
@@ -442,4 +466,5 @@ void mqtt_bridge_polling_init(
 void mqtt_bridge_polling_destroy(mqtt_bridge_polling_t* self)
 {
   delete reinterpret_cast<set<tiny_erd_t>*>(self->erd_set);
+  delete reinterpret_cast<map<tiny_erd_t, vector<uint8_t>>*>(self->erd_cache);
 }

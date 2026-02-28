@@ -28,6 +28,7 @@ typedef struct {
   tiny_event_subscription_t erd_client_activity_subscription;
   tiny_hsm_t hsm;
   void* erd_set;
+  void* erd_cache;
   tiny_gea3_erd_client_request_id_t request_id;
   uint8_t erd_host_address;
   uint8_t appliance_type;
