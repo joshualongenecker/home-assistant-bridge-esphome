@@ -32,7 +32,8 @@ enum {
   signal_read_failed,
   signal_read_completed,
   signal_mqtt_disconnected,
-  signal_appliance_lost
+  signal_appliance_lost,
+  signal_write_requested
 };
 
 // Common ERDs that most appliances support
@@ -93,9 +94,14 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
 
 static tiny_hsm_result_t state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data)
 {
-  (void)data;
+  mqtt_bridge_polling_t* self = container_of(mqtt_bridge_polling_t, hsm, hsm);
 
   switch(signal) {
+    case signal_write_requested: {
+      auto args = reinterpret_cast<const mqtt_client_on_write_request_args_t*>(data);
+      tiny_gea3_erd_client_write(self->erd_client, &self->request_id, self->erd_host_address, args->erd, args->value, args->size);
+    } break;
+
     case signal_appliance_lost: {
       tiny_hsm_transition(hsm, state_identify_appliance);
     } break;
@@ -165,6 +171,7 @@ static bool send_next_read_request(mqtt_bridge_polling_t* self)
 static void add_erd_to_polling_list(mqtt_bridge_polling_t* self, tiny_erd_t erd)
 {
   if(erd_set(self).find(erd) == erd_set(self).end()) {
+    mqtt_client_register_erd(self->mqtt_client, erd);
     erd_set(self).insert(erd);
     
     // Only add to polling list if not already present and there's space
@@ -440,9 +447,25 @@ void mqtt_bridge_polling_init(
         case tiny_gea3_erd_client_activity_type_read_failed:
           tiny_hsm_send_signal(&self->hsm, signal_read_failed, args);
           break;
+
+        case tiny_gea3_erd_client_activity_type_write_completed:
+          mqtt_client_update_erd_write_result(self->mqtt_client, args->write_completed.erd, true, 0);
+          break;
+
+        case tiny_gea3_erd_client_activity_type_write_failed:
+          mqtt_client_update_erd_write_result(self->mqtt_client, args->write_failed.erd, false, args->write_failed.reason);
+          break;
       }
     });
   tiny_event_subscribe(tiny_gea3_erd_client_on_activity(erd_client), &self->erd_client_activity_subscription);
+
+  tiny_event_subscription_init(
+    &self->mqtt_write_request_subscription, self, +[](void* context, const void* _args) {
+      auto self = reinterpret_cast<mqtt_bridge_polling_t*>(context);
+      auto args = reinterpret_cast<const mqtt_client_on_write_request_args_t*>(_args);
+      tiny_hsm_send_signal(&self->hsm, signal_write_requested, args);
+    });
+  tiny_event_subscribe(mqtt_client_on_write_request(mqtt_client), &self->mqtt_write_request_subscription);
 
   tiny_event_subscription_init(
     &self->mqtt_disconnect_subscription, self, +[](void* context, const void*) {

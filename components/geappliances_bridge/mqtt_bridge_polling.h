@@ -22,6 +22,7 @@ typedef struct {
   tiny_timer_t timer;
   tiny_timer_t appliance_lost_timer;
   tiny_timer_t polling_timer;
+  tiny_event_subscription_t mqtt_write_request_subscription;
   tiny_event_subscription_t mqtt_disconnect_subscription;
   tiny_event_subscription_t erd_client_activity_subscription;
   tiny_hsm_t hsm;
