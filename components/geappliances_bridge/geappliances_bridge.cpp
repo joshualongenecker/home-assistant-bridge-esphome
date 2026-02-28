@@ -598,7 +598,8 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
       &this->timer_group_,
       &this->erd_client_.interface,
       &this->mqtt_client_adapter_.interface,
-      this->polling_interval_ms_);
+      this->polling_interval_ms_,
+      this->polling_only_publish_on_change_);
   } else {
     mqtt_bridge_init(
       &this->mqtt_bridge_,
@@ -694,7 +695,8 @@ void GeappliancesBridge::check_subscription_activity_() {
       &this->timer_group_,
       &this->erd_client_.interface,
       &this->mqtt_client_adapter_.interface,
-      this->polling_interval_ms_);
+      this->polling_interval_ms_,
+      this->polling_only_publish_on_change_);
     
     // Mark that we're no longer in subscription mode
     this->subscription_mode_active_ = false;
@@ -757,6 +759,7 @@ void GeappliancesBridge::dump_config() {
   
   if (this->mode_ == BRIDGE_MODE_POLL || !this->subscription_mode_active_) {
     ESP_LOGCONFIG(TAG, "  Polling Interval: %u ms", this->polling_interval_ms_);
+    ESP_LOGCONFIG(TAG, "  Only Publish On Change: %s", this->polling_only_publish_on_change_ ? "yes" : "no");
   }
 }
 

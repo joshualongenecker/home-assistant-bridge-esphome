@@ -32,6 +32,7 @@ CONF_GEA2_ADDRESS = "gea2_address"
 CONF_DEVICE_ID = "device_id"
 CONF_MODE = "mode"
 CONF_POLLING_INTERVAL = "polling_interval"
+CONF_POLLING_ONLY_PUBLISH_ON_CHANGE = "polling_onlypublish_onchange"
 
 # Bridge mode options (polling vs subscriptions)
 MODE_POLL = "poll"
@@ -274,6 +275,7 @@ CONFIG_SCHEMA = cv.Schema(
             upper=False
         ),
         cv.Optional(CONF_POLLING_INTERVAL, default=10000): cv.positive_int,
+        cv.Optional(CONF_POLLING_ONLY_PUBLISH_ON_CHANGE, default=False): cv.boolean,
         cv.Optional(CONF_GEA3_ADDRESS, default=0xC0): cv.int_range(min=0, max=255),
         cv.Optional(CONF_GEA2_ADDRESS, default=0xA0): cv.int_range(min=0, max=255),
         cv.Optional(CONF_GEA_MODE, default=GEA_MODE_AUTO): cv.enum(
@@ -316,6 +318,7 @@ async def to_code(config):
     # Set bridge mode configuration (config[CONF_MODE] is now an integer from cv.enum)
     cg.add(var.set_mode(config[CONF_MODE]))
     cg.add(var.set_polling_interval(config[CONF_POLLING_INTERVAL]))
+    cg.add(var.set_polling_only_publish_on_change(config[CONF_POLLING_ONLY_PUBLISH_ON_CHANGE]))
 
     # Set GEA protocol configuration
     cg.add(var.set_gea3_address(config[CONF_GEA3_ADDRESS]))
