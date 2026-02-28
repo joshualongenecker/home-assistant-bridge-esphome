@@ -21,8 +21,8 @@ static const tiny_gea2_erd_client_configuration_t gea2_client_configuration = {
 static constexpr tiny_erd_t ERD_MODEL_NUMBER = 0x0001;
 static constexpr tiny_erd_t ERD_SERIAL_NUMBER = 0x0002;
 static constexpr tiny_erd_t ERD_APPLIANCE_TYPE = 0x0008;
-// ERD used for discovery broadcasts (model number)
-static constexpr tiny_erd_t ERD_DISCOVERY = 0x0001;
+// ERD used for discovery broadcasts (appliance type)
+static constexpr tiny_erd_t ERD_DISCOVERY = 0x0008;
 static constexpr uint8_t GEA_BROADCAST_ADDRESS = 0xFF;
 static constexpr uint8_t GEA2_INTERFACE_RETRIES = 3;
 
@@ -407,11 +407,10 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
   if (this->autodiscovery_state_ == AUTODISCOVERY_GEA3_BROADCAST_WAITING) {
     if (args->type == tiny_gea3_erd_client_activity_type_read_completed &&
         args->read_completed.erd == ERD_DISCOVERY) {
-      std::string model = this->bytes_to_string_(
-        reinterpret_cast<const uint8_t*>(args->read_completed.data),
-        args->read_completed.data_size);
-      ESP_LOGD(TAG, "GEA3 board discovered: address=0x%02X model_number=%s",
-               args->address, model.c_str());
+      uint8_t app_type = reinterpret_cast<const uint8_t*>(args->read_completed.data)[0];
+      std::string app_type_name = appliance_type_to_string(app_type);
+      ESP_LOGD(TAG, "GEA3 board discovered: address=0x%02X appliance_type=%u (%s)",
+               args->address, app_type, app_type_name.c_str());
       this->gea3_board_discovered_ = true;
       if (args->address == this->gea3_address_preference_) {
         // Preferred address responded - use it for device ID generation
@@ -490,11 +489,10 @@ void GeappliancesBridge::handle_gea2_erd_client_activity_(const tiny_gea2_erd_cl
   if (this->autodiscovery_state_ == AUTODISCOVERY_GEA2_BROADCAST_WAITING) {
     if (args->type == tiny_gea2_erd_client_activity_type_read_completed &&
         args->read_completed.erd == ERD_DISCOVERY) {
-      std::string model = this->bytes_to_string_(
-        reinterpret_cast<const uint8_t*>(args->read_completed.data),
-        args->read_completed.data_size);
-      ESP_LOGD(TAG, "GEA2 board discovered: address=0x%02X model_number=%s",
-               args->address, model.c_str());
+      uint8_t app_type = reinterpret_cast<const uint8_t*>(args->read_completed.data)[0];
+      std::string app_type_name = appliance_type_to_string(app_type);
+      ESP_LOGD(TAG, "GEA2 board discovered: address=0x%02X appliance_type=%u (%s)",
+               args->address, app_type, app_type_name.c_str());
       this->gea2_board_discovered_ = true;
       if (args->address == this->gea2_address_preference_) {
         // Preferred address responded - use it for device ID generation

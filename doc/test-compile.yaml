@@ -54,8 +54,8 @@ uart:
 
   # GEA2 UART configuration (older appliances)
   - id: gea2_uart
-    tx_pin: GPIO10  # D10 on Xiao ESP32-C3
-    rx_pin: GPIO9   # D9 on Xiao ESP32-C3
+    tx_pin: GPIO9     # D9 on Xiao ESP32-C3
+    rx_pin: GPIO10   # D10 on Xiao ESP32-C3
     baud_rate: 19200
 
 # GE Appliances Bridge component
