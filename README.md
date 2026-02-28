@@ -1,8 +1,8 @@
 # home-assistant-bridge-esphome
 
-ESPHome external component for GE Appliances bridge using the GEA3 protocol.
+ESPHome external component for GE Appliances bridge supporting both GEA3 and GEA2 protocols.
 
-Subscribes to data hosted by a GE Appliances product using GEA3 and publishes it to an MQTT server under `geappliances/<device ID>`. ERDs are identified by 16-bit identifiers and the raw binary data is published as a hex string to `geappliances/<device ID>/erd/<ERD ID>/value`. Data can be written to an ERD by writing a hex string of the appropriate size to `geappliances/<device ID>/erd/<ERD ID>/write`.
+Subscribes to data hosted by a GE Appliances product and publishes it to an MQTT server under `geappliances/<device ID>`. ERDs are identified by 16-bit identifiers and the raw binary data is published as a hex string to `geappliances/<device ID>/erd/<ERD ID>/value`. Data can be written to an ERD by writing a hex string of the appropriate size to `geappliances/<device ID>/erd/<ERD ID>/write`.
 
 This is intended to be used with the MQTT server provided by Home Assistant, but it should work with other MQTT servers.
 
@@ -37,19 +37,30 @@ mqtt:
   discovery: true
   discovery_prefix: homeassistant
 
-# UART configuration for GEA3 communication
+# UART configuration
 uart:
-  id: gea3_uart
-  tx_pin: GPIO21 #D6 on Xiao ESP32-C3
-  rx_pin: GPIO20 #D7 on Xiao ESP32-C3
-  baud_rate: 230400
+  # GEA3 UART (newer appliances)
+  - id: gea3_uart
+    tx_pin: GPIO21  # D6 on Xiao ESP32-C3
+    rx_pin: GPIO20  # D7 on Xiao ESP32-C3
+    baud_rate: 230400
+
+  # GEA2 UART (older appliances) - optional
+  - id: gea2_uart
+    tx_pin: GPIO9   # D9 on Xiao ESP32-C3
+    rx_pin: GPIO10  # D10 on Xiao ESP32-C3
+    baud_rate: 19200
 
 # GE Appliances Bridge component
 geappliances_bridge:
-  uart_id: gea3_uart
-  # device_id: "YourDeviceId"   # Default: auto generated    Uncomment to use a custom device ID
-  # mode: auto                  # Default: auto              Options: auto, subscribe, poll
-  # polling_interval: 10000     # Default: 10000 ms (10 seconds), used when in polling mode
+  gea3_uart_id: gea3_uart
+  # gea2_uart_id: gea2_uart       # Optional: enable GEA2 support
+  # device_id: "YourDeviceId"     # Optional: Uncomment to use a custom device ID
+  # mode: auto                    # Default: auto   Options: auto, subscribe, poll
+  # polling_interval: 10000       # Default: 10000 ms (10 seconds), used when in polling mode
+  # gea_mode: auto                # Default: auto   Options: auto, gea3, gea2
+  # gea3_address: 0xC0            # Default: 0xC0   Preferred GEA3 board address
+  # gea2_address: 0xA0            # Default: 0xA0   Preferred GEA2 board address
 ```
 
 ## Configurable Parameters
@@ -63,6 +74,32 @@ The `mode` parameter is **optional**.
 2. **Subscribe Mode** - The adapter subscribes to ERD updates from the appliance. The appliance pushes changes as they occur.
 
 3. **Poll Mode** - The adapter actively polls the appliance for ERD values at a configurable interval `polling_interval`
+
+### GEA Mode
+
+The `gea_mode` parameter is **optional** and controls which protocol(s) are used during autodiscovery.
+
+- **`auto` (Default)** - Tries GEA3 first, then GEA2.
+- **`gea3`** - GEA3 only.
+- **`gea2`** - GEA2 only.
+
+### Board Address Preferences
+
+`gea3_address` and `gea2_address` are **optional**. If the board at the preferred address responds during autodiscovery, it is used for device ID generation. If it does not respond, the first responder is used as a fallback.
+
+- **`gea3_address`** - Default: `0xC0`
+- **`gea2_address`** - Default: `0xA0`
+
+### Autodiscovery
+
+After connecting to the MQTT server, the component waits 20 seconds and then performs a protocol autodiscovery to find the appliance on the bus before generating a device ID:
+
+1. Sends a GEA3 broadcast (→ `0xFF`) for ERD `0x0008` (Appliance Type); collects responses for 10 seconds.
+2. Sends a GEA2 broadcast (→ `0xFF`) for ERD `0x0008` (Appliance Type); collects responses for 10 seconds.
+3. If no boards respond, repeats steps 1–2 until at least one board is found.
+4. Proceeds with device ID generation using the discovered board's address and protocol.
+
+Each responding board is logged at DEBUG level with its address and appliance type.
 
 ### Auto-Generated Device ID
 
