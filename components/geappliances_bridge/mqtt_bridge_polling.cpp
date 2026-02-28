@@ -357,18 +357,27 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
         tiny_erd_t erd = args->read_completed.erd;
         const uint8_t* data = reinterpret_cast<const uint8_t*>(args->read_completed.data);
         uint8_t data_size = args->read_completed.data_size;
-        auto& cache = erd_cache(self);
-        auto it = cache.find(erd);
-        bool data_changed;
-        if(it == cache.end()) {
-          data_changed = true;
+        bool should_publish;
+        if(self->only_publish_on_change) {
+          auto& cache = erd_cache(self);
+          auto it = cache.find(erd);
+          bool data_changed;
+          if(it == cache.end()) {
+            data_changed = true;
+          }
+          else {
+            data_changed = (it->second.size() != data_size) ||
+              (memcmp(it->second.data(), data, data_size) != 0);
+          }
+          if(data_changed) {
+            cache[erd] = vector<uint8_t>(data, data + data_size);
+          }
+          should_publish = data_changed;
         }
         else {
-          data_changed = (it->second.size() != data_size) ||
-            (memcmp(it->second.data(), data, data_size) != 0);
+          should_publish = true;
         }
-        if(data_changed) {
-          cache[erd] = vector<uint8_t>(data, data + data_size);
+        if(should_publish) {
           mqtt_client_update_erd(self->mqtt_client, erd, data, data_size);
         }
       }
@@ -410,12 +419,14 @@ void mqtt_bridge_polling_init(
   tiny_timer_group_t* timer_group,
   i_tiny_gea3_erd_client_t* erd_client,
   i_mqtt_client_t* mqtt_client,
-  uint32_t polling_interval_ms)
+  uint32_t polling_interval_ms,
+  bool only_publish_on_change)
 {
   self->timer_group = timer_group;
   self->erd_client = erd_client;
   self->mqtt_client = mqtt_client;
   self->polling_interval_ms = polling_interval_ms;
+  self->only_publish_on_change = only_publish_on_change;
   self->erd_set = reinterpret_cast<void*>(new set<tiny_erd_t>());
   self->erd_cache = reinterpret_cast<void*>(new map<tiny_erd_t, vector<uint8_t>>());
 

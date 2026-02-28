@@ -55,6 +55,7 @@ class GeappliancesBridge : public Component {
   void set_device_id(const std::string &device_id) { this->configured_device_id_ = device_id; }
   void set_mode(uint8_t mode) { this->mode_ = static_cast<BridgeMode>(mode); }
   void set_polling_interval(uint32_t polling_interval) { this->polling_interval_ms_ = polling_interval; }
+  void set_polling_only_publish_on_change(bool only_publish_on_change) { this->polling_only_publish_on_change_ = only_publish_on_change; }
   void set_gea3_address(uint8_t address) { this->gea3_address_preference_ = address; }
   void set_gea2_address(uint8_t address) { this->gea2_address_preference_ = address; }
   void set_gea_mode(uint8_t mode) { this->gea_mode_ = static_cast<GEAMode>(mode); }
@@ -110,6 +111,7 @@ class GeappliancesBridge : public Component {
   BridgeMode mode_{BRIDGE_MODE_AUTO};
   GEAMode gea_mode_{GEA_MODE_AUTO};
   uint32_t polling_interval_ms_{10000};
+  bool polling_only_publish_on_change_{false};
   uint8_t gea3_address_preference_{0xC0}; // Preferred GEA3 board address for device ID generation
   uint8_t gea2_address_preference_{0xA0}; // Preferred GEA2 board address for device ID generation
   

@@ -53,14 +53,15 @@ TEST_GROUP(mqtt_bridge_polling)
     mock().enable();
   }
 
-  void when_the_bridge_is_initialized()
+  void when_the_bridge_is_initialized(bool only_publish_on_change = false)
   {
     mqtt_bridge_polling_init(
       &self,
       &timer_group.timer_group,
       &erd_client.interface,
       &mqtt_client.interface,
-      polling_interval);
+      polling_interval,
+      only_publish_on_change);
   }
 
   void after(tiny_timer_ticks_t ticks)
@@ -79,10 +80,10 @@ TEST_GROUP(mqtt_bridge_polling)
     tiny_gea3_erd_client_double_trigger_activity_event(&erd_client, &args);
   }
 
-  void given_that_the_bridge_has_entered_polling_state()
+  void given_that_the_bridge_has_entered_polling_state(bool only_publish_on_change = false)
   {
     mock().disable();
-    when_the_bridge_is_initialized();
+    when_the_bridge_is_initialized(only_publish_on_change);
 
     // Identify the appliance (type 0x00 = water heater, 64 ERDs)
     uint8_t appliance_type = 0x00;
@@ -135,9 +136,24 @@ TEST_GROUP(mqtt_bridge_polling)
   }
 };
 
-TEST(mqtt_bridge_polling, should_publish_mqtt_on_first_poll_of_erd)
+TEST(mqtt_bridge_polling, should_always_publish_mqtt_when_only_publish_on_change_is_disabled)
 {
   given_that_the_bridge_has_entered_polling_state();
+
+  should_request_read(0xC0, polled_erd);
+  after(polling_interval);
+  should_update_erd(polled_erd, uint8_t(0x01));
+  when_a_poll_read_completes(0xC0, polled_erd, uint8_t(0x01));
+
+  should_request_read(0xC0, polled_erd);
+  after(polling_interval);
+  should_update_erd(polled_erd, uint8_t(0x01));
+  when_a_poll_read_completes(0xC0, polled_erd, uint8_t(0x01));
+}
+
+TEST(mqtt_bridge_polling, should_publish_mqtt_on_first_poll_when_only_publish_on_change_is_enabled)
+{
+  given_that_the_bridge_has_entered_polling_state(true);
 
   should_request_read(0xC0, polled_erd);
   after(polling_interval);
@@ -146,9 +162,9 @@ TEST(mqtt_bridge_polling, should_publish_mqtt_on_first_poll_of_erd)
   when_a_poll_read_completes(0xC0, polled_erd, uint8_t(0x01));
 }
 
-TEST(mqtt_bridge_polling, should_not_republish_mqtt_when_polled_erd_data_is_unchanged)
+TEST(mqtt_bridge_polling, should_not_republish_mqtt_when_polled_erd_data_is_unchanged_and_only_publish_on_change_is_enabled)
 {
-  given_that_the_bridge_has_entered_polling_state();
+  given_that_the_bridge_has_entered_polling_state(true);
 
   should_request_read(0xC0, polled_erd);
   after(polling_interval);
@@ -161,9 +177,9 @@ TEST(mqtt_bridge_polling, should_not_republish_mqtt_when_polled_erd_data_is_unch
   when_a_poll_read_completes(0xC0, polled_erd, uint8_t(0x01));
 }
 
-TEST(mqtt_bridge_polling, should_republish_mqtt_when_polled_erd_data_changes)
+TEST(mqtt_bridge_polling, should_republish_mqtt_when_polled_erd_data_changes_and_only_publish_on_change_is_enabled)
 {
-  given_that_the_bridge_has_entered_polling_state();
+  given_that_the_bridge_has_entered_polling_state(true);
 
   should_request_read(0xC0, polled_erd);
   after(polling_interval);

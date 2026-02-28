@@ -36,6 +36,7 @@ typedef struct {
   uint16_t appliance_erd_list_count;
   uint16_t erd_index;
   uint16_t polling_retries;
+  bool only_publish_on_change;
 } mqtt_bridge_polling_t;
 
 /*!
@@ -46,7 +47,8 @@ void mqtt_bridge_polling_init(
   tiny_timer_group_t* timer_group,
   i_tiny_gea3_erd_client_t* erd_client,
   i_mqtt_client_t* mqtt_client,
-  uint32_t polling_interval_ms);
+  uint32_t polling_interval_ms,
+  bool only_publish_on_change);
 
 /*!
  * Destroy the MQTT polling bridge.
