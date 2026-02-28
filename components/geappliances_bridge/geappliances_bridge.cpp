@@ -599,7 +599,8 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
       &this->mqtt_bridge_,
       &this->timer_group_,
       &this->erd_client_.interface,
-      &this->mqtt_client_adapter_.interface);
+      &this->mqtt_client_adapter_.interface,
+      this->host_address_);
   }
 
   this->mqtt_bridge_initialized_ = true;

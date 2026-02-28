@@ -21,6 +21,7 @@ typedef struct {
   tiny_event_subscription_t erd_client_activity_subscription;
   void* erd_set;
   tiny_hsm_t hsm;
+  uint8_t erd_host_address;
 } mqtt_bridge_t;
 
 /*!
@@ -30,7 +31,8 @@ void mqtt_bridge_init(
   mqtt_bridge_t* self,
   tiny_timer_group_t* timer_group,
   i_tiny_gea3_erd_client_t* erd_client,
-  i_mqtt_client_t* mqtt_client);
+  i_mqtt_client_t* mqtt_client,
+  uint8_t address);
 
 /*!
  * Destroy the MQTT bridge.
