@@ -10,8 +10,7 @@
 #include "i_tiny_gea3_erd_client.h"
 #include "tiny_hsm.h"
 #include "tiny_timer.h"
-
-#define POLLING_LIST_MAX_SIZE 256
+#include "erd_lists.h"
 
 typedef struct {
   tiny_erd_t erd_polling_list[POLLING_LIST_MAX_SIZE];

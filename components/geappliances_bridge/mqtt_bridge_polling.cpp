@@ -357,6 +357,10 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
         tiny_erd_t erd = args->read_completed.erd;
         const uint8_t* data = reinterpret_cast<const uint8_t*>(args->read_completed.data);
         uint8_t data_size = args->read_completed.data_size;
+        // Register any ERD that arrives here for the first time. This handles
+        // delayed discovery responses that arrive after the transition to polling
+        // state (when the device takes longer than retry_delay to respond).
+        add_erd_to_polling_list(self, erd);
         bool should_publish;
         if(self->only_publish_on_change) {
           auto& cache = erd_cache(self);

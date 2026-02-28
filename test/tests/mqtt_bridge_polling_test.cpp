@@ -110,6 +110,14 @@ TEST_GROUP(mqtt_bridge_polling)
       .andReturnValue(true);
   }
 
+  void should_register_erd(tiny_erd_t erd)
+  {
+    mock()
+      .expectOneCall("register_erd")
+      .onObject(&mqtt_client)
+      .withParameter("erd", erd);
+  }
+
   template <typename T>
   void should_update_erd(tiny_erd_t erd, T value)
   {
@@ -195,4 +203,74 @@ TEST(mqtt_bridge_polling, should_republish_mqtt_when_polled_erd_data_changes_and
   after(polling_interval);
   should_update_erd(polled_erd, uint8_t(0x02));
   when_a_poll_read_completes(0xC0, polled_erd, uint8_t(0x02));
+}
+
+// A late response from a discovery-phase read that arrives after the state
+// machine has already transitioned to polling (device responded slower than
+// retry_delay). The ERD must be registered and added to the polling list.
+TEST(mqtt_bridge_polling, should_register_and_poll_erd_whose_discovery_response_arrives_late_in_polling_state)
+{
+  enum { late_erd = 0x7b00 };
+
+  given_that_the_bridge_has_entered_polling_state();
+
+  // Cycle 1: polling timer fires and begins reading polled_erd
+  should_request_read(0xC0, polled_erd);
+  after(polling_interval);
+
+  // Late discovery response for late_erd arrives before polled_erd responds.
+  // Bridge registers it, publishes its value, then immediately reads the
+  // newly-registered ERD (now at the next position in the polling list).
+  should_register_erd(late_erd);
+  should_update_erd(late_erd, uint8_t(0xAB));
+  should_request_read(0xC0, late_erd);
+  when_a_poll_read_completes(0xC0, late_erd, uint8_t(0xAB));
+
+  // polled_erd arrives next; erd_index is now at the end so no further read
+  should_update_erd(polled_erd, uint8_t(0x01));
+  when_a_poll_read_completes(0xC0, polled_erd, uint8_t(0x01));
+
+  // Cycle 2: late_erd is now in the polling list alongside polled_erd
+  should_request_read(0xC0, polled_erd);
+  after(polling_interval);
+
+  // polled_erd completes and immediately triggers the read for late_erd
+  should_update_erd(polled_erd, uint8_t(0x01));
+  should_request_read(0xC0, late_erd);
+  when_a_poll_read_completes(0xC0, polled_erd, uint8_t(0x01));
+
+  should_update_erd(late_erd, uint8_t(0xAB));
+  when_a_poll_read_completes(0xC0, late_erd, uint8_t(0xAB));
+}
+
+// Same late-response scenario with only_publish_on_change enabled.
+TEST(mqtt_bridge_polling, should_register_and_poll_late_erd_when_only_publish_on_change_is_enabled)
+{
+  enum { late_erd = 0x7b05 };
+
+  given_that_the_bridge_has_entered_polling_state(true);
+
+  should_request_read(0xC0, polled_erd);
+  after(polling_interval);
+
+  // New ERD: always published on first read; bridge immediately reads the
+  // newly-registered ERD (appended to the polling list).
+  should_register_erd(late_erd);
+  should_update_erd(late_erd, uint8_t(0xCD));
+  should_request_read(0xC0, late_erd);
+  when_a_poll_read_completes(0xC0, late_erd, uint8_t(0xCD));
+
+  should_update_erd(polled_erd, uint8_t(0x01));
+  when_a_poll_read_completes(0xC0, polled_erd, uint8_t(0x01));
+
+  // Cycle 2: both ERDs polled; values unchanged → neither is republished
+  should_request_read(0xC0, polled_erd);
+  after(polling_interval);
+
+  // polled_erd same value → not published; late_erd read is triggered inline
+  should_request_read(0xC0, late_erd);
+  when_a_poll_read_completes(0xC0, polled_erd, uint8_t(0x01));
+
+  nothing_should_happen();
+  when_a_poll_read_completes(0xC0, late_erd, uint8_t(0xCD));
 }
