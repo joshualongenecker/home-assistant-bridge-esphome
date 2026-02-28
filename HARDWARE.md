@@ -2,7 +2,7 @@
 
 ## Overview
 
-This component is designed for use with the **FirstBuild Home Assistant Adapter** featuring the SeeedStudio Xiao ESP32-C3 microcontroller and GEA3 serial interface.
+This component is designed for use with the **FirstBuild Home Assistant Adapter** featuring the SeeedStudio Xiao ESP32-C3 microcontroller. It supports both GEA3 (newer appliances) and GEA2 (older appliances) serial interfaces.
 
 ## FirstBuild Home Assistant Adapter
 
@@ -15,19 +15,37 @@ Reference repository: [geappliances/home-assistant-adapter](https://github.com/g
 
 ## Pin Configuration
 
+### GEA3 (Newer Appliances)
+
 The FirstBuild adapter uses the following pins for GEA3 communication:
 
 ```yaml
 uart:
-  id: gea3_uart
-  tx_pin: GPIO21 #D6
-  rx_pin: GPIO20 #D7
-  baud_rate: 230400
+  - id: gea3_uart
+    tx_pin: GPIO21  # D6 on Xiao ESP32-C3
+    rx_pin: GPIO20  # D7 on Xiao ESP32-C3
+    baud_rate: 230400
 ```
 
 **Pin Mapping:**
 - GPIO21 = TX (to appliance RX)
 - GPIO20 = RX (from appliance TX)
+
+### GEA2 (Older Appliances) — Optional
+
+For older appliances that use GEA2, configure a second UART:
+
+```yaml
+uart:
+  - id: gea2_uart
+    tx_pin: GPIO9   # D9 on Xiao ESP32-C3
+    rx_pin: GPIO10  # D10 on Xiao ESP32-C3
+    baud_rate: 19200
+```
+
+**Pin Mapping:**
+- GPIO9  = TX (to appliance RX)
+- GPIO10 = RX (from appliance TX)
 
 ## GEA3 Serial Connection
 
@@ -38,6 +56,13 @@ The GEA3 protocol requires:
 
 The FirstBuild adapter carrier board handles the RJ45-to-serial conversion automatically.
 
+## GEA2 Serial Connection
+
+The GEA2 protocol requires:
+- **Baud rate:** 19200 bps
+- **Configuration:** 8 data bits, no parity, 1 stop bit (8N1)
+- **Voltage level:** 3.3V TTL
+
 ## Physical Connection
 
 Connect the FirstBuild adapter to your GE Appliance's GEA3 port using a standard Ethernet cable (RJ45).
@@ -47,9 +72,9 @@ Connect the FirstBuild adapter to your GE Appliance's GEA3 port using a standard
 ### No Communication with Appliance
 
 1. **Check physical connection** - Ensure RJ45 cable is firmly seated
-2. **Verify appliance compatibility** - Confirm appliance uses GEA3 protocol
+2. **Verify appliance compatibility** - Confirm appliance uses GEA3 or GEA2 protocol
 3. **Check power** - Ensure both adapter and appliance are powered on
-4. **Review logs** - Enable DEBUG logging to see UART activity
+4. **Review logs** - Enable DEBUG logging to see UART activity and autodiscovery results
 
 ### Testing Configuration
 
@@ -62,7 +87,7 @@ logger:
 
 Look for:
 - UART initialization messages
-- Data received from appliance
+- Autodiscovery broadcast results (board address and appliance type)
 - ERD value updates
 
 ## Additional Resources
