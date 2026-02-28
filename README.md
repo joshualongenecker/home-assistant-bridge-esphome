@@ -1,6 +1,6 @@
 # home-assistant-bridge-esphome
 
-ESPHome external component for GE Appliances bridge supporting both GEA3 and GEA2 protocols.
+ESPHome external component for GE Appliances bridge supporting both GEA3 and GEA2 (in development) protocols.
 
 Subscribes to data hosted by a GE Appliances product and publishes it to an MQTT server under `geappliances/<device ID>`. ERDs are identified by 16-bit identifiers and the raw binary data is published as a hex string to `geappliances/<device ID>/erd/<ERD ID>/value`. Data can be written to an ERD by writing a hex string of the appropriate size to `geappliances/<device ID>/erd/<ERD ID>/write`.
 
@@ -81,7 +81,7 @@ The `gea_mode` parameter is **optional** and controls which protocol(s) are used
 
 - **`auto` (Default)** - Tries GEA3 first, then GEA2.
 - **`gea3`** - GEA3 only.
-- **`gea2`** - GEA2 only.
+- **`gea2`** - GEA2 only. In development
 
 ### Board Address Preferences
 
