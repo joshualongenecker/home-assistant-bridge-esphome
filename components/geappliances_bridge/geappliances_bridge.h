@@ -13,7 +13,6 @@ extern "C" {
 #include "tiny_gea3_erd_client.h"
 #include "tiny_gea3_interface.h"
 #include "tiny_timer.h"
-#include "uptime_monitor.h"
 }
 
 #include "esphome_uart_adapter.h"
@@ -175,8 +174,6 @@ class GeappliancesBridge : public Component {
   mqtt_bridge_t mqtt_bridge_;
   mqtt_bridge_polling_t mqtt_bridge_polling_;
 
-  uptime_monitor_t uptime_monitor_;
-  
   tiny_event_subscription_t erd_client_activity_subscription_;
   tiny_event_subscription_t gea2_erd_client_activity_subscription_;
 };

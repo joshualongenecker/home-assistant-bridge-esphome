@@ -154,21 +154,6 @@ static void update_erd_write_result(
   ESP_LOGD(TAG, "Write result for ERD 0x%04X: %s", erd, payload.c_str());
 }
 
-static void publish_sub_topic(i_mqtt_client_t* _self, const char* sub_topic, const char* payload)
-{
-  auto self = reinterpret_cast<esphome_mqtt_client_adapter_t*>(_self);
-  
-  std::string suffix = std::string("/") + sub_topic;
-  std::string topic = build_topic(self, suffix.c_str());
-  
-  auto mqtt_client = esphome::mqtt::global_mqtt_client;
-  if (mqtt_client != nullptr && mqtt_client->is_connected()) {
-    mqtt_client->publish(topic, std::string(payload), 2, true);  // QoS 2, retain
-  } else {
-    ESP_LOGD(TAG, "MQTT not connected, skipping sub-topic publish for %s", sub_topic);
-  }
-}
-
 static i_tiny_event_t* on_write_request(i_mqtt_client_t* _self)
 {
   auto self = reinterpret_cast<esphome_mqtt_client_adapter_t*>(_self);
@@ -185,7 +170,6 @@ static const i_mqtt_client_api_t api = {
   register_erd,
   update_erd,
   update_erd_write_result,
-  publish_sub_topic,
   on_write_request,
   on_mqtt_disconnect
 };

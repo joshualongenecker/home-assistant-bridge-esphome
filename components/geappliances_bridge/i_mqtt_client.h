@@ -29,8 +29,6 @@ typedef struct i_mqtt_client_api_t {
 
   void (*update_erd_write_result)(i_mqtt_client_t* self, tiny_erd_t erd, bool success, tiny_gea3_erd_client_write_failure_reason_t failure_reason);
 
-  void (*publish_sub_topic)(i_mqtt_client_t* self, const char* sub_topic, const char* payload);
-
   i_tiny_event_t* (*on_write_request)(i_mqtt_client_t* self);
 
   i_tiny_event_t* (*on_mqtt_disconnect)(i_mqtt_client_t* self);
@@ -58,14 +56,6 @@ static inline void mqtt_client_update_erd(i_mqtt_client_t* self, tiny_erd_t erd,
 static inline void mqtt_client_update_erd_write_result(i_mqtt_client_t* self, tiny_erd_t erd, bool success, tiny_gea3_erd_client_write_failure_reason_t failure_reason)
 {
   self->api->update_erd_write_result(self, erd, success, failure_reason);
-}
-
-/*!
- * Publishes to a topic under the client's namespace.
- */
-static inline void mqtt_client_publish_sub_topic(i_mqtt_client_t* self, const char* sub_topic, const char* payload)
-{
-  self->api->publish_sub_topic(self, sub_topic, payload);
 }
 
 /*!

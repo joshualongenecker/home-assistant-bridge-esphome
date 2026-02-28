@@ -585,12 +585,6 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
   // Initialize MQTT client adapter
   esphome_mqtt_client_adapter_init(&this->mqtt_client_adapter_, this->final_device_id_.c_str());
 
-  // Initialize uptime monitor
-  uptime_monitor_init(
-    &this->uptime_monitor_,
-    &this->timer_group_,
-    &this->mqtt_client_adapter_.interface);
-
   // Initialize MQTT bridge based on mode
   if (use_polling) {
     mqtt_bridge_polling_init(
