@@ -26,6 +26,23 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-esphome-${{ hashFiles('doc/test-compile.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-esphome-
+            ${{ runner.os }}-pip-
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-platformio-${{ hashFiles('doc/test-compile.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-platformio-
+
       - name: Install ESPHome
         run: |
           pip install --upgrade pip
