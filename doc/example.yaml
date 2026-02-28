@@ -57,8 +57,11 @@ uart:
 
 # GE Appliances Bridge component
 geappliances_bridge:
-  uart_id: gea3_uart
+  gea3_uart_id: gea3_uart
   gea2_uart_id: gea2_uart
   # device_id: "YourDeviceId"   # Optional: Uncomment to use a custom device ID
   # mode: auto                  # Default: auto   Options: auto, subscribe, poll
   # polling_interval: 10000     # Default: 10000 ms (10 seconds), used when in polling mode
+  # gea_mode: auto              # Default: auto   Options: auto, gea3, gea2
+  # gea3_address: 0xC0          # Default: 0xC0   Preferred GEA3 board address
+  # gea2_address: 0xA0          # Default: 0xA0   Preferred GEA2 board address

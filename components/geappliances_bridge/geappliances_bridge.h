@@ -33,6 +33,14 @@ enum BridgeMode {
   BRIDGE_MODE_AUTO = 2        // Auto: try subscription, fallback to polling
 };
 
+// GEA protocol mode for autodiscovery and device ID generation
+// Note: These enum values must match GEA_MODE_*_VALUE constants in __init__.py
+enum GEAMode {
+  GEA_MODE_AUTO = 0,  // Try GEA3 first, then GEA2
+  GEA_MODE_GEA3 = 1,  // Use GEA3 only
+  GEA_MODE_GEA2 = 2   // Use GEA2 only
+};
+
 class GeappliancesBridge : public Component {
  public:
   static constexpr unsigned long baud = 230400;
@@ -42,11 +50,14 @@ class GeappliancesBridge : public Component {
   void dump_config() override;
   float get_setup_priority() const override;
 
-  void set_uart(uart::UARTComponent *uart) { this->uart_ = uart; }
+  void set_gea3_uart(uart::UARTComponent *uart) { this->uart_ = uart; }
   void set_gea2_uart(uart::UARTComponent *uart) { this->gea2_uart_ = uart; }
   void set_device_id(const std::string &device_id) { this->configured_device_id_ = device_id; }
   void set_mode(uint8_t mode) { this->mode_ = static_cast<BridgeMode>(mode); }
   void set_polling_interval(uint32_t polling_interval) { this->polling_interval_ms_ = polling_interval; }
+  void set_gea3_address(uint8_t address) { this->gea3_address_preference_ = address; }
+  void set_gea2_address(uint8_t address) { this->gea2_address_preference_ = address; }
+  void set_gea_mode(uint8_t mode) { this->gea_mode_ = static_cast<GEAMode>(mode); }
 
  protected:
   void on_mqtt_connected_();
@@ -97,7 +108,10 @@ class GeappliancesBridge : public Component {
   bool mqtt_was_connected_{false};
   bool mqtt_bridge_initialized_{false};
   BridgeMode mode_{BRIDGE_MODE_AUTO};
+  GEAMode gea_mode_{GEA_MODE_AUTO};
   uint32_t polling_interval_ms_{10000};
+  uint8_t gea3_address_preference_{0xC0}; // Preferred GEA3 board address for device ID generation
+  uint8_t gea2_address_preference_{0xA0}; // Preferred GEA2 board address for device ID generation
   
   // Auto mode fallback tracking
   bool subscription_mode_active_{false};
@@ -112,7 +126,13 @@ class GeappliancesBridge : public Component {
   AutodiscoveryState autodiscovery_state_{AUTODISCOVERY_WAITING_FOR_MQTT};
   uint32_t autodiscovery_timer_start_{0};
   bool gea3_board_discovered_{false};
+  bool gea3_preferred_found_{false};
+  uint8_t gea3_first_address_{0x00};       // First GEA3 board that responded (fallback)
+  bool gea3_first_address_set_{false};     // Whether gea3_first_address_ has been recorded
   bool gea2_board_discovered_{false};
+  bool gea2_preferred_found_{false};
+  uint8_t gea2_first_address_{0x00};       // First GEA2 board that responded (fallback)
+  bool gea2_first_address_set_{false};     // Whether gea2_first_address_ has been recorded
   static constexpr uint32_t STARTUP_DELAY_MS = 20000;              // 20s after MQTT connects
   static constexpr uint32_t AUTODISCOVERY_BROADCAST_WINDOW_MS = 10000; // 10s window per broadcast
 
