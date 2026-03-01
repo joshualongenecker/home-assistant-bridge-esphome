@@ -5,6 +5,7 @@
 extern "C" {
 #include "tiny_gea3_erd_api.h"
 #include "tiny_gea2_erd_api.h"
+#include "i_tiny_gea_interface.h"
 }
 
 namespace esphome {
@@ -26,10 +27,14 @@ static const tiny_gea2_erd_client_configuration_t gea2_client_configuration = {
 static constexpr tiny_erd_t ERD_MODEL_NUMBER = 0x0001;
 static constexpr tiny_erd_t ERD_SERIAL_NUMBER = 0x0002;
 static constexpr tiny_erd_t ERD_APPLIANCE_TYPE = 0x0008;
-// ERD used for discovery broadcasts (appliance type)
-static constexpr tiny_erd_t ERD_DISCOVERY = 0x0008;
 static constexpr uint8_t GEA_BROADCAST_ADDRESS = 0xFF;
 static constexpr uint8_t GEA2_INTERFACE_RETRIES = 3;
+// GEA3 Cmd=0x01 presence request: sent as a broadcast to enumerate all nodes on the bus
+static constexpr uint8_t GEA3_PRESENCE_REQUEST_COMMAND = 0x01;
+
+static void fill_gea3_presence_request(void* /*context*/, tiny_gea_packet_t* packet) {
+  packet->payload[0] = GEA3_PRESENCE_REQUEST_COMMAND;
+}
 
 static void publish_msec_interrupt(void* context)
 {
@@ -274,49 +279,71 @@ void GeappliancesBridge::run_autodiscovery_() {
       if (millis() - this->autodiscovery_timer_start_ >= STARTUP_DELAY_MS) {
         ESP_LOGI(TAG, "20s delay complete, starting GEA2/3 autodiscovery");
         if (this->gea_mode_ == GEA_MODE_GEA2) {
-          this->autodiscovery_state_ = AUTODISCOVERY_GEA2_BROADCAST_PENDING;
+          this->autodiscovery_state_ = AUTODISCOVERY_GEA2_PING_PENDING;
         } else {
-          this->autodiscovery_state_ = AUTODISCOVERY_GEA3_BROADCAST_PENDING;
+          this->autodiscovery_state_ = AUTODISCOVERY_GEA3_PING_PENDING;
         }
       }
       break;
 
-    case AUTODISCOVERY_GEA3_BROADCAST_PENDING: {
-      // Reset GEA3 discovery tracking for this broadcast cycle
+    case AUTODISCOVERY_GEA3_PING_PENDING: {
+      // Reset GEA3 discovery tracking for this cycle
       this->gea3_board_discovered_ = false;
       this->gea3_preferred_found_ = false;
       this->gea3_discovered_count_ = 0;
+      this->gea3_board_response_count_ = 0;
+      this->gea3_board_check_index_ = 0;
       this->gea3_discovery_poll_count_ = 0;
-      tiny_gea3_erd_client_request_id_t req_id;
-      if (tiny_gea3_erd_client_read(&this->erd_client_.interface, &req_id,
-                                     GEA_BROADCAST_ADDRESS, ERD_DISCOVERY)) {
-        ESP_LOGI(TAG, "GEA3 discovery: sent broadcast #%u/%u (TX: dst=0xFF ERD=0x%04X)",
-                 this->gea3_discovery_poll_count_, AUTODISCOVERY_POLL_COUNT, ERD_DISCOVERY);
+      // Send Cmd=0x01 ping broadcast so every board on the bus responds
+      if (tiny_gea_interface_send(&this->gea3_interface_.interface, GEA_BROADCAST_ADDRESS, 1, nullptr,
+          fill_gea3_presence_request)) {
+        ESP_LOGI(TAG, "GEA3 discovery: sent ping #1/%u (TX: dst=0xFF Cmd=0x01)", AUTODISCOVERY_POLL_COUNT);
         this->autodiscovery_timer_start_ = millis();
         this->gea3_last_poll_time_ = millis();
         this->gea3_discovery_poll_count_ = 1;
-        this->autodiscovery_state_ = AUTODISCOVERY_GEA3_BROADCAST_WAITING;
+        this->autodiscovery_state_ = AUTODISCOVERY_GEA3_PING_WAITING;
       }
       // else: retry next loop iteration
       break;
     }
 
-    case AUTODISCOVERY_GEA3_BROADCAST_WAITING: {
-      // Resend broadcast every AUTODISCOVERY_REPEAT_INTERVAL_MS while under AUTODISCOVERY_POLL_COUNT
+    case AUTODISCOVERY_GEA3_PING_WAITING: {
+      // Resend ping every AUTODISCOVERY_REPEAT_INTERVAL_MS while under AUTODISCOVERY_POLL_COUNT
       if (this->gea3_discovery_poll_count_ < AUTODISCOVERY_POLL_COUNT &&
           millis() - this->gea3_last_poll_time_ >= AUTODISCOVERY_REPEAT_INTERVAL_MS) {
-        tiny_gea3_erd_client_request_id_t req_id;
-        if (tiny_gea3_erd_client_read(&this->erd_client_.interface, &req_id,
-                                       GEA_BROADCAST_ADDRESS, ERD_DISCOVERY)) {
+        if (tiny_gea_interface_send(&this->gea3_interface_.interface, GEA_BROADCAST_ADDRESS, 1, nullptr,
+            fill_gea3_presence_request)) {
           this->gea3_discovery_poll_count_++;
           this->gea3_last_poll_time_ = millis();
-          ESP_LOGI(TAG, "GEA3 discovery: sent broadcast #%u/%u (TX: dst=0xFF ERD=0x%04X)",
-                   this->gea3_discovery_poll_count_, AUTODISCOVERY_POLL_COUNT, ERD_DISCOVERY);
+          ESP_LOGI(TAG, "GEA3 discovery: sent ping #%u/%u (TX: dst=0xFF Cmd=0x01)",
+                   this->gea3_discovery_poll_count_, AUTODISCOVERY_POLL_COUNT);
         }
       }
       if (millis() - this->autodiscovery_timer_start_ >= AUTODISCOVERY_BROADCAST_WINDOW_MS) {
-        if (this->gea3_board_discovered_) {
-          // Use preferred address if found; otherwise use first responder
+        if (this->gea3_board_response_count_ > 0) {
+          ESP_LOGI(TAG, "GEA3 ping complete: %u board(s) responded, verifying appliances",
+                   this->gea3_board_response_count_);
+          this->gea3_board_check_index_ = 0;
+          this->autodiscovery_state_ = AUTODISCOVERY_GEA3_ERD_CHECK_PENDING;
+        } else {
+          if (this->gea_mode_ == GEA_MODE_GEA3 ||
+              (this->gea_mode_ == GEA_MODE_AUTO && this->gea2_uart_ == nullptr)) {
+            ESP_LOGW(TAG, "No GEA3 boards found, retrying GEA3...");
+            this->autodiscovery_state_ = AUTODISCOVERY_GEA3_PING_PENDING;
+          } else {
+            ESP_LOGI(TAG, "No GEA3 boards found, trying GEA2...");
+            this->autodiscovery_state_ = AUTODISCOVERY_GEA2_PING_PENDING;
+          }
+        }
+      }
+      break;
+    }
+
+    case AUTODISCOVERY_GEA3_ERD_CHECK_PENDING: {
+      // All boards in the ping response list have been checked
+      if (this->gea3_board_check_index_ >= this->gea3_board_response_count_) {
+        if (this->gea3_discovered_count_ > 0) {
+          // Set primary host address
           if (!this->gea3_preferred_found_) {
             this->host_address_ = this->gea3_discovered_addresses_[0];
           }
@@ -328,57 +355,105 @@ void GeappliancesBridge::run_autodiscovery_() {
         } else {
           if (this->gea_mode_ == GEA_MODE_GEA3 ||
               (this->gea_mode_ == GEA_MODE_AUTO && this->gea2_uart_ == nullptr)) {
-            ESP_LOGW(TAG, "No GEA3 boards found, retrying GEA3...");
-            this->autodiscovery_state_ = AUTODISCOVERY_GEA3_BROADCAST_PENDING;
+            ESP_LOGW(TAG, "No GEA3 appliance boards found, retrying GEA3...");
+            this->autodiscovery_state_ = AUTODISCOVERY_GEA3_PING_PENDING;
           } else {
-            ESP_LOGI(TAG, "No GEA3 boards found, trying GEA2...");
-            this->autodiscovery_state_ = AUTODISCOVERY_GEA2_BROADCAST_PENDING;
+            ESP_LOGI(TAG, "No GEA3 appliance boards found, trying GEA2...");
+            this->autodiscovery_state_ = AUTODISCOVERY_GEA2_PING_PENDING;
+          }
+        }
+        break;
+      }
+      // Send unicast ERD 0x0008 read to the next board in the ping response list
+      uint8_t board = this->gea3_board_response_list_[this->gea3_board_check_index_];
+      tiny_gea3_erd_client_request_id_t req_id;
+      if (tiny_gea3_erd_client_read(&this->erd_client_.interface, &req_id, board, ERD_APPLIANCE_TYPE)) {
+        ESP_LOGI(TAG, "GEA3 discovery: reading ERD 0x%04X from 0x%02X (%u/%u)",
+                 ERD_APPLIANCE_TYPE, board,
+                 this->gea3_board_check_index_ + 1, this->gea3_board_response_count_);
+        this->autodiscovery_timer_start_ = millis();
+        this->autodiscovery_state_ = AUTODISCOVERY_GEA3_ERD_CHECK_WAITING;
+      }
+      // else: retry next loop iteration
+      break;
+    }
+
+    case AUTODISCOVERY_GEA3_ERD_CHECK_WAITING: {
+      // ERD client activity in handle_erd_client_activity_() drives the state forward.
+      // Safety timeout in case the ERD client never fires (should not happen normally).
+      if (millis() - this->autodiscovery_timer_start_ >= ERD_CHECK_TIMEOUT_MS) {
+        uint8_t board = this->gea3_board_response_list_[this->gea3_board_check_index_];
+        ESP_LOGW(TAG, "GEA3 discovery: timeout reading ERD 0x%04X from 0x%02X, skipping",
+                 ERD_APPLIANCE_TYPE, board);
+        this->gea3_board_check_index_++;
+        this->autodiscovery_state_ = AUTODISCOVERY_GEA3_ERD_CHECK_PENDING;
+      }
+      break;
+    }
+
+    case AUTODISCOVERY_GEA2_PING_PENDING:
+      if (this->gea2_uart_ == nullptr) {
+        ESP_LOGE(TAG, "GEA2 mode selected but no gea2_uart_id configured; falling back to GEA3 autodiscovery");
+        this->autodiscovery_state_ = AUTODISCOVERY_GEA3_PING_PENDING;
+      } else {
+        // Reset GEA2 discovery tracking for this cycle
+        this->gea2_board_discovered_ = false;
+        this->gea2_preferred_found_ = false;
+        this->gea2_discovered_count_ = 0;
+        this->gea2_board_response_count_ = 0;
+        this->gea2_board_check_index_ = 0;
+        this->gea2_discovery_poll_count_ = 0;
+        // GEA2 ERD read to broadcast — same effect as a ping; any board that answers appears on bus
+        tiny_gea2_erd_client_request_id_t req_id;
+        if (tiny_gea2_erd_client_read(&this->gea2_erd_client_.interface, &req_id,
+                                       GEA_BROADCAST_ADDRESS, ERD_APPLIANCE_TYPE)) {
+          ESP_LOGI(TAG, "GEA2 discovery: sent ping #1/%u (TX: dst=0xFF ERD=0x%04X)",
+                   AUTODISCOVERY_POLL_COUNT, ERD_APPLIANCE_TYPE);
+          this->autodiscovery_timer_start_ = millis();
+          this->gea2_last_poll_time_ = millis();
+          this->gea2_discovery_poll_count_ = 1;
+          this->autodiscovery_state_ = AUTODISCOVERY_GEA2_PING_WAITING;
+        }
+        // else: retry next loop iteration
+      }
+      break;
+
+    case AUTODISCOVERY_GEA2_PING_WAITING: {
+      // Resend ping every AUTODISCOVERY_REPEAT_INTERVAL_MS while under AUTODISCOVERY_POLL_COUNT
+      if (this->gea2_discovery_poll_count_ < AUTODISCOVERY_POLL_COUNT &&
+          millis() - this->gea2_last_poll_time_ >= AUTODISCOVERY_REPEAT_INTERVAL_MS) {
+        tiny_gea2_erd_client_request_id_t req_id;
+        if (tiny_gea2_erd_client_read(&this->gea2_erd_client_.interface, &req_id,
+                                       GEA_BROADCAST_ADDRESS, ERD_APPLIANCE_TYPE)) {
+          this->gea2_discovery_poll_count_++;
+          this->gea2_last_poll_time_ = millis();
+          ESP_LOGI(TAG, "GEA2 discovery: sent ping #%u/%u (TX: dst=0xFF ERD=0x%04X)",
+                   this->gea2_discovery_poll_count_, AUTODISCOVERY_POLL_COUNT, ERD_APPLIANCE_TYPE);
+        }
+      }
+      if (millis() - this->autodiscovery_timer_start_ >= AUTODISCOVERY_BROADCAST_WINDOW_MS) {
+        if (this->gea2_board_response_count_ > 0) {
+          ESP_LOGI(TAG, "GEA2 ping complete: %u board(s) responded, verifying appliances",
+                   this->gea2_board_response_count_);
+          this->gea2_board_check_index_ = 0;
+          this->autodiscovery_state_ = AUTODISCOVERY_GEA2_ERD_CHECK_PENDING;
+        } else {
+          if (this->gea_mode_ == GEA_MODE_GEA2) {
+            ESP_LOGW(TAG, "No GEA2 boards found, retrying GEA2...");
+            this->autodiscovery_state_ = AUTODISCOVERY_GEA2_PING_PENDING;
+          } else {
+            ESP_LOGW(TAG, "No boards found after GEA3+GEA2 broadcasts, repeating discovery loop...");
+            this->autodiscovery_state_ = AUTODISCOVERY_GEA3_PING_PENDING;
           }
         }
       }
       break;
     }
 
-    case AUTODISCOVERY_GEA2_BROADCAST_PENDING:
-      if (this->gea2_uart_ == nullptr) {
-        ESP_LOGE(TAG, "GEA2 mode selected but no gea2_uart_id configured; falling back to GEA3 autodiscovery");
-        this->autodiscovery_state_ = AUTODISCOVERY_GEA3_BROADCAST_PENDING;
-      } else {
-        // Reset GEA2 discovery tracking for this broadcast cycle
-        this->gea2_board_discovered_ = false;
-        this->gea2_preferred_found_ = false;
-        this->gea2_discovered_count_ = 0;
-        this->gea2_discovery_poll_count_ = 0;
-        tiny_gea2_erd_client_request_id_t req_id;
-        if (tiny_gea2_erd_client_read(&this->gea2_erd_client_.interface, &req_id,
-                                       GEA_BROADCAST_ADDRESS, ERD_DISCOVERY)) {
-          ESP_LOGI(TAG, "GEA2 discovery: sent broadcast #%u/%u (TX: dst=0xFF ERD=0x%04X)",
-                   this->gea2_discovery_poll_count_, AUTODISCOVERY_POLL_COUNT, ERD_DISCOVERY);
-          this->autodiscovery_timer_start_ = millis();
-          this->gea2_last_poll_time_ = millis();
-          this->gea2_discovery_poll_count_ = 1;
-          this->autodiscovery_state_ = AUTODISCOVERY_GEA2_BROADCAST_WAITING;
-        }
-        // else: retry next loop iteration
-      }
-      break;
-
-    case AUTODISCOVERY_GEA2_BROADCAST_WAITING: {
-      // Resend broadcast every AUTODISCOVERY_REPEAT_INTERVAL_MS while under AUTODISCOVERY_POLL_COUNT
-      if (this->gea2_discovery_poll_count_ < AUTODISCOVERY_POLL_COUNT &&
-          millis() - this->gea2_last_poll_time_ >= AUTODISCOVERY_REPEAT_INTERVAL_MS) {
-        tiny_gea2_erd_client_request_id_t req_id;
-        if (tiny_gea2_erd_client_read(&this->gea2_erd_client_.interface, &req_id,
-                                       GEA_BROADCAST_ADDRESS, ERD_DISCOVERY)) {
-          this->gea2_discovery_poll_count_++;
-          this->gea2_last_poll_time_ = millis();
-          ESP_LOGI(TAG, "GEA2 discovery: sent broadcast #%u/%u (TX: dst=0xFF ERD=0x%04X)",
-                   this->gea2_discovery_poll_count_, AUTODISCOVERY_POLL_COUNT, ERD_DISCOVERY);
-        }
-      }
-      if (millis() - this->autodiscovery_timer_start_ >= AUTODISCOVERY_BROADCAST_WINDOW_MS) {
-        if (this->gea2_board_discovered_) {
-          // Use preferred address if found; otherwise use first responder
+    case AUTODISCOVERY_GEA2_ERD_CHECK_PENDING: {
+      // All boards in the GEA2 ping response list have been checked
+      if (this->gea2_board_check_index_ >= this->gea2_board_response_count_) {
+        if (this->gea2_discovered_count_ > 0) {
           if (!this->gea2_preferred_found_) {
             this->host_address_ = this->gea2_discovered_addresses_[0];
           }
@@ -389,13 +464,38 @@ void GeappliancesBridge::run_autodiscovery_() {
           this->start_device_id_generation_();
         } else {
           if (this->gea_mode_ == GEA_MODE_GEA2) {
-            ESP_LOGW(TAG, "No GEA2 boards found, retrying GEA2...");
-            this->autodiscovery_state_ = AUTODISCOVERY_GEA2_BROADCAST_PENDING;
+            ESP_LOGW(TAG, "No GEA2 appliance boards found, retrying GEA2...");
+            this->autodiscovery_state_ = AUTODISCOVERY_GEA2_PING_PENDING;
           } else {
-            ESP_LOGW(TAG, "No boards found after GEA3+GEA2 broadcasts, repeating discovery loop...");
-            this->autodiscovery_state_ = AUTODISCOVERY_GEA3_BROADCAST_PENDING;
+            ESP_LOGW(TAG, "No boards found after GEA3+GEA2 discovery, repeating...");
+            this->autodiscovery_state_ = AUTODISCOVERY_GEA3_PING_PENDING;
           }
         }
+        break;
+      }
+      // Send unicast ERD 0x0008 read to the next board in the GEA2 ping response list
+      uint8_t board = this->gea2_board_response_list_[this->gea2_board_check_index_];
+      tiny_gea2_erd_client_request_id_t req_id;
+      if (tiny_gea2_erd_client_read(&this->gea2_erd_client_.interface, &req_id, board, ERD_APPLIANCE_TYPE)) {
+        ESP_LOGI(TAG, "GEA2 discovery: reading ERD 0x%04X from 0x%02X (%u/%u)",
+                 ERD_APPLIANCE_TYPE, board,
+                 this->gea2_board_check_index_ + 1, this->gea2_board_response_count_);
+        this->autodiscovery_timer_start_ = millis();
+        this->autodiscovery_state_ = AUTODISCOVERY_GEA2_ERD_CHECK_WAITING;
+      }
+      // else: retry next loop iteration
+      break;
+    }
+
+    case AUTODISCOVERY_GEA2_ERD_CHECK_WAITING: {
+      // handle_gea2_erd_client_activity_() drives the state forward.
+      // Safety timeout in case the ERD client never fires.
+      if (millis() - this->autodiscovery_timer_start_ >= ERD_CHECK_TIMEOUT_MS) {
+        uint8_t board = this->gea2_board_response_list_[this->gea2_board_check_index_];
+        ESP_LOGW(TAG, "GEA2 discovery: timeout reading ERD 0x%04X from 0x%02X, skipping",
+                 ERD_APPLIANCE_TYPE, board);
+        this->gea2_board_check_index_++;
+        this->autodiscovery_state_ = AUTODISCOVERY_GEA2_ERD_CHECK_PENDING;
       }
       break;
     }
@@ -483,8 +583,38 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
     }
   }
 
-  // Skip during autodiscovery window; raw packet handler captures all board responses
-  if (this->autodiscovery_state_ == AUTODISCOVERY_GEA3_BROADCAST_WAITING) {
+  // Skip during Phase 1 ping window; raw packet handler captures board responses
+  if (this->autodiscovery_state_ == AUTODISCOVERY_GEA3_PING_WAITING) {
+    return;
+  }
+
+  // Phase 2: per-board ERD 0x0008 check — determines whether each board is an appliance
+  if (this->autodiscovery_state_ == AUTODISCOVERY_GEA3_ERD_CHECK_WAITING) {
+    uint8_t board = this->gea3_board_response_list_[this->gea3_board_check_index_];
+    if (args->address != board) return;
+    if (args->type == tiny_gea3_erd_client_activity_type_read_completed &&
+        args->read_completed.erd == ERD_APPLIANCE_TYPE) {
+      uint8_t app_type = reinterpret_cast<const uint8_t*>(args->read_completed.data)[0];
+      std::string app_type_name = appliance_type_to_string(app_type);
+      ESP_LOGI(TAG, "GEA3 discovery: board 0x%02X responded, appliance_type=%u (%s)",
+               board, app_type, app_type_name.c_str());
+      this->gea3_board_discovered_ = true;
+      if (board == this->gea3_address_preference_) {
+        this->gea3_preferred_found_ = true;
+        this->host_address_ = board;
+        this->use_gea2_for_device_id_ = false;
+      }
+      if (this->gea3_discovered_count_ < MAX_BOARDS) {
+        this->gea3_discovered_addresses_[this->gea3_discovered_count_++] = board;
+        ESP_LOGI(TAG, "GEA3 discovery: %u appliance board(s) confirmed so far", this->gea3_discovered_count_);
+      }
+    } else if (args->type == tiny_gea3_erd_client_activity_type_read_failed) {
+      ESP_LOGI(TAG, "GEA3 discovery: board 0x%02X did not respond to ERD 0x%04X, skipping",
+               board, ERD_APPLIANCE_TYPE);
+    }
+    // Advance to the next board regardless of outcome
+    this->gea3_board_check_index_++;
+    this->autodiscovery_state_ = AUTODISCOVERY_GEA3_ERD_CHECK_PENDING;
     return;
   }
 
@@ -574,8 +704,38 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
 }
 
 void GeappliancesBridge::handle_gea2_erd_client_activity_(const tiny_gea2_erd_client_on_activity_args_t* args) {
-  // Skip during autodiscovery window; raw packet handler captures all board responses
-  if (this->autodiscovery_state_ == AUTODISCOVERY_GEA2_BROADCAST_WAITING) {
+  // Skip during GEA2 Phase 1 ping window; raw packet handler captures board responses
+  if (this->autodiscovery_state_ == AUTODISCOVERY_GEA2_PING_WAITING) {
+    return;
+  }
+
+  // Phase 2: per-board ERD 0x0008 check for GEA2
+  if (this->autodiscovery_state_ == AUTODISCOVERY_GEA2_ERD_CHECK_WAITING) {
+    uint8_t board = this->gea2_board_response_list_[this->gea2_board_check_index_];
+    if (args->address != board) return;
+    if (args->type == tiny_gea2_erd_client_activity_type_read_completed &&
+        args->read_completed.erd == ERD_APPLIANCE_TYPE) {
+      uint8_t app_type = reinterpret_cast<const uint8_t*>(args->read_completed.data)[0];
+      std::string app_type_name = appliance_type_to_string(app_type);
+      ESP_LOGI(TAG, "GEA2 discovery: board 0x%02X responded, appliance_type=%u (%s)",
+               board, app_type, app_type_name.c_str());
+      this->gea2_board_discovered_ = true;
+      if (board == this->gea2_address_preference_) {
+        this->gea2_preferred_found_ = true;
+        this->host_address_ = board;
+        this->use_gea2_for_device_id_ = true;
+      }
+      if (this->gea2_discovered_count_ < MAX_BOARDS) {
+        this->gea2_discovered_addresses_[this->gea2_discovered_count_++] = board;
+        ESP_LOGI(TAG, "GEA2 discovery: %u appliance board(s) confirmed so far", this->gea2_discovered_count_);
+      }
+    } else if (args->type == tiny_gea2_erd_client_activity_type_read_failed) {
+      ESP_LOGI(TAG, "GEA2 discovery: board 0x%02X did not respond to ERD 0x%04X, skipping",
+               board, ERD_APPLIANCE_TYPE);
+    }
+    // Advance to the next board regardless of outcome
+    this->gea2_board_check_index_++;
+    this->autodiscovery_state_ = AUTODISCOVERY_GEA2_ERD_CHECK_PENDING;
     return;
   }
 
@@ -791,102 +951,55 @@ std::string GeappliancesBridge::bytes_to_hex_string_(const uint8_t* data, size_t
 }
 
 void GeappliancesBridge::handle_gea3_raw_packet_(const tiny_gea_packet_t* packet) {
-  if (this->autodiscovery_state_ != AUTODISCOVERY_GEA3_BROADCAST_WAITING) {
+  if (this->autodiscovery_state_ != AUTODISCOVERY_GEA3_PING_WAITING) {
     return;
   }
 
-  // Log every raw packet received during the discovery window
+  // Log every raw packet received during the ping discovery window
   std::string payload_hex = this->bytes_to_hex_string_(packet->payload, packet->payload_length);
   ESP_LOGD(TAG, "GEA3 RX [discovery]: src=0x%02X dst=0x%02X payload=[%s]",
            packet->source, packet->destination, payload_hex.c_str());
 
-  // GEA3 read response for ERD 0x0008:
-  //   payload[0] = 0xA1 (read_response command)
-  //   payload[1] = request_id
-  //   payload[2] = result (0x00 = success)
-  //   payload[3] = erd_msb (0x00)
-  //   payload[4] = erd_lsb (0x08)
-  //   payload[5] = data_size
-  //   payload[6] = appliance_type
-  if (packet->payload_length < 7) return;
-  if (packet->payload[0] != tiny_gea3_erd_api_command_read_response) return;
-  if (packet->payload[2] != tiny_gea3_erd_api_read_result_success) return;
-  if (packet->payload[3] != 0x00 || packet->payload[4] != 0x08) return;
-  if (packet->payload[5] < 1) return;
-  if (packet->source == this->client_address_) return; // ignore echoes of our own requests
-  if (packet->source == 0xBE || packet->source == 0xBF) return; // not appliance boards
-
-  uint8_t app_type = packet->payload[6];
-  std::string app_type_name = appliance_type_to_string(app_type);
-  ESP_LOGI(TAG, "GEA3 discovery: board 0x%02X responded, appliance_type=%u (%s)",
-           packet->source, app_type, app_type_name.c_str());
-
-  this->gea3_board_discovered_ = true;
-  if (packet->source == this->gea3_address_preference_) {
-    this->gea3_preferred_found_ = true;
-    this->host_address_ = packet->source;
-    this->use_gea2_for_device_id_ = false;
-  }
+  // Collect source addresses of all boards that respond to the ping.
+  // Exclude our own address, the broadcast address, and known non-appliance boards.
+  if (packet->source == this->client_address_) return;
+  if (packet->source == GEA_BROADCAST_ADDRESS) return;
+  if (packet->source == 0xBE || packet->source == 0xBF) return;
 
   // Deduplicated tracking
-  for (uint8_t i = 0; i < this->gea3_discovered_count_; i++) {
-    if (this->gea3_discovered_addresses_[i] == packet->source) {
-      return;
-    }
+  for (uint8_t i = 0; i < this->gea3_board_response_count_; i++) {
+    if (this->gea3_board_response_list_[i] == packet->source) return;
   }
-  if (this->gea3_discovered_count_ < MAX_BOARDS) {
-    this->gea3_discovered_addresses_[this->gea3_discovered_count_++] = packet->source;
-    ESP_LOGI(TAG, "GEA3 discovery: %u board(s) found so far", this->gea3_discovered_count_);
+  if (this->gea3_board_response_count_ < MAX_BOARDS) {
+    this->gea3_board_response_list_[this->gea3_board_response_count_++] = packet->source;
+    ESP_LOGI(TAG, "GEA3 discovery: board 0x%02X responded to ping (%u board(s) so far)",
+             packet->source, this->gea3_board_response_count_);
   }
 }
 
 void GeappliancesBridge::handle_gea2_raw_packet_(const tiny_gea_packet_t* packet) {
-  if (this->autodiscovery_state_ != AUTODISCOVERY_GEA2_BROADCAST_WAITING) {
+  if (this->autodiscovery_state_ != AUTODISCOVERY_GEA2_PING_WAITING) {
     return;
   }
 
-  // Log every raw packet received during the discovery window
+  // Log every raw packet received during the GEA2 ping discovery window
   std::string payload_hex = this->bytes_to_hex_string_(packet->payload, packet->payload_length);
   ESP_LOGD(TAG, "GEA2 RX [discovery]: src=0x%02X dst=0x%02X payload=[%s]",
            packet->source, packet->destination, payload_hex.c_str());
 
-  // GEA2 read response for ERD 0x0008:
-  //   payload[0] = 0xF0 (read command, shared with request)
-  //   payload[1] = erd_count (0x01)
-  //   payload[2] = erd_msb (0x00)
-  //   payload[3] = erd_lsb (0x08)
-  //   payload[4] = data_size
-  //   payload[5] = appliance_type
-  // (responses have payload_length >= 6; a 4-byte request has payload_length == 4)
-  if (packet->payload_length < 6) return;
-  if (packet->payload[0] != 0xF0) return;
-  if (packet->payload[1] != 0x01) return; // erd_count == 1
-  if (packet->payload[2] != 0x00 || packet->payload[3] != 0x08) return;
-  if (packet->payload[4] < 1) return;
-  if (packet->source == this->client_address_) return; // ignore our own request echoes
-  if (packet->source == 0xBE || packet->source == 0xBF) return; // not appliance boards
-
-  uint8_t app_type = packet->payload[5];
-  std::string app_type_name = appliance_type_to_string(app_type);
-  ESP_LOGI(TAG, "GEA2 discovery: board 0x%02X responded, appliance_type=%u (%s)",
-           packet->source, app_type, app_type_name.c_str());
-
-  this->gea2_board_discovered_ = true;
-  if (packet->source == this->gea2_address_preference_) {
-    this->gea2_preferred_found_ = true;
-    this->host_address_ = packet->source;
-    this->use_gea2_for_device_id_ = true;
-  }
+  // Collect source addresses of all boards that respond to the ping.
+  if (packet->source == this->client_address_) return;
+  if (packet->source == GEA_BROADCAST_ADDRESS) return;
+  if (packet->source == 0xBE || packet->source == 0xBF) return;
 
   // Deduplicated tracking
-  for (uint8_t i = 0; i < this->gea2_discovered_count_; i++) {
-    if (this->gea2_discovered_addresses_[i] == packet->source) {
-      return;
-    }
+  for (uint8_t i = 0; i < this->gea2_board_response_count_; i++) {
+    if (this->gea2_board_response_list_[i] == packet->source) return;
   }
-  if (this->gea2_discovered_count_ < MAX_BOARDS) {
-    this->gea2_discovered_addresses_[this->gea2_discovered_count_++] = packet->source;
-    ESP_LOGI(TAG, "GEA2 discovery: %u board(s) found so far", this->gea2_discovered_count_);
+  if (this->gea2_board_response_count_ < MAX_BOARDS) {
+    this->gea2_board_response_list_[this->gea2_board_response_count_++] = packet->source;
+    ESP_LOGI(TAG, "GEA2 discovery: board 0x%02X responded to ping (%u board(s) so far)",
+             packet->source, this->gea2_board_response_count_);
   }
 }
 

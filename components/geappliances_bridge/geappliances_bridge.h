@@ -94,11 +94,15 @@ class GeappliancesBridge : public Component {
   enum AutodiscoveryState {
     AUTODISCOVERY_WAITING_FOR_MQTT,          // Waiting for MQTT connection
     AUTODISCOVERY_WAITING_20S,               // MQTT connected, waiting 20 seconds
-    AUTODISCOVERY_GEA3_BROADCAST_PENDING,    // About to send GEA3 broadcast
-    AUTODISCOVERY_GEA3_BROADCAST_WAITING,    // Sent GEA3 broadcast, waiting 10s for responses
-    AUTODISCOVERY_GEA2_BROADCAST_PENDING,    // About to send GEA2 broadcast
-    AUTODISCOVERY_GEA2_BROADCAST_WAITING,    // Sent GEA2 broadcast, waiting 10s for responses
-    AUTODISCOVERY_COMPLETE                   // At least one board discovered
+    AUTODISCOVERY_GEA3_PING_PENDING,         // About to send GEA3 Cmd=0x01 broadcast ping
+    AUTODISCOVERY_GEA3_PING_WAITING,         // Sent ping, collecting all responding board addresses
+    AUTODISCOVERY_GEA3_ERD_CHECK_PENDING,    // About to unicast-read ERD 0x0008 from next board
+    AUTODISCOVERY_GEA3_ERD_CHECK_WAITING,    // Waiting for ERD 0x0008 read result from current board
+    AUTODISCOVERY_GEA2_PING_PENDING,         // About to send GEA2 Cmd=0xF0 broadcast ping
+    AUTODISCOVERY_GEA2_PING_WAITING,         // Sent GEA2 ping, collecting responding board addresses
+    AUTODISCOVERY_GEA2_ERD_CHECK_PENDING,    // About to unicast-read ERD 0x0008 from next GEA2 board
+    AUTODISCOVERY_GEA2_ERD_CHECK_WAITING,    // Waiting for ERD 0x0008 read result from current GEA2 board
+    AUTODISCOVERY_COMPLETE                   // At least one appliance board discovered
   };
 
   uart::UARTComponent *uart_{nullptr};
@@ -140,22 +144,36 @@ class GeappliancesBridge : public Component {
   // Autodiscovery state machine
   AutodiscoveryState autodiscovery_state_{AUTODISCOVERY_WAITING_FOR_MQTT};
   uint32_t autodiscovery_timer_start_{0};
+
+  // Phase 1 (ping) results: boards that responded to the Cmd=0x01 broadcast
+  uint8_t gea3_board_response_list_[MAX_BOARDS];
+  uint8_t gea3_board_response_count_{0};
+  uint8_t gea3_board_check_index_{0};   // Current board index in Phase 2 ERD check
   bool gea3_board_discovered_{false};
   bool gea3_preferred_found_{false};
-  uint8_t gea3_discovered_addresses_[MAX_BOARDS];  // All GEA3 boards that responded
-  uint8_t gea3_discovered_count_{0};               // Number of GEA3 boards discovered
-  uint8_t gea3_discovery_poll_count_{0};           // Number of broadcasts sent this cycle
+  // Phase 2 (ERD 0x0008 check) results: confirmed appliance boards
+  uint8_t gea3_discovered_addresses_[MAX_BOARDS];  // Appliance boards that responded to 0x0008
+  uint8_t gea3_discovered_count_{0};
+  uint8_t gea3_discovery_poll_count_{0};           // Number of ping broadcasts sent this cycle
   uint32_t gea3_last_poll_time_{0};                // Timestamp of last GEA3 broadcast
+
+  // Phase 1 (ping) results for GEA2
+  uint8_t gea2_board_response_list_[MAX_BOARDS];
+  uint8_t gea2_board_response_count_{0};
+  uint8_t gea2_board_check_index_{0};
   bool gea2_board_discovered_{false};
   bool gea2_preferred_found_{false};
-  uint8_t gea2_discovered_addresses_[MAX_BOARDS];  // All GEA2 boards that responded
-  uint8_t gea2_discovered_count_{0};               // Number of GEA2 boards discovered
-  uint8_t gea2_discovery_poll_count_{0};           // Number of broadcasts sent this cycle
-  uint32_t gea2_last_poll_time_{0};                // Timestamp of last GEA2 broadcast
+  // Phase 2 results for GEA2
+  uint8_t gea2_discovered_addresses_[MAX_BOARDS];
+  uint8_t gea2_discovered_count_{0};
+  uint8_t gea2_discovery_poll_count_{0};
+  uint32_t gea2_last_poll_time_{0};
+
   static constexpr uint32_t STARTUP_DELAY_MS = 20000;              // 20s after MQTT connects
-  static constexpr uint32_t AUTODISCOVERY_BROADCAST_WINDOW_MS = 10000; // 10s window per broadcast cycle
-  static constexpr uint8_t  AUTODISCOVERY_POLL_COUNT = 5;           // Repeat broadcast this many times
-  static constexpr uint32_t AUTODISCOVERY_REPEAT_INTERVAL_MS = 2000; // Interval between broadcasts
+  static constexpr uint32_t AUTODISCOVERY_BROADCAST_WINDOW_MS = 10000; // 10s window per ping cycle
+  static constexpr uint8_t  AUTODISCOVERY_POLL_COUNT = 5;           // Repeat ping this many times
+  static constexpr uint32_t AUTODISCOVERY_REPEAT_INTERVAL_MS = 2000; // Interval between pings
+  static constexpr uint32_t ERD_CHECK_TIMEOUT_MS = 3000;            // Per-board ERD read timeout
 
   tiny_gea3_erd_client_request_id_t pending_request_id_;
   tiny_gea2_erd_client_request_id_t gea2_pending_request_id_;
