@@ -8,6 +8,7 @@
 
 #include "i_mqtt_client.h"
 #include "i_tiny_gea3_erd_client.h"
+#include "tiny_gea_constants.h"
 #include "tiny_hsm.h"
 #include "tiny_timer.h"
 #include "erd_lists.h"
@@ -40,6 +41,11 @@ typedef struct {
 
 /*!
  * Initialize the MQTT polling bridge.
+ *
+ * If initial_address is tiny_gea_broadcast_address (0xFF), the bridge will
+ * broadcast to discover the host address automatically (legacy behavior).
+ * If initial_address is a specific address, the bridge skips autodiscovery
+ * and begins polling that address directly.
  */
 void mqtt_bridge_polling_init(
   mqtt_bridge_polling_t* self,
@@ -47,7 +53,8 @@ void mqtt_bridge_polling_init(
   i_tiny_gea3_erd_client_t* erd_client,
   i_mqtt_client_t* mqtt_client,
   uint32_t polling_interval_ms,
-  bool only_publish_on_change);
+  bool only_publish_on_change,
+  uint8_t initial_address);
 
 /*!
  * Destroy the MQTT polling bridge.

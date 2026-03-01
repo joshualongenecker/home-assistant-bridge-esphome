@@ -94,7 +94,8 @@ TEST_GROUP(appliance_simulation_examples)
       &erd_client.interface,
       &mqtt_client.interface,
       polling_interval,
-      false);
+      false,
+      tiny_gea_broadcast_address);
   }
   
   /*!

@@ -43,6 +43,7 @@ enum GEAMode {
 class GeappliancesBridge : public Component {
  public:
   static constexpr unsigned long baud = 230400;
+  static constexpr uint8_t MAX_BOARDS = 8;
 
   void setup() override;
   void loop() override;
@@ -107,6 +108,7 @@ class GeappliancesBridge : public Component {
   bool use_gea2_for_device_id_{false}; // Use GEA2 client for device ID reads
   bool mqtt_was_connected_{false};
   bool mqtt_bridge_initialized_{false};
+  uint8_t bridge_count_{0};  // Number of initialized bridges (one per discovered board)
   BridgeMode mode_{BRIDGE_MODE_AUTO};
   GEAMode gea_mode_{GEA_MODE_AUTO};
   uint32_t polling_interval_ms_{10000};
@@ -128,12 +130,12 @@ class GeappliancesBridge : public Component {
   uint32_t autodiscovery_timer_start_{0};
   bool gea3_board_discovered_{false};
   bool gea3_preferred_found_{false};
-  uint8_t gea3_first_address_{0x00};       // First GEA3 board that responded (fallback)
-  bool gea3_first_address_set_{false};     // Whether gea3_first_address_ has been recorded
+  uint8_t gea3_discovered_addresses_[MAX_BOARDS];  // All GEA3 boards that responded
+  uint8_t gea3_discovered_count_{0};               // Number of GEA3 boards discovered
   bool gea2_board_discovered_{false};
   bool gea2_preferred_found_{false};
-  uint8_t gea2_first_address_{0x00};       // First GEA2 board that responded (fallback)
-  bool gea2_first_address_set_{false};     // Whether gea2_first_address_ has been recorded
+  uint8_t gea2_discovered_addresses_[MAX_BOARDS];  // All GEA2 boards that responded
+  uint8_t gea2_discovered_count_{0};               // Number of GEA2 boards discovered
   static constexpr uint32_t STARTUP_DELAY_MS = 20000;              // 20s after MQTT connects
   static constexpr uint32_t AUTODISCOVERY_BROADCAST_WINDOW_MS = 10000; // 10s window per broadcast
 
@@ -150,7 +152,7 @@ class GeappliancesBridge : public Component {
 
   // GEA3 components
   esphome_uart_adapter_t uart_adapter_;
-  esphome_mqtt_client_adapter_t mqtt_client_adapter_;
+  esphome_mqtt_client_adapter_t mqtt_client_adapters_[MAX_BOARDS];
 
   tiny_gea3_interface_t gea3_interface_;
   uint8_t receive_buffer_[255];
@@ -171,8 +173,8 @@ class GeappliancesBridge : public Component {
   tiny_gea2_erd_client_t gea2_erd_client_;
   uint8_t gea2_client_queue_buffer_[1024];
 
-  mqtt_bridge_t mqtt_bridge_;
-  mqtt_bridge_polling_t mqtt_bridge_polling_;
+  mqtt_bridge_t mqtt_bridges_[MAX_BOARDS];
+  mqtt_bridge_polling_t mqtt_bridge_pollings_[MAX_BOARDS];
 
   tiny_event_subscription_t erd_client_activity_subscription_;
   tiny_event_subscription_t gea2_erd_client_activity_subscription_;

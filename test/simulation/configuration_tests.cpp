@@ -115,7 +115,8 @@ TEST_GROUP(configuration_based_tests)
       &erd_client.interface,
       &mqtt_client.interface,
       polling_interval,
-      only_publish_on_change);
+      only_publish_on_change,
+      tiny_gea_broadcast_address);
   }
   
   // Helper methods for simulating appliance behavior
@@ -806,7 +807,8 @@ TEST_GROUP(only_publish_on_change_config)
       &erd_client.interface,
       &mqtt_client.interface,
       polling_interval,
-      true);
+      true,
+      tiny_gea_broadcast_address);
   }
 
   void configure_always_publish()
@@ -817,7 +819,8 @@ TEST_GROUP(only_publish_on_change_config)
       &erd_client.interface,
       &mqtt_client.interface,
       polling_interval,
-      false);
+      false,
+      tiny_gea_broadcast_address);
   }
 
   void simulate_read_completed(tiny_erd_t erd, const uint8_t* data, uint8_t size)

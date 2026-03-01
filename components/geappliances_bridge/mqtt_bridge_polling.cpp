@@ -424,13 +424,15 @@ void mqtt_bridge_polling_init(
   i_tiny_gea3_erd_client_t* erd_client,
   i_mqtt_client_t* mqtt_client,
   uint32_t polling_interval_ms,
-  bool only_publish_on_change)
+  bool only_publish_on_change,
+  uint8_t initial_address)
 {
   self->timer_group = timer_group;
   self->erd_client = erd_client;
   self->mqtt_client = mqtt_client;
   self->polling_interval_ms = polling_interval_ms;
   self->only_publish_on_change = only_publish_on_change;
+  self->erd_host_address = initial_address;
   self->erd_set = reinterpret_cast<void*>(new set<tiny_erd_t>());
   self->erd_cache = reinterpret_cast<void*>(new map<tiny_erd_t, vector<uint8_t>>());
 
@@ -475,7 +477,12 @@ void mqtt_bridge_polling_init(
     });
   tiny_event_subscribe(mqtt_client_on_mqtt_disconnect(mqtt_client), &self->mqtt_disconnect_subscription);
 
-  tiny_hsm_init(&self->hsm, &hsm_configuration, state_identify_appliance);
+  if(initial_address == tiny_gea_broadcast_address) {
+    tiny_hsm_init(&self->hsm, &hsm_configuration, state_identify_appliance);
+  }
+  else {
+    tiny_hsm_init(&self->hsm, &hsm_configuration, state_add_common_erds);
+  }
 }
 
 void mqtt_bridge_polling_destroy(mqtt_bridge_polling_t* self)
