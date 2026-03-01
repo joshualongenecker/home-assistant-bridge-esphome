@@ -746,17 +746,28 @@ void GeappliancesBridge::check_subscription_activity_() {
     ESP_LOGW(TAG, "No subscription activity detected after %u seconds, falling back to polling mode", 
              SUBSCRIPTION_TIMEOUT_MS / 1000);
     
-    // Destroy the subscription bridge
-    mqtt_bridge_destroy(&this->mqtt_bridge_);
-    
-    // Initialize polling bridge
-    mqtt_bridge_polling_init(
-      &this->mqtt_bridge_polling_,
-      &this->timer_group_,
-      &this->erd_client_.interface,
-      &this->mqtt_client_adapter_.interface,
-      this->polling_interval_ms_,
-      this->polling_only_publish_on_change_);
+    // Destroy the subscription bridges and switch to polling bridges for all boards
+    for (uint8_t i = 0; i < this->bridge_count_; i++) {
+      mqtt_bridge_destroy(&this->mqtt_bridges_[i]);
+
+      uint8_t board_address;
+      if (!this->use_gea2_for_device_id_ && this->gea3_discovered_count_ > 0) {
+        board_address = this->gea3_discovered_addresses_[i];
+      } else if (this->use_gea2_for_device_id_ && this->gea2_discovered_count_ > 0) {
+        board_address = this->gea2_discovered_addresses_[i];
+      } else {
+        board_address = this->host_address_;
+      }
+
+      mqtt_bridge_polling_init(
+        &this->mqtt_bridge_pollings_[i],
+        &this->timer_group_,
+        &this->erd_client_.interface,
+        &this->mqtt_client_adapters_[i].interface,
+        this->polling_interval_ms_,
+        this->polling_only_publish_on_change_,
+        board_address);
+    }
     
     // Mark that we're no longer in subscription mode
     this->subscription_mode_active_ = false;
