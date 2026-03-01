@@ -814,6 +814,7 @@ void GeappliancesBridge::handle_gea3_raw_packet_(const tiny_gea_packet_t* packet
   if (packet->payload[3] != 0x00 || packet->payload[4] != 0x08) return;
   if (packet->payload[5] < 1) return;
   if (packet->source == this->client_address_) return; // ignore echoes of our own requests
+  if (packet->source == 0xBE || packet->source == 0xBF) return; // not appliance boards
 
   uint8_t app_type = packet->payload[6];
   std::string app_type_name = appliance_type_to_string(app_type);
@@ -863,6 +864,7 @@ void GeappliancesBridge::handle_gea2_raw_packet_(const tiny_gea_packet_t* packet
   if (packet->payload[2] != 0x00 || packet->payload[3] != 0x08) return;
   if (packet->payload[4] < 1) return;
   if (packet->source == this->client_address_) return; // ignore our own request echoes
+  if (packet->source == 0xBE || packet->source == 0xBF) return; // not appliance boards
 
   uint8_t app_type = packet->payload[5];
   std::string app_type_name = appliance_type_to_string(app_type);
