@@ -14,7 +14,6 @@ using namespace std;
 
 // GEA3 protocol constants
 enum {
-  erd_host_address = 0xC0,  // Default address for GE appliance host
   resubscribe_delay = 1000,  // Delay in ms before retrying subscription
   subscription_retention_period = 30 * 1000  // Period in ms to retain subscription (30 seconds)
 };
@@ -84,7 +83,7 @@ static tiny_hsm_result_t state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, co
     case signal_write_requested: {
       auto args = reinterpret_cast<const mqtt_client_on_write_request_args_t*>(data);
       tiny_gea3_erd_client_request_id_t request_id;
-      tiny_gea3_erd_client_write(self->erd_client, &request_id, erd_host_address, args->erd, args->value, args->size);
+      tiny_gea3_erd_client_write(self->erd_client, &request_id, self->erd_host_address, args->erd, args->value, args->size);
     } break;
 
     default:
@@ -103,7 +102,7 @@ static tiny_hsm_result_t state_subscribing(tiny_hsm_t* hsm, tiny_hsm_signal_t si
     case tiny_hsm_signal_entry:
     case signal_subscription_failed:
     case signal_timer_expired:
-      if(!tiny_gea3_erd_client_subscribe(self->erd_client, erd_host_address)) {
+      if(!tiny_gea3_erd_client_subscribe(self->erd_client, self->erd_host_address)) {
         arm_timer(self, resubscribe_delay);
       }
       break;
@@ -135,7 +134,7 @@ static tiny_hsm_result_t state_subscribed(tiny_hsm_t* hsm, tiny_hsm_signal_t sig
       break;
 
     case signal_timer_expired:
-      tiny_gea3_erd_client_retain_subscription(self->erd_client, erd_host_address);
+      tiny_gea3_erd_client_retain_subscription(self->erd_client, self->erd_host_address);
       break;
 
     case signal_subscription_host_came_online:
@@ -168,11 +167,13 @@ void mqtt_bridge_init(
   mqtt_bridge_t* self,
   tiny_timer_group_t* timer_group,
   i_tiny_gea3_erd_client_t* erd_client,
-  i_mqtt_client_t* mqtt_client)
+  i_mqtt_client_t* mqtt_client,
+  uint8_t address)
 {
   self->timer_group = timer_group;
   self->erd_client = erd_client;
   self->mqtt_client = mqtt_client;
+  self->erd_host_address = address;
   self->erd_set = reinterpret_cast<void*>(new set<tiny_erd_t>());
 
   tiny_event_subscription_init(
@@ -180,7 +181,7 @@ void mqtt_bridge_init(
       auto self = reinterpret_cast<mqtt_bridge_t*>(context);
       auto args = reinterpret_cast<const tiny_gea3_erd_client_on_activity_args_t*>(_args);
 
-      if(args->address != erd_host_address) {
+      if(args->address != self->erd_host_address) {
         return;
       }
 
