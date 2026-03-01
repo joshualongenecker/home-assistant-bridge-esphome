@@ -61,7 +61,8 @@ TEST_GROUP(mqtt_bridge_polling)
       &erd_client.interface,
       &mqtt_client.interface,
       polling_interval,
-      only_publish_on_change);
+      only_publish_on_change,
+      tiny_gea_broadcast_address);
   }
 
   void after(tiny_timer_ticks_t ticks)
@@ -137,6 +138,34 @@ TEST_GROUP(mqtt_bridge_polling)
     static T _value;
     _value = value;
     trigger_read_completed(address, erd, &_value, sizeof(_value));
+  }
+
+  void when_the_bridge_is_initialized_with_address(uint8_t address, bool only_publish_on_change = false)
+  {
+    mqtt_bridge_polling_init(
+      &self,
+      &timer_group.timer_group,
+      &erd_client.interface,
+      &mqtt_client.interface,
+      polling_interval,
+      only_publish_on_change,
+      address);
+  }
+
+  void given_that_the_bridge_has_entered_polling_state_with_address(
+    uint8_t address, bool only_publish_on_change = false)
+  {
+    mock().disable();
+    when_the_bridge_is_initialized_with_address(address, only_publish_on_change);
+
+    // No broadcast identification needed: bridge starts directly in state_add_common_erds
+    uint8_t initial_value = 0x00;
+    trigger_read_completed(address, polled_erd, &initial_value, sizeof(initial_value));
+
+    // Skip remaining discovery ERDs using timer expirations
+    after(retry_delay * discovery_timer_expirations);
+
+    mock().enable();
   }
 
   void nothing_should_happen()
@@ -273,4 +302,20 @@ TEST(mqtt_bridge_polling, should_register_and_poll_late_erd_when_only_publish_on
 
   nothing_should_happen();
   when_a_poll_read_completes(0xC0, late_erd, uint8_t(0xCD));
+}
+
+// When initialized with a specific (non-broadcast) address, the bridge skips
+// state_identify_appliance and polls that address directly.  This is the
+// mechanism that allows a second board (e.g. 0xD0) to be bridged alongside
+// the primary board (0xC0) using two separate bridge instances.
+TEST(mqtt_bridge_polling, should_poll_preset_address_without_broadcast_discovery)
+{
+  enum { second_board_address = 0xD0 };
+
+  given_that_the_bridge_has_entered_polling_state_with_address(second_board_address);
+
+  should_request_read(second_board_address, polled_erd);
+  after(polling_interval);
+  should_update_erd(polled_erd, uint8_t(0x42));
+  when_a_poll_read_completes(second_board_address, polled_erd, uint8_t(0x42));
 }

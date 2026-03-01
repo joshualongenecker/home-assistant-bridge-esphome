@@ -43,6 +43,7 @@ enum GEAMode {
 class GeappliancesBridge : public Component {
  public:
   static constexpr unsigned long baud = 230400;
+  static constexpr uint8_t MAX_BOARDS = 8;
 
   void setup() override;
   void loop() override;
@@ -64,11 +65,14 @@ class GeappliancesBridge : public Component {
   void notify_mqtt_disconnected_();
   void handle_erd_client_activity_(const tiny_gea3_erd_client_on_activity_args_t* args);
   void handle_gea2_erd_client_activity_(const tiny_gea2_erd_client_on_activity_args_t* args);
+  void handle_gea3_raw_packet_(const tiny_gea_packet_t* packet);
+  void handle_gea2_raw_packet_(const tiny_gea_packet_t* packet);
   void initialize_mqtt_bridge_();
   void check_subscription_activity_();
   void run_autodiscovery_();
   void start_device_id_generation_();
   std::string bytes_to_string_(const uint8_t* data, size_t size);
+  std::string bytes_to_hex_string_(const uint8_t* data, size_t size);
   std::string sanitize_for_mqtt_topic_(const std::string& input);
   bool try_read_erd_with_retry_(tiny_erd_t erd, const char* erd_name);
 
@@ -90,11 +94,15 @@ class GeappliancesBridge : public Component {
   enum AutodiscoveryState {
     AUTODISCOVERY_WAITING_FOR_MQTT,          // Waiting for MQTT connection
     AUTODISCOVERY_WAITING_20S,               // MQTT connected, waiting 20 seconds
-    AUTODISCOVERY_GEA3_BROADCAST_PENDING,    // About to send GEA3 broadcast
-    AUTODISCOVERY_GEA3_BROADCAST_WAITING,    // Sent GEA3 broadcast, waiting 10s for responses
-    AUTODISCOVERY_GEA2_BROADCAST_PENDING,    // About to send GEA2 broadcast
-    AUTODISCOVERY_GEA2_BROADCAST_WAITING,    // Sent GEA2 broadcast, waiting 10s for responses
-    AUTODISCOVERY_COMPLETE                   // At least one board discovered
+    AUTODISCOVERY_GEA3_PING_PENDING,         // About to send GEA3 Cmd=0x01 broadcast ping
+    AUTODISCOVERY_GEA3_PING_WAITING,         // Sent ping, collecting all responding board addresses
+    AUTODISCOVERY_GEA3_ERD_CHECK_PENDING,    // About to unicast-read ERD 0x0008 from next board
+    AUTODISCOVERY_GEA3_ERD_CHECK_WAITING,    // Waiting for ERD 0x0008 read result from current board
+    AUTODISCOVERY_GEA2_PING_PENDING,         // About to send GEA2 Cmd=0xF0 broadcast ping
+    AUTODISCOVERY_GEA2_PING_WAITING,         // Sent GEA2 ping, collecting responding board addresses
+    AUTODISCOVERY_GEA2_ERD_CHECK_PENDING,    // About to unicast-read ERD 0x0008 from next GEA2 board
+    AUTODISCOVERY_GEA2_ERD_CHECK_WAITING,    // Waiting for ERD 0x0008 read result from current GEA2 board
+    AUTODISCOVERY_COMPLETE                   // At least one appliance board discovered
   };
 
   uart::UARTComponent *uart_{nullptr};
@@ -107,6 +115,7 @@ class GeappliancesBridge : public Component {
   bool use_gea2_for_device_id_{false}; // Use GEA2 client for device ID reads
   bool mqtt_was_connected_{false};
   bool mqtt_bridge_initialized_{false};
+  uint8_t bridge_count_{0};  // Number of initialized bridges (one per discovered board)
   BridgeMode mode_{BRIDGE_MODE_AUTO};
   GEAMode gea_mode_{GEA_MODE_AUTO};
   uint32_t polling_interval_ms_{10000};
@@ -123,19 +132,48 @@ class GeappliancesBridge : public Component {
   DeviceIdState device_id_state_{DEVICE_ID_STATE_IDLE};
   BridgeInitState bridge_init_state_{BRIDGE_INIT_STATE_WAITING_FOR_DEVICE_ID};
 
+  // Per-board device ID generation
+  uint8_t device_id_gen_address_{0xC0}; // Address currently being read for device ID
+  uint8_t device_id_board_index_{0};    // Which board in the discovered array we're generating for
+  uint8_t total_boards_for_device_id_{0}; // Total boards needing device ID generation
+  // Per-board generated device IDs; index i aligns with gea3_discovered_addresses_[i] (or gea2)
+  std::string board_device_ids_[MAX_BOARDS];
+  // Per-board appliance types; index i aligns with gea3_discovered_addresses_[i] (or gea2)
+  uint8_t board_appliance_types_[MAX_BOARDS]{};
+
   // Autodiscovery state machine
   AutodiscoveryState autodiscovery_state_{AUTODISCOVERY_WAITING_FOR_MQTT};
   uint32_t autodiscovery_timer_start_{0};
+
+  // Phase 1 (ping) results: boards that responded to the Cmd=0x01 broadcast
+  uint8_t gea3_board_response_list_[MAX_BOARDS];
+  uint8_t gea3_board_response_count_{0};
+  uint8_t gea3_board_check_index_{0};   // Current board index in Phase 2 ERD check
   bool gea3_board_discovered_{false};
   bool gea3_preferred_found_{false};
-  uint8_t gea3_first_address_{0x00};       // First GEA3 board that responded (fallback)
-  bool gea3_first_address_set_{false};     // Whether gea3_first_address_ has been recorded
+  // Phase 2 (ERD 0x0008 check) results: confirmed appliance boards
+  uint8_t gea3_discovered_addresses_[MAX_BOARDS];  // Appliance boards that responded to 0x0008
+  uint8_t gea3_discovered_count_{0};
+  uint8_t gea3_discovery_poll_count_{0};           // Number of ping broadcasts sent this cycle
+  uint32_t gea3_last_poll_time_{0};                // Timestamp of last GEA3 broadcast
+
+  // Phase 1 (ping) results for GEA2
+  uint8_t gea2_board_response_list_[MAX_BOARDS];
+  uint8_t gea2_board_response_count_{0};
+  uint8_t gea2_board_check_index_{0};
   bool gea2_board_discovered_{false};
   bool gea2_preferred_found_{false};
-  uint8_t gea2_first_address_{0x00};       // First GEA2 board that responded (fallback)
-  bool gea2_first_address_set_{false};     // Whether gea2_first_address_ has been recorded
+  // Phase 2 results for GEA2
+  uint8_t gea2_discovered_addresses_[MAX_BOARDS];
+  uint8_t gea2_discovered_count_{0};
+  uint8_t gea2_discovery_poll_count_{0};
+  uint32_t gea2_last_poll_time_{0};
+
   static constexpr uint32_t STARTUP_DELAY_MS = 20000;              // 20s after MQTT connects
-  static constexpr uint32_t AUTODISCOVERY_BROADCAST_WINDOW_MS = 10000; // 10s window per broadcast
+  static constexpr uint32_t AUTODISCOVERY_BROADCAST_WINDOW_MS = 10000; // 10s window per ping cycle
+  static constexpr uint8_t  AUTODISCOVERY_POLL_COUNT = 5;           // Repeat ping this many times
+  static constexpr uint32_t AUTODISCOVERY_REPEAT_INTERVAL_MS = 2000; // Interval between pings
+  static constexpr uint32_t ERD_CHECK_TIMEOUT_MS = 3000;            // Per-board ERD read timeout
 
   tiny_gea3_erd_client_request_id_t pending_request_id_;
   tiny_gea2_erd_client_request_id_t gea2_pending_request_id_;
@@ -150,7 +188,7 @@ class GeappliancesBridge : public Component {
 
   // GEA3 components
   esphome_uart_adapter_t uart_adapter_;
-  esphome_mqtt_client_adapter_t mqtt_client_adapter_;
+  esphome_mqtt_client_adapter_t mqtt_client_adapters_[MAX_BOARDS];
 
   tiny_gea3_interface_t gea3_interface_;
   uint8_t receive_buffer_[255];
@@ -171,11 +209,13 @@ class GeappliancesBridge : public Component {
   tiny_gea2_erd_client_t gea2_erd_client_;
   uint8_t gea2_client_queue_buffer_[1024];
 
-  mqtt_bridge_t mqtt_bridge_;
-  mqtt_bridge_polling_t mqtt_bridge_polling_;
+  mqtt_bridge_t mqtt_bridges_[MAX_BOARDS];
+  mqtt_bridge_polling_t mqtt_bridge_pollings_[MAX_BOARDS];
 
   tiny_event_subscription_t erd_client_activity_subscription_;
   tiny_event_subscription_t gea2_erd_client_activity_subscription_;
+  tiny_event_subscription_t gea3_raw_packet_subscription_;
+  tiny_event_subscription_t gea2_raw_packet_subscription_;
 };
 
 }  // namespace geappliances_bridge

@@ -88,7 +88,8 @@ TEST_GROUP(application_level)
       &erd_client.interface,
       &mqtt_client.interface,
       polling_interval,
-      false);
+      false,
+      tiny_gea_broadcast_address);
   }
   
   /*!
