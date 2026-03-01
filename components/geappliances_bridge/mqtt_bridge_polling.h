@@ -54,7 +54,8 @@ void mqtt_bridge_polling_init(
   i_mqtt_client_t* mqtt_client,
   uint32_t polling_interval_ms,
   bool only_publish_on_change,
-  uint8_t initial_address);
+  uint8_t initial_address,
+  uint8_t initial_appliance_type = 0);
 
 /*!
  * Destroy the MQTT polling bridge.

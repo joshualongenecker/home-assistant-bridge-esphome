@@ -524,8 +524,9 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
         
         ESP_LOGI(TAG, "Generated device ID for 0x%02X: %s", this->device_id_gen_address_, this->generated_device_id_.c_str());
 
-        // Store this board's device ID (aligned with discovered_addresses index)
+        // Store this board's device ID and appliance type (aligned with discovered_addresses index)
         this->board_device_ids_[this->device_id_board_index_] = this->generated_device_id_;
+        this->board_appliance_types_[this->device_id_board_index_] = this->appliance_type_;
 
         // Keep final_device_id_ as the primary (host) board's device ID
         if (this->device_id_gen_address_ == this->host_address_ || this->final_device_id_.empty()) {
@@ -607,8 +608,9 @@ void GeappliancesBridge::handle_gea2_erd_client_activity_(const tiny_gea2_erd_cl
                                      sanitized_serial;
         ESP_LOGI(TAG, "Generated device ID for 0x%02X (via GEA2): %s", this->device_id_gen_address_, this->generated_device_id_.c_str());
 
-        // Store this board's device ID (aligned with discovered_addresses index)
+        // Store this board's device ID and appliance type (aligned with discovered_addresses index)
         this->board_device_ids_[this->device_id_board_index_] = this->generated_device_id_;
+        this->board_appliance_types_[this->device_id_board_index_] = this->appliance_type_;
 
         // Keep final_device_id_ as the primary (host) board's device ID
         if (this->device_id_gen_address_ == this->host_address_ || this->final_device_id_.empty()) {
@@ -742,7 +744,8 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
         &this->mqtt_client_adapters_[i].interface,
         this->polling_interval_ms_,
         this->polling_only_publish_on_change_,
-        board_address);
+        board_address,
+        this->board_appliance_types_[i]);
     } else {
       mqtt_bridge_init(
         &this->mqtt_bridges_[i],

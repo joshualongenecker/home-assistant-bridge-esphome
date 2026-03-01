@@ -134,6 +134,8 @@ class GeappliancesBridge : public Component {
   uint8_t total_boards_for_device_id_{0}; // Total boards needing device ID generation
   // Per-board generated device IDs; index i aligns with gea3_discovered_addresses_[i] (or gea2)
   std::string board_device_ids_[MAX_BOARDS];
+  // Per-board appliance types; index i aligns with gea3_discovered_addresses_[i] (or gea2)
+  uint8_t board_appliance_types_[MAX_BOARDS]{};
 
   // Autodiscovery state machine
   AutodiscoveryState autodiscovery_state_{AUTODISCOVERY_WAITING_FOR_MQTT};
