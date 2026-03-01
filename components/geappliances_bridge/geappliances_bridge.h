@@ -128,6 +128,13 @@ class GeappliancesBridge : public Component {
   DeviceIdState device_id_state_{DEVICE_ID_STATE_IDLE};
   BridgeInitState bridge_init_state_{BRIDGE_INIT_STATE_WAITING_FOR_DEVICE_ID};
 
+  // Per-board device ID generation
+  uint8_t device_id_gen_address_{0xC0}; // Address currently being read for device ID
+  uint8_t device_id_board_index_{0};    // Which board in the discovered array we're generating for
+  uint8_t total_boards_for_device_id_{0}; // Total boards needing device ID generation
+  // Per-board generated device IDs; index i aligns with gea3_discovered_addresses_[i] (or gea2)
+  std::string board_device_ids_[MAX_BOARDS];
+
   // Autodiscovery state machine
   AutodiscoveryState autodiscovery_state_{AUTODISCOVERY_WAITING_FOR_MQTT};
   uint32_t autodiscovery_timer_start_{0};
