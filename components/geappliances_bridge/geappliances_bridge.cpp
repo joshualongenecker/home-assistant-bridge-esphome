@@ -608,9 +608,12 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
         this->gea3_discovered_addresses_[this->gea3_discovered_count_++] = board;
         ESP_LOGI(TAG, "GEA3 discovery: %u appliance board(s) confirmed so far", this->gea3_discovered_count_);
       }
-    } else if (args->type == tiny_gea3_erd_client_activity_type_read_failed) {
+    } else if (args->type == tiny_gea3_erd_client_activity_type_read_failed &&
+               args->read_failed.erd == ERD_APPLIANCE_TYPE) {
       ESP_LOGI(TAG, "GEA3 discovery: board 0x%02X did not respond to ERD 0x%04X, skipping",
                board, ERD_APPLIANCE_TYPE);
+    } else {
+      return; // Ignore all other activity types (subscription events, writes, etc.) — wait for the read result
     }
     // Advance to the next board regardless of outcome
     this->gea3_board_check_index_++;
@@ -729,9 +732,12 @@ void GeappliancesBridge::handle_gea2_erd_client_activity_(const tiny_gea2_erd_cl
         this->gea2_discovered_addresses_[this->gea2_discovered_count_++] = board;
         ESP_LOGI(TAG, "GEA2 discovery: %u appliance board(s) confirmed so far", this->gea2_discovered_count_);
       }
-    } else if (args->type == tiny_gea2_erd_client_activity_type_read_failed) {
+    } else if (args->type == tiny_gea2_erd_client_activity_type_read_failed &&
+               args->read_failed.erd == ERD_APPLIANCE_TYPE) {
       ESP_LOGI(TAG, "GEA2 discovery: board 0x%02X did not respond to ERD 0x%04X, skipping",
                board, ERD_APPLIANCE_TYPE);
+    } else {
+      return; // Ignore all other activity types — wait for the read result
     }
     // Advance to the next board regardless of outcome
     this->gea2_board_check_index_++;
