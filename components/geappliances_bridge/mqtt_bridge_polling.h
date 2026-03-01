@@ -10,8 +10,7 @@
 #include "i_tiny_gea3_erd_client.h"
 #include "tiny_hsm.h"
 #include "tiny_timer.h"
-
-#define POLLING_LIST_MAX_SIZE 256
+#include "erd_lists.h"
 
 typedef struct {
   tiny_erd_t erd_polling_list[POLLING_LIST_MAX_SIZE];
@@ -28,6 +27,7 @@ typedef struct {
   tiny_event_subscription_t erd_client_activity_subscription;
   tiny_hsm_t hsm;
   void* erd_set;
+  void* erd_cache;
   tiny_gea3_erd_client_request_id_t request_id;
   uint8_t erd_host_address;
   uint8_t appliance_type;
@@ -35,6 +35,7 @@ typedef struct {
   uint16_t appliance_erd_list_count;
   uint16_t erd_index;
   uint16_t polling_retries;
+  bool only_publish_on_change;
 } mqtt_bridge_polling_t;
 
 /*!
@@ -45,7 +46,8 @@ void mqtt_bridge_polling_init(
   tiny_timer_group_t* timer_group,
   i_tiny_gea3_erd_client_t* erd_client,
   i_mqtt_client_t* mqtt_client,
-  uint32_t polling_interval_ms);
+  uint32_t polling_interval_ms,
+  bool only_publish_on_change);
 
 /*!
  * Destroy the MQTT polling bridge.

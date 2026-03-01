@@ -1,0 +1,126 @@
+# Copilot Setup Steps for ESPHome Compilation
+# This file contains the setup steps required for Copilot to successfully compile ESPHome
+# These steps allow Copilot to debug build issues and test changes to the ESPHome component
+
+# Copilot Coding Agent Setup Steps for ESPHome Compilation
+# This file is automatically executed when the Copilot coding agent starts.
+# It sets up the environment so the agent can compile and test ESPHome configurations.
+#
+# Format: GitHub Actions-style steps with 'name' and 'run' fields.
+steps:
+  - name: "Initialize Git submodules"
+    run: git submodule update --init --recursive
+  - name: "Install ESPHome"
+    run: |
+      pip3 install --upgrade pip
+      pip3 install esphome
+  - name: "Setup test secrets"
+    run: cp doc/test-secrets.yaml doc/secrets.yaml
+
+setup_steps:
+  - name: Initialize Git Submodules
+    description: Initialize and update all git submodules required for the build
+    commands:
+      - git submodule update --init --recursive
+    
+  - name: Install Python
+    description: Install Python 3.11 or later
+    commands:
+      - python3 --version || echo "Python 3 needs to be installed"
+      - pip3 --version || echo "pip3 needs to be installed"
+    notes: |
+      Python 3.11 or later is recommended for ESPHome compatibility.
+      On Ubuntu/Debian: sudo apt-get update && sudo apt-get install -y python3 python3-pip
+      On macOS: brew install python@3.11
+    
+  - name: Install ESPHome
+    description: Install ESPHome via pip
+    commands:
+      - pip3 install --upgrade pip
+      - pip3 install esphome
+    notes: |
+      This installs the ESPHome command-line tool which is used to compile the configuration.
+      ESPHome will handle downloading and installing the ESP-IDF framework automatically.
+    
+  - name: Setup Test Secrets File
+    description: Copy test secrets file for compilation
+    commands:
+      - cp doc/test-secrets.yaml doc/secrets.yaml
+    notes: |
+      The test-secrets.yaml file contains dummy values that allow the configuration to compile.
+      DO NOT use these values in production!
+      The secrets.yaml file is gitignored and will not be committed.
+    
+  - name: Compile ESPHome Configuration
+    description: Compile the example ESPHome configuration to verify the build
+    commands:
+      - esphome compile doc/test-compile.yaml
+    notes: |
+      This compiles the ESPHome configuration using the local component directory.
+      The first compilation may take longer as ESPHome downloads the ESP-IDF framework.
+      Subsequent compilations will be faster as dependencies are cached.
+      
+      Common issues:
+      - If compilation fails due to missing dependencies, ESPHome will usually provide
+        clear error messages about what needs to be installed.
+      - Make sure submodules are initialized before compiling.
+      - The ERD lists header (erd_lists.h) is auto-generated during the build process
+        from the public-appliance-api-documentation submodule.
+
+  - name: Clean Up
+    description: Remove the secrets file after compilation (optional)
+    commands:
+      - rm -f doc/secrets.yaml
+    notes: |
+      This step is optional and cleans up the temporary secrets file.
+      Only run this if you want to ensure secrets are not accidentally committed.
+
+verification:
+  description: How to verify the setup is working correctly
+  steps:
+    - Run 'esphome version' to verify ESPHome is installed
+    - Run 'git submodule status' to verify all submodules are initialized
+    - Attempt to compile with 'esphome compile doc/test-compile.yaml'
+    - Check that the build completes without errors
+
+troubleshooting:
+  common_issues:
+    - issue: Submodules not initialized
+      solution: Run 'git submodule update --init --recursive'
+    
+    - issue: Python or pip not found
+      solution: Install Python 3.11 or later and ensure it's in your PATH
+    
+    - issue: ESPHome not found
+      solution: Install ESPHome with 'pip3 install esphome' and ensure pip's bin directory is in your PATH
+    
+    - issue: Missing secrets file
+      solution: Copy the test secrets file with 'cp doc/test-secrets.yaml doc/secrets.yaml'
+    
+    - issue: ESP-IDF framework download fails
+      solution: Check your internet connection. ESPHome will download ESP-IDF automatically on first run.
+    
+    - issue: SSL certificate verification fails when downloading ESP-IDF
+      solution: |
+        This can occur in sandboxed environments or when using corporate proxies.
+        If you see "CERTIFICATE_VERIFY_FAILED" errors, this is typically an environment issue.
+        In production environments, ensure SSL certificates are properly configured.
+        The setup steps are still valid - this is a network/SSL configuration issue.
+    
+    - issue: Compilation fails with missing ERD lists
+      solution: The erd_lists.h file is auto-generated. Ensure the public-appliance-api-documentation submodule is initialized.
+
+additional_info:
+  project_structure: |
+    - components/geappliances_bridge/: The ESPHome component implementation
+    - doc/test-compile.yaml: Test configuration for CI compilation testing
+    - doc/test-secrets.yaml: Dummy secrets for testing
+    - lib/: Submodule dependencies (tiny, tiny-gea-api, public-appliance-api-documentation)
+  
+  build_process: |
+    The build process:
+    1. ESPHome reads the YAML configuration (doc/test-compile.yaml)
+    2. Loads the external component from components/geappliances_bridge/
+    3. Auto-generates erd_lists.h from the public-appliance-api-documentation submodule
+    4. Compiles the code using ESP-IDF framework for the ESP32-C3 target
+    5. Produces firmware binary that can be flashed to the device

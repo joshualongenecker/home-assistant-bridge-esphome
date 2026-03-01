@@ -5,7 +5,6 @@ from esphome import pins
 from esphome.components import uart, mqtt
 from esphome.const import (
     CONF_ID,
-    CONF_UART_ID,
 )
 import json
 import os
@@ -20,11 +19,22 @@ CODEOWNERS = ["@joshualongenecker"]
 DEPENDENCIES = ["uart", "mqtt"]
 AUTO_LOAD = []
 
+# UART configuration keys
+CONF_GEA3_UART_ID = "gea3_uart_id"
+CONF_GEA2_UART_ID = "gea2_uart_id"
+
+# GEA protocol configuration keys
+CONF_GEA_MODE = "gea_mode"
+CONF_GEA3_ADDRESS = "gea3_address"
+CONF_GEA2_ADDRESS = "gea2_address"
+
+# Bridge (MQTT) configuration keys
 CONF_DEVICE_ID = "device_id"
 CONF_MODE = "mode"
 CONF_POLLING_INTERVAL = "polling_interval"
+CONF_POLLING_ONLY_PUBLISH_ON_CHANGE = "polling_onlypublish_onchange"
 
-# Mode options
+# Bridge mode options (polling vs subscriptions)
 MODE_POLL = "poll"
 MODE_SUBSCRIBE = "subscribe"
 MODE_AUTO = "auto"
@@ -33,6 +43,16 @@ MODE_AUTO = "auto"
 MODE_POLL_VALUE = 0
 MODE_SUBSCRIBE_VALUE = 1
 MODE_AUTO_VALUE = 2
+
+# GEA protocol mode options
+GEA_MODE_AUTO = "auto"
+GEA_MODE_GEA3 = "gea3"
+GEA_MODE_GEA2 = "gea2"
+
+# GEA mode enum values (must match GEAMode enum in C++)
+GEA_MODE_AUTO_VALUE = 0
+GEA_MODE_GEA3_VALUE = 1
+GEA_MODE_GEA2_VALUE = 2
 
 geappliances_bridge_ns = cg.esphome_ns.namespace("geappliances_bridge")
 GeappliancesBridge = geappliances_bridge_ns.class_(
@@ -243,7 +263,8 @@ std::string appliance_type_to_string(uint8_t appliance_type) {{
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(GeappliancesBridge),
-        cv.GenerateID(CONF_UART_ID): cv.use_id(uart.UARTComponent),
+        cv.GenerateID(CONF_GEA3_UART_ID): cv.use_id(uart.UARTComponent),
+        cv.Optional(CONF_GEA2_UART_ID): cv.use_id(uart.UARTComponent),
         cv.Optional(CONF_DEVICE_ID): cv.string,
         cv.Optional(CONF_MODE, default=MODE_AUTO): cv.enum(
             {
@@ -254,6 +275,17 @@ CONFIG_SCHEMA = cv.Schema(
             upper=False
         ),
         cv.Optional(CONF_POLLING_INTERVAL, default=10000): cv.positive_int,
+        cv.Optional(CONF_POLLING_ONLY_PUBLISH_ON_CHANGE, default=False): cv.boolean,
+        cv.Optional(CONF_GEA3_ADDRESS, default=0xC0): cv.int_range(min=0, max=255),
+        cv.Optional(CONF_GEA2_ADDRESS, default=0xA0): cv.int_range(min=0, max=255),
+        cv.Optional(CONF_GEA_MODE, default=GEA_MODE_AUTO): cv.enum(
+            {
+                GEA_MODE_AUTO: GEA_MODE_AUTO_VALUE,
+                GEA_MODE_GEA3: GEA_MODE_GEA3_VALUE,
+                GEA_MODE_GEA2: GEA_MODE_GEA2_VALUE,
+            },
+            upper=False
+        ),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -270,17 +302,28 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Get UART component reference
-    uart_component = await cg.get_variable(config[CONF_UART_ID])
-    cg.add(var.set_uart(uart_component))
+    # Get GEA3 UART component reference
+    gea3_uart_component = await cg.get_variable(config[CONF_GEA3_UART_ID])
+    cg.add(var.set_gea3_uart(gea3_uart_component))
+
+    # Get optional GEA2 UART component reference
+    if CONF_GEA2_UART_ID in config:
+        gea2_uart_component = await cg.get_variable(config[CONF_GEA2_UART_ID])
+        cg.add(var.set_gea2_uart(gea2_uart_component))
 
     # Set device ID if provided, otherwise it will be auto-generated
     if CONF_DEVICE_ID in config:
         cg.add(var.set_device_id(config[CONF_DEVICE_ID]))
     
-    # Set mode configuration (config[CONF_MODE] is now an integer from cv.enum)
+    # Set bridge mode configuration (config[CONF_MODE] is now an integer from cv.enum)
     cg.add(var.set_mode(config[CONF_MODE]))
     cg.add(var.set_polling_interval(config[CONF_POLLING_INTERVAL]))
+    cg.add(var.set_polling_only_publish_on_change(config[CONF_POLLING_ONLY_PUBLISH_ON_CHANGE]))
+
+    # Set GEA protocol configuration
+    cg.add(var.set_gea3_address(config[CONF_GEA3_ADDRESS]))
+    cg.add(var.set_gea2_address(config[CONF_GEA2_ADDRESS]))
+    cg.add(var.set_gea_mode(config[CONF_GEA_MODE]))
     
     # Load appliance types from JSON and generate C++ mapping function
     appliance_types = load_appliance_types()

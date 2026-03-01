@@ -7,6 +7,7 @@ library and generates a C header file with ERD lists organized by appliance type
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Set
@@ -88,9 +89,9 @@ def format_erd_list(erds: List[int], indent: int = 2) -> str:
     return '\n'.join(lines)
 
 
-def generate_header(categories: Dict[str, List[int]]) -> str:
+def generate_header(categories: Dict[str, List[int]], polling_list_max_size: int) -> str:
     """Generate the complete erd_lists.h header file."""
-    header = """/*!
+    header = f"""/*!
  * @file
  * @brief Erd lists for various appliances
  * 
@@ -102,6 +103,10 @@ def generate_header(categories: Dict[str, List[int]]) -> str:
 #define ERD_LISTS_H
 
 #include "tiny_erd.h"
+
+// Maximum number of ERDs that can be held in the polling list.
+// Sized for the worst case: common ERDs + energy ERDs + largest appliance-specific ERD list.
+#define POLLING_LIST_MAX_SIZE {polling_list_max_size}
 
 """
     
@@ -199,6 +204,19 @@ const uint16_t maximumApplianceType = sizeof(applianceTypeToErdGroupTranslation)
     return header
 
 
+def read_common_erds_count(repo_root: Path) -> int:
+    """Read the number of entries in common_erds[] from mqtt_bridge_polling.cpp."""
+    polling_cpp = repo_root / 'components' / 'geappliances_bridge' / 'mqtt_bridge_polling.cpp'
+    content = polling_cpp.read_text()
+    match = re.search(r'common_erds\[\]\s*=\s*\{([^}]*)\}', content, re.DOTALL)
+    if not match:
+        print("Error: could not find common_erds[] in mqtt_bridge_polling.cpp", file=sys.stderr)
+        sys.exit(1)
+    # Strip line comments before counting hex values to avoid matching values in comments
+    body = re.sub(r'//[^\n]*', '', match.group(1))
+    return len(re.findall(r'0x[0-9a-fA-F]+', body))
+
+
 def main():
     """Main entry point for the script."""
     # Determine paths relative to script location
@@ -229,8 +247,23 @@ def main():
     for category, erd_list in categories.items():
         print(f"  {category}: {len(erd_list)}")
     
-    # Generate header
-    header_content = generate_header(categories)
+    # Calculate required POLLING_LIST_MAX_SIZE.
+    # The polling list holds: common ERDs + energy ERDs + appliance-specific ERDs.
+    # Use the worst case across all appliance-specific categories.
+    appliance_specific_categories = [
+        'waterHeater', 'laundry', 'refrigeration', 'smallAppliance',
+        'range', 'dishWasher', 'airConditioning', 'waterFilter'
+    ]
+    max_appliance_erds = max(len(categories[cat]) for cat in appliance_specific_categories)
+    common_erds_count = read_common_erds_count(repo_root)
+    energy_erds_count = len(categories['energy'])
+    polling_list_max_size = common_erds_count + energy_erds_count + max_appliance_erds
+    print(f"\nPolling list size check:")
+    print(f"  common ERDs: {common_erds_count}, energy ERDs: {energy_erds_count}, max appliance ERDs: {max_appliance_erds}")
+    print(f"  POLLING_LIST_MAX_SIZE: {polling_list_max_size}")
+
+    # Generate header (includes POLLING_LIST_MAX_SIZE)
+    header_content = generate_header(categories, polling_list_max_size)
     
     # Write output
     print(f"\nWriting generated header to {output_file}")

@@ -37,6 +37,7 @@ The script:
 3. Generates C arrays for each category with sorted ERD values
 4. Creates the appliance type to ERD list translation table
 5. Writes the complete header file to `components/geappliances_bridge/erd_lists.h`
+6. Calculates the maximum possible polling list size (common ERDs + energy ERDs + largest appliance-specific ERD list) and writes `#define POLLING_LIST_MAX_SIZE` into `components/geappliances_bridge/erd_lists.h`
 
 ### Note
 

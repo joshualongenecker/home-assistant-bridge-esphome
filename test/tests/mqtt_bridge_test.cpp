@@ -40,13 +40,14 @@ TEST_GROUP(mqtt_bridge)
     mqtt_bridge_destroy(&self);
   }
 
-  void when_the_bridge_is_initialized()
+  void when_the_bridge_is_initialized(uint8_t address = 0xC0)
   {
     mqtt_bridge_init(
       &self,
       &timer_group.timer_group,
       &erd_client.interface,
-      &mqtt_client.interface);
+      &mqtt_client.interface,
+      address);
   }
 
   void given_that_the_bridge_has_been_initialized()
@@ -387,4 +388,214 @@ TEST(mqtt_bridge, should_resubscribe_after_mqtt_disconnects)
   given_that_the_bridge_has_been_initialized_and_a_subscription_is_active_for(0xC0);
   a_subscription_to_should_be_requested_for(0xC0);
   after_mqtt_disconnects();
+}
+
+// ---------------------------------------------------------------------------
+// Dual-subscription tests: two independent bridge instances, each watching a
+// different appliance address and publishing to its own MQTT client.
+// ---------------------------------------------------------------------------
+
+TEST_GROUP(mqtt_bridge_dual)
+{
+  enum {
+    address_a = 0xC0,
+    address_b = 0xC4,
+    resubscribe_delay = 1000,
+    subscription_retention_period = 30 * 1000
+  };
+
+  mqtt_bridge_t bridge_a;
+  mqtt_bridge_t bridge_b;
+
+  tiny_timer_group_double_t timer_group;
+  tiny_gea3_erd_client_double_t erd_client;
+  mqtt_client_double_t mqtt_client_a;
+  mqtt_client_double_t mqtt_client_b;
+
+  void setup()
+  {
+    mock().strictOrder();
+
+    tiny_timer_group_double_init(&timer_group);
+    tiny_gea3_erd_client_double_init(&erd_client);
+    mqtt_client_double_init(&mqtt_client_a);
+    mqtt_client_double_init(&mqtt_client_b);
+  }
+
+  void teardown()
+  {
+    mqtt_bridge_destroy(&bridge_a);
+    mqtt_bridge_destroy(&bridge_b);
+  }
+
+  void given_both_bridges_are_initialized()
+  {
+    mock().disable();
+    mqtt_bridge_init(
+      &bridge_a,
+      &timer_group.timer_group,
+      &erd_client.interface,
+      &mqtt_client_a.interface,
+      address_a);
+    mqtt_bridge_init(
+      &bridge_b,
+      &timer_group.timer_group,
+      &erd_client.interface,
+      &mqtt_client_b.interface,
+      address_b);
+    mock().enable();
+  }
+
+  void a_subscription_should_be_requested_for(uint8_t address)
+  {
+    mock()
+      .expectOneCall("subscribe")
+      .onObject(&erd_client)
+      .withParameter("address", address)
+      .andReturnValue(true);
+  }
+
+  void after_a_subscription_is_added_or_retained_for(uint8_t address)
+  {
+    tiny_gea3_erd_client_on_activity_args_t args;
+    args.type = tiny_gea3_erd_client_activity_type_subscription_added_or_retained;
+    args.address = address;
+    tiny_gea3_erd_client_double_trigger_activity_event(&erd_client, &args);
+  }
+
+  void given_both_subscriptions_are_active()
+  {
+    mock().disable();
+    after_a_subscription_is_added_or_retained_for(address_a);
+    after_a_subscription_is_added_or_retained_for(address_b);
+    mock().enable();
+  }
+
+  void should_register_erd_on(mqtt_client_double_t& client, tiny_erd_t erd)
+  {
+    mock()
+      .expectOneCall("register_erd")
+      .onObject(&client)
+      .withParameter("erd", erd);
+  }
+
+  template <typename T>
+  void should_update_erd_on(mqtt_client_double_t& client, tiny_erd_t erd, T value)
+  {
+    static T _value;
+    _value = value;
+
+    mock()
+      .expectOneCall("update_erd")
+      .onObject(&client)
+      .withParameter("erd", erd)
+      .withMemoryBufferParameter("value", reinterpret_cast<const uint8_t*>(&_value), sizeof(_value));
+  }
+
+  template <typename T>
+  void when_an_erd_publication_is_received(uint8_t publisher_address, tiny_erd_t erd, T data)
+  {
+    tiny_gea3_erd_client_on_activity_args_t args;
+    args.type = tiny_gea3_erd_client_activity_type_subscription_publication_received;
+    args.address = publisher_address;
+    args.subscription_publication_received.erd = erd;
+    args.subscription_publication_received.data = &data;
+    args.subscription_publication_received.data_size = sizeof(data);
+    tiny_gea3_erd_client_double_trigger_activity_event(&erd_client, &args);
+  }
+
+  void after(tiny_timer_ticks_t ticks)
+  {
+    tiny_timer_group_double_elapse_time(&timer_group, ticks);
+  }
+
+  void nothing_should_happen()
+  {
+  }
+};
+
+TEST(mqtt_bridge_dual, each_bridge_subscribes_to_its_own_address_at_init)
+{
+  a_subscription_should_be_requested_for(address_a);
+  a_subscription_should_be_requested_for(address_b);
+  mqtt_bridge_init(
+    &bridge_a,
+    &timer_group.timer_group,
+    &erd_client.interface,
+    &mqtt_client_a.interface,
+    address_a);
+  mqtt_bridge_init(
+    &bridge_b,
+    &timer_group.timer_group,
+    &erd_client.interface,
+    &mqtt_client_b.interface,
+    address_b);
+}
+
+TEST(mqtt_bridge_dual, publications_from_each_appliance_are_routed_to_the_correct_mqtt_client)
+{
+  given_both_bridges_are_initialized();
+  given_both_subscriptions_are_active();
+
+  should_register_erd_on(mqtt_client_a, 0x0001);
+  should_update_erd_on(mqtt_client_a, 0x0001, uint32_t(0xAAAA0001));
+  when_an_erd_publication_is_received(address_a, 0x0001, uint32_t(0xAAAA0001));
+
+  should_register_erd_on(mqtt_client_b, 0x0001);
+  should_update_erd_on(mqtt_client_b, 0x0001, uint32_t(0xBBBB0001));
+  when_an_erd_publication_is_received(address_b, 0x0001, uint32_t(0xBBBB0001));
+}
+
+TEST(mqtt_bridge_dual, each_bridge_ignores_publications_from_the_other_appliance_address)
+{
+  given_both_bridges_are_initialized();
+  given_both_subscriptions_are_active();
+
+  // Only bridge_a should react to address_a publications; bridge_b should be silent
+  should_register_erd_on(mqtt_client_a, 0x0002);
+  should_update_erd_on(mqtt_client_a, 0x0002, uint32_t(0x11223344));
+  when_an_erd_publication_is_received(address_a, 0x0002, uint32_t(0x11223344));
+
+  // Only bridge_b should react to address_b publications; bridge_a should be silent
+  should_register_erd_on(mqtt_client_b, 0x0002);
+  should_update_erd_on(mqtt_client_b, 0x0002, uint32_t(0x55667788));
+  when_an_erd_publication_is_received(address_b, 0x0002, uint32_t(0x55667788));
+}
+
+TEST(mqtt_bridge_dual, each_bridge_independently_retains_its_subscription)
+{
+  given_both_bridges_are_initialized();
+  given_both_subscriptions_are_active();
+
+  nothing_should_happen();
+  after(subscription_retention_period - 1);
+
+  mock()
+    .expectOneCall("retain_subscription")
+    .onObject(&erd_client)
+    .withParameter("address", address_a)
+    .andReturnValue(true);
+  mock()
+    .expectOneCall("retain_subscription")
+    .onObject(&erd_client)
+    .withParameter("address", address_b)
+    .andReturnValue(true);
+  after(1);
+}
+
+TEST(mqtt_bridge_dual, resubscribing_one_bridge_does_not_affect_the_other)
+{
+  given_both_bridges_are_initialized();
+  given_both_subscriptions_are_active();
+
+  // bridge_b's host comes back online: only bridge_b should resubscribe
+  mock()
+    .expectOneCall("subscribe")
+    .onObject(&erd_client)
+    .withParameter("address", address_b)
+    .andReturnValue(true);
+  tiny_gea3_erd_client_on_activity_args_t args;
+  args.type = tiny_gea3_erd_client_activity_type_subscription_host_came_online;
+  args.address = address_b;
+  tiny_gea3_erd_client_double_trigger_activity_event(&erd_client, &args);
 }
