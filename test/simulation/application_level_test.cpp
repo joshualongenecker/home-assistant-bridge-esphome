@@ -73,7 +73,8 @@ TEST_GROUP(application_level)
       &mqtt_bridge,
       &timer_group.timer_group,
       &erd_client.interface,
-      &mqtt_client.interface);
+      &mqtt_client.interface,
+      appliance_address);
   }
   
   /*!
@@ -86,7 +87,8 @@ TEST_GROUP(application_level)
       &timer_group.timer_group,
       &erd_client.interface,
       &mqtt_client.interface,
-      polling_interval);
+      polling_interval,
+      false);
   }
   
   /*!

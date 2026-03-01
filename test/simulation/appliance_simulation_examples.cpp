@@ -82,7 +82,8 @@ TEST_GROUP(appliance_simulation_examples)
       &mqtt_bridge,
       &timer_group.timer_group,
       &erd_client.interface,
-      &mqtt_client.interface);
+      &mqtt_client.interface,
+      host_address);
   }
   
   void initialize_mqtt_bridge_polling_mode()
@@ -92,7 +93,8 @@ TEST_GROUP(appliance_simulation_examples)
       &timer_group.timer_group,
       &erd_client.interface,
       &mqtt_client.interface,
-      polling_interval);
+      polling_interval,
+      false);
   }
   
   /*!
