@@ -2,6 +2,11 @@
 #include "esphome/core/log.h"
 #include "esphome_time_source.h"
 
+extern "C" {
+#include "tiny_gea3_erd_api.h"
+#include "tiny_gea2_erd_api.h"
+}
+
 namespace esphome {
 namespace geappliances_bridge {
 
@@ -74,6 +79,18 @@ void GeappliancesBridge::setup() {
     tiny_gea3_erd_client_on_activity(&this->erd_client_.interface), 
     &this->erd_client_activity_subscription_);
 
+  // Subscribe to raw GEA3 packets so all broadcast responses are captured during discovery
+  tiny_event_subscription_init(
+    &this->gea3_raw_packet_subscription_, this,
+    +[](void* context, const void* args_) {
+      auto self = reinterpret_cast<GeappliancesBridge*>(context);
+      auto args = reinterpret_cast<const tiny_gea_interface_on_receive_args_t*>(args_);
+      self->handle_gea3_raw_packet_(args->packet);
+    });
+  tiny_event_subscribe(
+    tiny_gea_interface_on_receive(&this->gea3_interface_.interface),
+    &this->gea3_raw_packet_subscription_);
+
   // Initialize GEA2 components if a second UART is configured
   if (this->gea2_uart_ != nullptr) {
     ESP_LOGI(TAG, "GEA2 UART configured, initializing GEA2 interface");
@@ -125,6 +142,18 @@ void GeappliancesBridge::setup() {
     tiny_event_subscribe(
       tiny_gea2_erd_client_on_activity(&this->gea2_erd_client_.interface),
       &this->gea2_erd_client_activity_subscription_);
+
+    // Subscribe to raw GEA2 packets so all broadcast responses are captured during discovery
+    tiny_event_subscription_init(
+      &this->gea2_raw_packet_subscription_, this,
+      +[](void* context, const void* args_) {
+        auto self = reinterpret_cast<GeappliancesBridge*>(context);
+        auto args = reinterpret_cast<const tiny_gea_interface_on_receive_args_t*>(args_);
+        self->handle_gea2_raw_packet_(args->packet);
+      });
+    tiny_event_subscribe(
+      tiny_gea_interface_on_receive(&this->gea2_interface_.interface),
+      &this->gea2_raw_packet_subscription_);
   }
 
   // If device_id is configured, set it immediately; otherwise wait for autodiscovery
@@ -257,19 +286,34 @@ void GeappliancesBridge::run_autodiscovery_() {
       this->gea3_board_discovered_ = false;
       this->gea3_preferred_found_ = false;
       this->gea3_discovered_count_ = 0;
+      this->gea3_discovery_poll_count_ = 0;
       tiny_gea3_erd_client_request_id_t req_id;
       if (tiny_gea3_erd_client_read(&this->erd_client_.interface, &req_id,
                                      GEA_BROADCAST_ADDRESS, ERD_DISCOVERY)) {
-        ESP_LOGI(TAG, "Sent GEA3 broadcast (ERD 0x%04X) to address 0x%02X",
-                 ERD_DISCOVERY, GEA_BROADCAST_ADDRESS);
+        ESP_LOGI(TAG, "GEA3 discovery: sent broadcast #%u/%u (TX: dst=0xFF ERD=0x%04X)",
+                 this->gea3_discovery_poll_count_, AUTODISCOVERY_POLL_COUNT, ERD_DISCOVERY);
         this->autodiscovery_timer_start_ = millis();
+        this->gea3_last_poll_time_ = millis();
+        this->gea3_discovery_poll_count_ = 1;
         this->autodiscovery_state_ = AUTODISCOVERY_GEA3_BROADCAST_WAITING;
       }
       // else: retry next loop iteration
       break;
     }
 
-    case AUTODISCOVERY_GEA3_BROADCAST_WAITING:
+    case AUTODISCOVERY_GEA3_BROADCAST_WAITING: {
+      // Resend broadcast every AUTODISCOVERY_REPEAT_INTERVAL_MS while under AUTODISCOVERY_POLL_COUNT
+      if (this->gea3_discovery_poll_count_ < AUTODISCOVERY_POLL_COUNT &&
+          millis() - this->gea3_last_poll_time_ >= AUTODISCOVERY_REPEAT_INTERVAL_MS) {
+        tiny_gea3_erd_client_request_id_t req_id;
+        if (tiny_gea3_erd_client_read(&this->erd_client_.interface, &req_id,
+                                       GEA_BROADCAST_ADDRESS, ERD_DISCOVERY)) {
+          this->gea3_discovery_poll_count_++;
+          this->gea3_last_poll_time_ = millis();
+          ESP_LOGI(TAG, "GEA3 discovery: sent broadcast #%u/%u (TX: dst=0xFF ERD=0x%04X)",
+                   this->gea3_discovery_poll_count_, AUTODISCOVERY_POLL_COUNT, ERD_DISCOVERY);
+        }
+      }
       if (millis() - this->autodiscovery_timer_start_ >= AUTODISCOVERY_BROADCAST_WINDOW_MS) {
         if (this->gea3_board_discovered_) {
           // Use preferred address if found; otherwise use first responder
@@ -293,6 +337,7 @@ void GeappliancesBridge::run_autodiscovery_() {
         }
       }
       break;
+    }
 
     case AUTODISCOVERY_GEA2_BROADCAST_PENDING:
       if (this->gea2_uart_ == nullptr) {
@@ -303,19 +348,34 @@ void GeappliancesBridge::run_autodiscovery_() {
         this->gea2_board_discovered_ = false;
         this->gea2_preferred_found_ = false;
         this->gea2_discovered_count_ = 0;
+        this->gea2_discovery_poll_count_ = 0;
         tiny_gea2_erd_client_request_id_t req_id;
         if (tiny_gea2_erd_client_read(&this->gea2_erd_client_.interface, &req_id,
                                        GEA_BROADCAST_ADDRESS, ERD_DISCOVERY)) {
-          ESP_LOGI(TAG, "Sent GEA2 broadcast (ERD 0x%04X) to address 0x%02X",
-                   ERD_DISCOVERY, GEA_BROADCAST_ADDRESS);
+          ESP_LOGI(TAG, "GEA2 discovery: sent broadcast #%u/%u (TX: dst=0xFF ERD=0x%04X)",
+                   this->gea2_discovery_poll_count_, AUTODISCOVERY_POLL_COUNT, ERD_DISCOVERY);
           this->autodiscovery_timer_start_ = millis();
+          this->gea2_last_poll_time_ = millis();
+          this->gea2_discovery_poll_count_ = 1;
           this->autodiscovery_state_ = AUTODISCOVERY_GEA2_BROADCAST_WAITING;
         }
         // else: retry next loop iteration
       }
       break;
 
-    case AUTODISCOVERY_GEA2_BROADCAST_WAITING:
+    case AUTODISCOVERY_GEA2_BROADCAST_WAITING: {
+      // Resend broadcast every AUTODISCOVERY_REPEAT_INTERVAL_MS while under AUTODISCOVERY_POLL_COUNT
+      if (this->gea2_discovery_poll_count_ < AUTODISCOVERY_POLL_COUNT &&
+          millis() - this->gea2_last_poll_time_ >= AUTODISCOVERY_REPEAT_INTERVAL_MS) {
+        tiny_gea2_erd_client_request_id_t req_id;
+        if (tiny_gea2_erd_client_read(&this->gea2_erd_client_.interface, &req_id,
+                                       GEA_BROADCAST_ADDRESS, ERD_DISCOVERY)) {
+          this->gea2_discovery_poll_count_++;
+          this->gea2_last_poll_time_ = millis();
+          ESP_LOGI(TAG, "GEA2 discovery: sent broadcast #%u/%u (TX: dst=0xFF ERD=0x%04X)",
+                   this->gea2_discovery_poll_count_, AUTODISCOVERY_POLL_COUNT, ERD_DISCOVERY);
+        }
+      }
       if (millis() - this->autodiscovery_timer_start_ >= AUTODISCOVERY_BROADCAST_WINDOW_MS) {
         if (this->gea2_board_discovered_) {
           // Use preferred address if found; otherwise use first responder
@@ -338,6 +398,7 @@ void GeappliancesBridge::run_autodiscovery_() {
         }
       }
       break;
+    }
 
     case AUTODISCOVERY_COMPLETE:
       break;
@@ -407,34 +468,9 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
     }
   }
 
-  // Handle autodiscovery responses (GEA3 broadcast window)
+  // Skip during autodiscovery window; raw packet handler captures all board responses
   if (this->autodiscovery_state_ == AUTODISCOVERY_GEA3_BROADCAST_WAITING) {
-    if (args->type == tiny_gea3_erd_client_activity_type_read_completed &&
-        args->read_completed.erd == ERD_DISCOVERY) {
-      uint8_t app_type = reinterpret_cast<const uint8_t*>(args->read_completed.data)[0];
-      std::string app_type_name = appliance_type_to_string(app_type);
-      ESP_LOGD(TAG, "GEA3 board discovered: address=0x%02X appliance_type=%u (%s)",
-               args->address, app_type, app_type_name.c_str());
-      this->gea3_board_discovered_ = true;
-      if (args->address == this->gea3_address_preference_) {
-        // Preferred address responded - use it for device ID generation
-        this->gea3_preferred_found_ = true;
-        this->host_address_ = args->address;
-        this->use_gea2_for_device_id_ = false;
-      }
-      // Track every responding address (deduplicated)
-      bool already_tracked = false;
-      for (uint8_t i = 0; i < this->gea3_discovered_count_; i++) {
-        if (this->gea3_discovered_addresses_[i] == args->address) {
-          already_tracked = true;
-          break;
-        }
-      }
-      if (!already_tracked && this->gea3_discovered_count_ < MAX_BOARDS) {
-        this->gea3_discovered_addresses_[this->gea3_discovered_count_++] = args->address;
-      }
-    }
-    return; // Don't process as device ID during autodiscovery window
+    return;
   }
 
   // Only process read responses for device ID ERDs before MQTT bridge is initialized
@@ -496,34 +532,9 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
 }
 
 void GeappliancesBridge::handle_gea2_erd_client_activity_(const tiny_gea2_erd_client_on_activity_args_t* args) {
-  // Handle autodiscovery responses (GEA2 broadcast window)
+  // Skip during autodiscovery window; raw packet handler captures all board responses
   if (this->autodiscovery_state_ == AUTODISCOVERY_GEA2_BROADCAST_WAITING) {
-    if (args->type == tiny_gea2_erd_client_activity_type_read_completed &&
-        args->read_completed.erd == ERD_DISCOVERY) {
-      uint8_t app_type = reinterpret_cast<const uint8_t*>(args->read_completed.data)[0];
-      std::string app_type_name = appliance_type_to_string(app_type);
-      ESP_LOGD(TAG, "GEA2 board discovered: address=0x%02X appliance_type=%u (%s)",
-               args->address, app_type, app_type_name.c_str());
-      this->gea2_board_discovered_ = true;
-      if (args->address == this->gea2_address_preference_) {
-        // Preferred address responded - use it for device ID generation
-        this->gea2_preferred_found_ = true;
-        this->host_address_ = args->address;
-        this->use_gea2_for_device_id_ = true;
-      }
-      // Track every responding address (deduplicated)
-      bool already_tracked = false;
-      for (uint8_t i = 0; i < this->gea2_discovered_count_; i++) {
-        if (this->gea2_discovered_addresses_[i] == args->address) {
-          already_tracked = true;
-          break;
-        }
-      }
-      if (!already_tracked && this->gea2_discovered_count_ < MAX_BOARDS) {
-        this->gea2_discovered_addresses_[this->gea2_discovered_count_++] = args->address;
-      }
-    }
-    return; // Don't process as device ID during autodiscovery window
+    return;
   }
 
   // Handle device ID reads via GEA2 (when use_gea2_for_device_id_ is true)
@@ -688,6 +699,116 @@ std::string GeappliancesBridge::bytes_to_string_(const uint8_t* data, size_t siz
     result += static_cast<char>(data[i]);
   }
   return result;
+}
+
+std::string GeappliancesBridge::bytes_to_hex_string_(const uint8_t* data, size_t size) {
+  static const char hex_chars[] = "0123456789ABCDEF";
+  std::string result;
+  result.reserve(size * 3);
+  for (size_t i = 0; i < size; i++) {
+    if (i > 0) result += ' ';
+    result += hex_chars[(data[i] >> 4) & 0xF];
+    result += hex_chars[data[i] & 0xF];
+  }
+  return result;
+}
+
+void GeappliancesBridge::handle_gea3_raw_packet_(const tiny_gea_packet_t* packet) {
+  if (this->autodiscovery_state_ != AUTODISCOVERY_GEA3_BROADCAST_WAITING) {
+    return;
+  }
+
+  // Log every raw packet received during the discovery window
+  std::string payload_hex = this->bytes_to_hex_string_(packet->payload, packet->payload_length);
+  ESP_LOGD(TAG, "GEA3 RX [discovery]: src=0x%02X dst=0x%02X payload=[%s]",
+           packet->source, packet->destination, payload_hex.c_str());
+
+  // GEA3 read response for ERD 0x0008:
+  //   payload[0] = 0xA1 (read_response command)
+  //   payload[1] = request_id
+  //   payload[2] = result (0x00 = success)
+  //   payload[3] = erd_msb (0x00)
+  //   payload[4] = erd_lsb (0x08)
+  //   payload[5] = data_size
+  //   payload[6] = appliance_type
+  if (packet->payload_length < 7) return;
+  if (packet->payload[0] != tiny_gea3_erd_api_command_read_response) return;
+  if (packet->payload[2] != tiny_gea3_erd_api_read_result_success) return;
+  if (packet->payload[3] != 0x00 || packet->payload[4] != 0x08) return;
+  if (packet->payload[5] < 1) return;
+  if (packet->source == this->client_address_) return; // ignore echoes of our own requests
+
+  uint8_t app_type = packet->payload[6];
+  std::string app_type_name = appliance_type_to_string(app_type);
+  ESP_LOGI(TAG, "GEA3 discovery: board 0x%02X responded, appliance_type=%u (%s)",
+           packet->source, app_type, app_type_name.c_str());
+
+  this->gea3_board_discovered_ = true;
+  if (packet->source == this->gea3_address_preference_) {
+    this->gea3_preferred_found_ = true;
+    this->host_address_ = packet->source;
+    this->use_gea2_for_device_id_ = false;
+  }
+
+  // Deduplicated tracking
+  for (uint8_t i = 0; i < this->gea3_discovered_count_; i++) {
+    if (this->gea3_discovered_addresses_[i] == packet->source) {
+      return;
+    }
+  }
+  if (this->gea3_discovered_count_ < MAX_BOARDS) {
+    this->gea3_discovered_addresses_[this->gea3_discovered_count_++] = packet->source;
+    ESP_LOGI(TAG, "GEA3 discovery: %u board(s) found so far", this->gea3_discovered_count_);
+  }
+}
+
+void GeappliancesBridge::handle_gea2_raw_packet_(const tiny_gea_packet_t* packet) {
+  if (this->autodiscovery_state_ != AUTODISCOVERY_GEA2_BROADCAST_WAITING) {
+    return;
+  }
+
+  // Log every raw packet received during the discovery window
+  std::string payload_hex = this->bytes_to_hex_string_(packet->payload, packet->payload_length);
+  ESP_LOGD(TAG, "GEA2 RX [discovery]: src=0x%02X dst=0x%02X payload=[%s]",
+           packet->source, packet->destination, payload_hex.c_str());
+
+  // GEA2 read response for ERD 0x0008:
+  //   payload[0] = 0xF0 (read command, shared with request)
+  //   payload[1] = erd_count (0x01)
+  //   payload[2] = erd_msb (0x00)
+  //   payload[3] = erd_lsb (0x08)
+  //   payload[4] = data_size
+  //   payload[5] = appliance_type
+  // (responses have payload_length >= 6; a 4-byte request has payload_length == 4)
+  if (packet->payload_length < 6) return;
+  if (packet->payload[0] != 0xF0) return;
+  if (packet->payload[1] != 0x01) return; // erd_count == 1
+  if (packet->payload[2] != 0x00 || packet->payload[3] != 0x08) return;
+  if (packet->payload[4] < 1) return;
+  if (packet->source == this->client_address_) return; // ignore our own request echoes
+
+  uint8_t app_type = packet->payload[5];
+  std::string app_type_name = appliance_type_to_string(app_type);
+  ESP_LOGI(TAG, "GEA2 discovery: board 0x%02X responded, appliance_type=%u (%s)",
+           packet->source, app_type, app_type_name.c_str());
+
+  this->gea2_board_discovered_ = true;
+  if (packet->source == this->gea2_address_preference_) {
+    this->gea2_preferred_found_ = true;
+    this->host_address_ = packet->source;
+    this->use_gea2_for_device_id_ = true;
+  }
+
+  // Deduplicated tracking
+  for (uint8_t i = 0; i < this->gea2_discovered_count_; i++) {
+    if (this->gea2_discovered_addresses_[i] == packet->source) {
+      return;
+    }
+  }
+  if (this->gea2_discovered_count_ < MAX_BOARDS) {
+    this->gea2_discovered_addresses_[this->gea2_discovered_count_++] = packet->source;
+    ESP_LOGI(TAG, "GEA2 discovery: %u board(s) found so far", this->gea2_discovered_count_);
+  }
 }
 
 std::string GeappliancesBridge::sanitize_for_mqtt_topic_(const std::string& input) {

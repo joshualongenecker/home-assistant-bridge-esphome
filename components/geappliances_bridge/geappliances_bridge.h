@@ -65,11 +65,14 @@ class GeappliancesBridge : public Component {
   void notify_mqtt_disconnected_();
   void handle_erd_client_activity_(const tiny_gea3_erd_client_on_activity_args_t* args);
   void handle_gea2_erd_client_activity_(const tiny_gea2_erd_client_on_activity_args_t* args);
+  void handle_gea3_raw_packet_(const tiny_gea_packet_t* packet);
+  void handle_gea2_raw_packet_(const tiny_gea_packet_t* packet);
   void initialize_mqtt_bridge_();
   void check_subscription_activity_();
   void run_autodiscovery_();
   void start_device_id_generation_();
   std::string bytes_to_string_(const uint8_t* data, size_t size);
+  std::string bytes_to_hex_string_(const uint8_t* data, size_t size);
   std::string sanitize_for_mqtt_topic_(const std::string& input);
   bool try_read_erd_with_retry_(tiny_erd_t erd, const char* erd_name);
 
@@ -132,12 +135,18 @@ class GeappliancesBridge : public Component {
   bool gea3_preferred_found_{false};
   uint8_t gea3_discovered_addresses_[MAX_BOARDS];  // All GEA3 boards that responded
   uint8_t gea3_discovered_count_{0};               // Number of GEA3 boards discovered
+  uint8_t gea3_discovery_poll_count_{0};           // Number of broadcasts sent this cycle
+  uint32_t gea3_last_poll_time_{0};                // Timestamp of last GEA3 broadcast
   bool gea2_board_discovered_{false};
   bool gea2_preferred_found_{false};
   uint8_t gea2_discovered_addresses_[MAX_BOARDS];  // All GEA2 boards that responded
   uint8_t gea2_discovered_count_{0};               // Number of GEA2 boards discovered
+  uint8_t gea2_discovery_poll_count_{0};           // Number of broadcasts sent this cycle
+  uint32_t gea2_last_poll_time_{0};                // Timestamp of last GEA2 broadcast
   static constexpr uint32_t STARTUP_DELAY_MS = 20000;              // 20s after MQTT connects
-  static constexpr uint32_t AUTODISCOVERY_BROADCAST_WINDOW_MS = 10000; // 10s window per broadcast
+  static constexpr uint32_t AUTODISCOVERY_BROADCAST_WINDOW_MS = 10000; // 10s window per broadcast cycle
+  static constexpr uint8_t  AUTODISCOVERY_POLL_COUNT = 5;           // Repeat broadcast this many times
+  static constexpr uint32_t AUTODISCOVERY_REPEAT_INTERVAL_MS = 2000; // Interval between broadcasts
 
   tiny_gea3_erd_client_request_id_t pending_request_id_;
   tiny_gea2_erd_client_request_id_t gea2_pending_request_id_;
@@ -178,6 +187,8 @@ class GeappliancesBridge : public Component {
 
   tiny_event_subscription_t erd_client_activity_subscription_;
   tiny_event_subscription_t gea2_erd_client_activity_subscription_;
+  tiny_event_subscription_t gea3_raw_packet_subscription_;
+  tiny_event_subscription_t gea2_raw_packet_subscription_;
 };
 
 }  // namespace geappliances_bridge
