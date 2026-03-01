@@ -8,6 +8,7 @@ INC_DIRS := \
   lib/tiny-gea-api/include \
   lib/tiny-gea-api/test/include \
   test/include \
+  test/simulation \
 
 SRC_DIRS := \
   lib/tiny/src \
@@ -17,6 +18,7 @@ SRC_DIRS := \
   test \
   test/src \
   test/tests \
+  test/simulation \
 
 SRC_FILES := \
   components/geappliances_bridge/mqtt_bridge.cpp \
