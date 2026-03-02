@@ -28,6 +28,7 @@ CONF_DEVICE_ID = "device_id"
 CONF_MODE = "mode"
 CONF_POLLING_INTERVAL = "polling_interval"
 CONF_POLLING_ONLY_PUBLISH_ON_CHANGE = "polling_onlypublish_onchange"
+CONF_BLE_PROVISIONING = "ble_provisioning"
 
 # Bridge mode options (polling vs subscriptions)
 MODE_POLL = "poll"
@@ -267,6 +268,7 @@ CONFIG_SCHEMA = cv.Schema(
         ),
         cv.Optional(CONF_POLLING_INTERVAL, default=10000): cv.positive_int,
         cv.Optional(CONF_POLLING_ONLY_PUBLISH_ON_CHANGE, default=False): cv.boolean,
+        cv.Optional(CONF_BLE_PROVISIONING, default=False): cv.boolean,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 CONFIG_SCHEMA = cv.All(CONFIG_SCHEMA, validate_at_least_one_uart)
@@ -302,6 +304,7 @@ async def to_code(config):
     cg.add(var.set_mode(config[CONF_MODE]))
     cg.add(var.set_polling_interval(config[CONF_POLLING_INTERVAL]))
     cg.add(var.set_polling_only_publish_on_change(config[CONF_POLLING_ONLY_PUBLISH_ON_CHANGE]))
+    cg.add(var.set_ble_provisioning_enabled(config[CONF_BLE_PROVISIONING]))
     
     # Load appliance types from JSON and generate C++ mapping function
     appliance_types = load_appliance_types()

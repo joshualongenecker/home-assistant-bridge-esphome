@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/core/component.h"
+#include "esphome/core/preferences.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/mqtt/mqtt_client.h"
 #include <string>
@@ -25,6 +26,29 @@ std::string appliance_type_to_string(uint8_t appliance_type);
 namespace esphome {
 namespace geappliances_bridge {
 
+/*!
+ * Structure for storing MQTT credentials in NVS (non-volatile storage).
+ *
+ * When ble_provisioning is enabled, the component stores MQTT credentials
+ * here so they survive reboots and override compile-time secrets.
+ *
+ * Size limits (including null terminator):
+ *   broker   – max 127 characters
+ *   username – max 63 characters
+ *   password – max 63 characters
+ *
+ * Note: only one geappliances_bridge instance per device is supported when
+ * ble_provisioning is enabled (all instances share the same NVS slot).
+ */
+struct MQTTNvsCredentials {
+  static constexpr uint8_t MAGIC = 0xBE;  ///< Detects valid stored data vs. blank flash
+  char broker[128];
+  uint16_t port;
+  char username[64];
+  char password[64];
+  uint8_t magic;
+};
+
 // Operation mode for the bridge
 // Note: These enum values must match MODE_*_VALUE constants in __init__.py
 enum BridgeMode {
@@ -48,6 +72,24 @@ class GeappliancesBridge : public Component {
   void set_mode(uint8_t mode) { this->mode_ = static_cast<BridgeMode>(mode); }
   void set_polling_interval(uint32_t polling_interval) { this->polling_interval_ms_ = polling_interval; }
   void set_polling_only_publish_on_change(bool only_publish_on_change) { this->polling_only_publish_on_change_ = only_publish_on_change; }
+  void set_ble_provisioning_enabled(bool enabled) { this->ble_provisioning_enabled_ = enabled; }
+
+  /*!
+   * Configure MQTT credentials at runtime and persist them to NVS.
+   *
+   * Call this via an ESPHome API service (see example.yaml) after BLE WiFi
+   * provisioning to supply the MQTT broker credentials without hardcoding them
+   * as compile-time secrets.  The credentials are written to flash and survive
+   * reboots.  A safe reboot is triggered automatically so the MQTT component
+   * re-connects with the new credentials on startup.
+   *
+   * @param broker   MQTT broker hostname or IP address (max 127 chars).
+   * @param port     MQTT broker port (typically 1883).
+   * @param username MQTT username – max 63 chars, may be empty.
+   * @param password MQTT password – max 63 chars, may be empty.
+   */
+  void configure_mqtt_credentials(const std::string &broker, uint16_t port,
+                                  const std::string &username, const std::string &password);
 
  protected:
   void on_mqtt_connected_();
@@ -62,6 +104,8 @@ class GeappliancesBridge : public Component {
   std::string bytes_to_string_(const uint8_t* data, size_t size);
   std::string sanitize_for_mqtt_topic_(const std::string& input);
   bool try_read_erd_with_retry_(tiny_erd_t erd, const char* erd_name);
+  bool load_mqtt_credentials_from_nvs_();
+  void apply_nvs_mqtt_credentials_();
 
   enum DeviceIdState {
     DEVICE_ID_STATE_IDLE,
@@ -101,6 +145,8 @@ class GeappliancesBridge : public Component {
   BridgeMode mode_{BRIDGE_MODE_AUTO};
   uint32_t polling_interval_ms_{10000};
   bool polling_only_publish_on_change_{false};
+  bool ble_provisioning_enabled_{false};
+  MQTTNvsCredentials nvs_credentials_{};
   
   // Auto mode fallback tracking
   bool subscription_mode_active_{false};

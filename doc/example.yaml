@@ -6,6 +6,19 @@ esphome:
 api:
   encryption:
     key: !secret api_encryption_key
+  # BLE Provisioning: expose a service so Home Assistant can push MQTT credentials
+  # to the adapter after WiFi is provisioned via BLE.  Call this once after pairing;
+  # credentials are persisted in flash and survive reboots.
+  services:
+    - service: configure_mqtt
+      variables:
+        broker: string
+        port: int
+        username: string
+        password: string
+      then:
+        - lambda: |-
+            id(geappliances_bridge_comp).configure_mqtt_credentials(broker, (uint16_t)port, username, password);
 
 wifi:
   ssid: !secret wifi_ssid
@@ -18,8 +31,15 @@ logger:
 ota:
   - platform: esphome
 
-# Allow provisioning Wi-Fi via serial
+# Allow provisioning Wi-Fi via serial (fallback for non-BLE setup)
 improv_serial:
+
+# BLE Improv: broadcast a BLE beacon when unpaired so Home Assistant can
+# discover the adapter and provision WiFi credentials without a serial cable.
+# After WiFi is provisioned, call the 'configure_mqtt' API service above to
+# supply the MQTT broker credentials.
+esp32_improv_ble:
+  authorizer: none
 
 esp32:
   board: seeed_xiao_esp32c3
@@ -33,6 +53,9 @@ external_components:
     components: [ geappliances_bridge ]
 
 # MQTT configuration for Home Assistant
+# When ble_provisioning is enabled, credentials stored via the 'configure_mqtt'
+# API service override these values on the next boot.  You can leave the secrets
+# as placeholders (e.g. "unconfigured") for a fully BLE-provisioned setup.
 mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
@@ -57,8 +80,10 @@ uart:
 
 # GE Appliances Bridge component
 geappliances_bridge:
+  id: geappliances_bridge_comp
   gea3_uart_id: gea3_uart
   gea2_uart_id: gea2_uart     # Not functional yet
+  ble_provisioning: true      # Enable NVS-backed MQTT credential storage for BLE provisioning
   # device_id: "YourDeviceId"   # Optional: Uncomment to use a custom device ID
   # mode: auto                  # Default: auto   Options: auto, subscribe, poll
   # polling_interval: 10000     # Default: 10000 ms (10 seconds), used when in polling mode

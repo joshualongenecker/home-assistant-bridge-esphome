@@ -12,6 +12,66 @@ This component is designed for use with the **FirstBuild Home Assistant Adapter*
 
 Available from [FirstBuild](https://firstbuild.com/inventions/home-assistant-adapter/)
 
+## BLE Provisioning (No Secrets Required)
+
+The adapter supports a **zero-secret setup** via BLE Improv, eliminating the need to hardcode WiFi or MQTT credentials in your ESPHome configuration.
+
+### How It Works
+
+1. **Flash** the adapter with firmware that includes `esp32_improv_ble` and `ble_provisioning: true`.
+2. **Pair WiFi** – the adapter broadcasts a BLE advertisement that Home Assistant detects. Clicking *Configure* in the HA device discovery dialog provisions WiFi credentials over BLE automatically.
+3. **Configure MQTT** – after the adapter connects to WiFi, Home Assistant discovers it via the ESPHome native API. Call the `configure_mqtt` service once (e.g. from *Developer Tools → Services* or an automation):
+
+```yaml
+service: esphome.<device_name>_configure_mqtt
+data:
+  broker: "192.168.1.100"   # Your MQTT broker IP or hostname
+  port: 1883
+  username: "mqtt_user"
+  password: "mqtt_pass"
+```
+
+The credentials are written to the ESP32's flash (NVS) and the adapter reboots automatically. On every subsequent boot, the stored credentials override the compile-time values in the `mqtt:` block, so the adapter connects to the correct broker without needing a `secrets.yaml` file.
+
+### BLE Provisioning YAML Example
+
+```yaml
+api:
+  encryption:
+    key: !secret api_encryption_key
+  services:
+    - service: configure_mqtt
+      variables:
+        broker: string
+        port: int
+        username: string
+        password: string
+      then:
+        - lambda: |-
+            id(geappliances_bridge_comp).configure_mqtt_credentials(broker, (uint16_t)port, username, password);
+
+# BLE Improv: provisions WiFi credentials when paired in Home Assistant
+esp32_improv_ble:
+  authorizer: none
+
+# MQTT section is still required by ESPHome; credentials are overridden at
+# runtime from NVS when ble_provisioning: true is set in geappliances_bridge.
+mqtt:
+  broker: !secret mqtt_broker   # used only if no NVS credentials are stored yet
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  port: 1883
+  discovery: true
+  discovery_prefix: homeassistant
+
+geappliances_bridge:
+  id: geappliances_bridge_comp
+  gea3_uart_id: gea3_uart
+  ble_provisioning: true        # enables NVS credential storage + BLE flow
+```
+
+See [doc/example.yaml](doc/example.yaml) for the complete configuration.
+
 ## Configuration
 
 Add to your ESPHome YAML configuration:
@@ -61,6 +121,19 @@ geappliances_bridge:
 ```
 
 ## Configurable Parameters
+
+### BLE Provisioning
+
+The `ble_provisioning` parameter is **optional** (default: `false`).
+
+When set to `true`, the component:
+1. Loads MQTT credentials from ESP32 flash (NVS) on each boot and applies them to the MQTT client before it connects. This overrides the `broker`, `username`, and `password` values in the `mqtt:` YAML block.
+2. Exposes a `configure_mqtt_credentials()` method callable from the ESPHome API service `configure_mqtt` (see [doc/example.yaml](doc/example.yaml) for the service definition). After receiving new credentials the device saves them to NVS and performs a safe reboot.
+
+This enables the full **zero-secret BLE provisioning flow**:
+- WiFi is provisioned via `esp32_improv_ble` (no serial cable required)
+- MQTT credentials are pushed once via the `configure_mqtt` API service from Home Assistant
+- Both sets of credentials are stored in flash and reused on every subsequent boot
 
 ### Mode
 

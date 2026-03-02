@@ -1,5 +1,6 @@
 #include "geappliances_bridge.h"
 #include "esphome/core/log.h"
+#include "esphome/core/application.h"
 #include "esphome_time_source.h"
 
 namespace esphome {
@@ -32,6 +33,18 @@ static void publish_msec_interrupt(void* context)
 
 void GeappliancesBridge::setup() {
   ESP_LOGCONFIG(TAG, "Setting up GE Appliances Bridge...");
+
+  // If BLE provisioning is enabled, try to load MQTT credentials from NVS.
+  // This must happen before the MQTT component's setup() so that any stored
+  // credentials override the compile-time secrets.
+  if (this->ble_provisioning_enabled_) {
+    if (this->load_mqtt_credentials_from_nvs_()) {
+      this->apply_nvs_mqtt_credentials_();
+    } else {
+      ESP_LOGI(TAG, "BLE provisioning enabled: no MQTT credentials in NVS. "
+               "Use the 'configure_mqtt' API service to provision credentials.");
+    }
+  }
 
   // Initialize timer group
   tiny_timer_group_init(&this->timer_group_, esphome_time_source_init());
@@ -621,11 +634,90 @@ void GeappliancesBridge::dump_config() {
     ESP_LOGCONFIG(TAG, "  Polling Interval: %u ms", this->polling_interval_ms_);
     ESP_LOGCONFIG(TAG, "  Only Publish On Change: %s", this->polling_only_publish_on_change_ ? "yes" : "no");
   }
+  ESP_LOGCONFIG(TAG, "  BLE Provisioning: %s", this->ble_provisioning_enabled_ ? "enabled" : "disabled");
+  if (this->ble_provisioning_enabled_ && this->nvs_credentials_.magic == MQTTNvsCredentials::MAGIC) {
+    ESP_LOGCONFIG(TAG, "  MQTT Credentials Source: NVS (broker=%s port=%u)",
+                  this->nvs_credentials_.broker, this->nvs_credentials_.port);
+  }
 }
 
 float GeappliancesBridge::get_setup_priority() const {
   // Run after UART (priority 600) and MQTT (priority 50)
   return setup_priority::DATA;  // Priority 600
+}
+
+// NVS preference key – must be unique per component instance.
+// Using a fixed hash to avoid a run-time hash computation.
+static constexpr uint32_t MQTT_NVS_PREF_HASH = 0x47454150; // "GEAP"
+
+bool GeappliancesBridge::load_mqtt_credentials_from_nvs_() {
+  MQTTNvsCredentials creds;
+  auto pref = global_preferences->make_preference<MQTTNvsCredentials>(MQTT_NVS_PREF_HASH);
+  if (!pref.load(&creds)) {
+    return false;
+  }
+  if (creds.magic != MQTTNvsCredentials::MAGIC) {
+    return false;
+  }
+  // Null-terminate for safety (make_preference loads raw bytes)
+  creds.broker[sizeof(creds.broker) - 1] = '\0';
+  creds.username[sizeof(creds.username) - 1] = '\0';
+  creds.password[sizeof(creds.password) - 1] = '\0';
+  this->nvs_credentials_ = creds;
+  ESP_LOGI(TAG, "Loaded MQTT credentials from NVS: broker=%s port=%u", creds.broker, creds.port);
+  return true;
+}
+
+void GeappliancesBridge::apply_nvs_mqtt_credentials_() {
+  auto mqtt_client = mqtt::global_mqtt_client;
+  if (mqtt_client == nullptr) {
+    ESP_LOGW(TAG, "Cannot apply NVS credentials: MQTT client not available");
+    return;
+  }
+  mqtt_client->set_broker_address(this->nvs_credentials_.broker);
+  mqtt_client->set_broker_port(this->nvs_credentials_.port);
+  mqtt_client->set_login(this->nvs_credentials_.username, this->nvs_credentials_.password);
+  ESP_LOGI(TAG, "Applied NVS MQTT credentials: broker=%s port=%u",
+           this->nvs_credentials_.broker, this->nvs_credentials_.port);
+}
+
+void GeappliancesBridge::configure_mqtt_credentials(
+    const std::string &broker, uint16_t port,
+    const std::string &username, const std::string &password) {
+  if (broker.empty()) {
+    ESP_LOGE(TAG, "configure_mqtt_credentials: broker must not be empty");
+    return;
+  }
+  if (broker.length() >= sizeof(MQTTNvsCredentials::broker)) {
+    ESP_LOGE(TAG, "configure_mqtt_credentials: broker too long (max %zu chars)",
+             sizeof(MQTTNvsCredentials::broker) - 1);
+    return;
+  }
+  if (username.length() >= sizeof(MQTTNvsCredentials::username) ||
+      password.length() >= sizeof(MQTTNvsCredentials::password)) {
+    ESP_LOGE(TAG, "configure_mqtt_credentials: username or password too long");
+    return;
+  }
+
+  MQTTNvsCredentials creds = {};
+  strncpy(creds.broker,   broker.c_str(),   sizeof(creds.broker) - 1);
+  creds.broker[sizeof(creds.broker) - 1] = '\0';
+  strncpy(creds.username, username.c_str(), sizeof(creds.username) - 1);
+  creds.username[sizeof(creds.username) - 1] = '\0';
+  strncpy(creds.password, password.c_str(), sizeof(creds.password) - 1);
+  creds.password[sizeof(creds.password) - 1] = '\0';
+  creds.port  = port;
+  creds.magic = MQTTNvsCredentials::MAGIC;
+
+  auto pref = global_preferences->make_preference<MQTTNvsCredentials>(MQTT_NVS_PREF_HASH);
+  pref.save(&creds);
+
+  ESP_LOGI(TAG, "MQTT credentials saved to NVS (broker=%s port=%u). Rebooting...",
+           broker.c_str(), port);
+
+  // A reboot ensures the MQTT component picks up the new credentials cleanly
+  // from setup_priority ordering rather than a mid-session reconnect.
+  App.safe_reboot();
 }
 
 }  // namespace geappliances_bridge

@@ -6,6 +6,16 @@ esphome:
 api:
   encryption:
     key: !secret api_encryption_key
+  services:
+    - service: configure_mqtt
+      variables:
+        broker: string
+        port: int
+        username: string
+        password: string
+      then:
+        - lambda: |-
+            id(geappliances_bridge_comp).configure_mqtt_credentials(broker, (uint16_t)port, username, password);
 
 wifi:
   ssid: !secret wifi_ssid
@@ -20,6 +30,10 @@ ota:
 
 # Allow provisioning Wi-Fi via serial
 improv_serial:
+
+# BLE Improv: allow WiFi provisioning without a serial cable
+esp32_improv_ble:
+  authorizer: none
 
 esp32:
   board: seeed_xiao_esp32c3
@@ -60,8 +74,10 @@ uart:
 
 # GE Appliances Bridge component
 geappliances_bridge:
+  id: geappliances_bridge_comp
   gea3_uart_id: gea3_uart
   gea2_uart_id: gea2_uart
+  ble_provisioning: true
   # device_id: "YourDeviceId"   # Optional: Uncomment to use a custom device ID
   # mode: auto                  # Default: auto   Options: auto, subscribe, poll
   # polling_interval: 10000     # Default: 10000 ms (10 seconds), used when in polling mode
