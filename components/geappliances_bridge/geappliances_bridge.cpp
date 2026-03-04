@@ -553,7 +553,8 @@ void GeappliancesBridge::apply_nvs_mqtt_credentials_() {
   }
   mqtt_client->set_broker_address(this->nvs_credentials_.broker);
   mqtt_client->set_broker_port(this->nvs_credentials_.port);
-  mqtt_client->set_login(this->nvs_credentials_.username, this->nvs_credentials_.password);
+  mqtt_client->set_username(this->nvs_credentials_.username);
+  mqtt_client->set_password(this->nvs_credentials_.password);
   ESP_LOGI(TAG, "Applied NVS MQTT credentials: broker=%s port=%u",
            this->nvs_credentials_.broker, this->nvs_credentials_.port);
 }
