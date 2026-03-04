@@ -7,7 +7,7 @@ This directory contains application-level integration tests that simulate the co
 The simulation testing framework allows testing of:
 - **Configuration-based testing** - Different YAML configuration scenarios
 - Complete application workflows (device ID generation, subscription, polling)
-- GEA3/GEA2 protocol interactions with mock appliance responses
+- GEA3 protocol interactions with mock appliance responses
 - MQTT bridge behavior with simulated ERD reads/writes
 - Mode switching (subscription mode fallback to polling mode)
 - Multiple appliance types (dishwashers, refrigerators, washers)
@@ -167,7 +167,7 @@ The test suite covers various YAML configuration scenarios:
 
 Potential improvements to the simulation framework:
 
-1. **Full GEA Protocol Simulator** - Implement a complete GEA3/GEA2 protocol simulator that:
+1. **Full GEA Protocol Simulator** - Implement a complete GEA3 protocol simulator that:
    - Processes GEA packets at the byte level
    - Handles packet framing, CRC, and address fields
    - Simulates realistic timing and delays

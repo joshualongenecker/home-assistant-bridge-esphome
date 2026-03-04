@@ -1,6 +1,6 @@
 # home-assistant-bridge-esphome
 
-ESPHome external component for GE Appliances bridge supporting both GEA3 and GEA2 (in development) protocols.
+ESPHome external component for GE Appliances bridge supporting the GEA3 protocol.
 
 Subscribes to data hosted by a GE Appliances product and publishes it to an MQTT server under `geappliances/<device ID>`. ERDs are identified by 16-bit identifiers and the raw binary data is published as a hex string to `geappliances/<device ID>/erd/<ERD ID>/value`. Data can be written to an ERD by writing a hex string of the appropriate size to `geappliances/<device ID>/erd/<ERD ID>/write`.
 
@@ -105,16 +105,9 @@ uart:
     rx_pin: GPIO20  # D7 on Xiao ESP32-C3
     baud_rate: 230400
 
-  # GEA2 UART (older appliances) - optional
-  - id: gea2_uart
-    tx_pin: GPIO9   # D9 on Xiao ESP32-C3
-    rx_pin: GPIO10  # D10 on Xiao ESP32-C3
-    baud_rate: 19200
-
 # GE Appliances Bridge component
 geappliances_bridge:
   gea3_uart_id: gea3_uart
-  # gea2_uart_id: gea2_uart       # Optional: enable GEA2 support
   # device_id: "YourDeviceId"     # Optional: Uncomment to use a custom device ID
   # mode: auto                    # Default: auto   Options: auto, subscribe, poll
   # polling_interval: 10000       # Default: 10000 ms (10 seconds), used when in polling mode
@@ -149,8 +142,7 @@ The `mode` parameter is **optional**.
 
 After connecting to the MQTT server, the component waits 20 seconds and then performs a protocol autodiscovery to find the appliance on the bus before generating a device ID.
 
-- If `gea3_uart_id` is configured, a GEA3 broadcast is sent first; if a board responds its address is used.
-- If no GEA3 board responds and `gea2_uart_id` is configured, a GEA2 broadcast is sent next.
+- If `gea3_uart_id` is configured, a GEA3 broadcast is sent; if a board responds its address is used.
 - Discovery repeats until at least one board is found.
 - The first-responding board's address and protocol are used for all subsequent ERD communication.
 

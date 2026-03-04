@@ -21,7 +21,6 @@ SRC_DIRS := \
   test/simulation \
 
 SRC_FILES := \
-  components/geappliances_bridge/gea2_to_gea3_erd_client_adapter.cpp \
   components/geappliances_bridge/mqtt_bridge.cpp \
 
 SRCS := $(SRC_FILES) $(shell find $(SRC_DIRS) -maxdepth 1 -name *.cpp -or -name *.c -or -name *.s)
