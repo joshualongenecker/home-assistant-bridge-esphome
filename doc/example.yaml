@@ -38,7 +38,7 @@ improv_serial:
 # discover the adapter and provision WiFi credentials without a serial cable.
 # After WiFi is provisioned, call the 'configure_mqtt' API service above to
 # supply the MQTT broker credentials.
-esp32_improv_ble:
+esp32_improv:
   authorizer: none
 
 esp32:

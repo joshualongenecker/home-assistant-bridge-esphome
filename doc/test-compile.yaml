@@ -32,7 +32,7 @@ ota:
 improv_serial:
 
 # BLE Improv: allow WiFi provisioning without a serial cable
-esp32_improv_ble:
+esp32_improv:
   authorizer: none
 
 esp32:

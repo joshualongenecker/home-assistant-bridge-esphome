@@ -18,7 +18,7 @@ The adapter supports a **zero-secret setup** via BLE Improv, eliminating the nee
 
 ### How It Works
 
-1. **Flash** the adapter with firmware that includes `esp32_improv_ble` and `ble_provisioning: true`.
+1. **Flash** the adapter with firmware that includes `esp32_improv` and `ble_provisioning: true`.
 2. **Pair WiFi** – the adapter broadcasts a BLE advertisement that Home Assistant detects. Clicking *Configure* in the HA device discovery dialog provisions WiFi credentials over BLE automatically.
 3. **Configure MQTT** – after the adapter connects to WiFi, Home Assistant discovers it via the ESPHome native API. Call the `configure_mqtt` service once (e.g. from *Developer Tools → Services* or an automation):
 
@@ -51,7 +51,7 @@ api:
             id(geappliances_bridge_comp).configure_mqtt_credentials(broker, (uint16_t)port, username, password);
 
 # BLE Improv: provisions WiFi credentials when paired in Home Assistant
-esp32_improv_ble:
+esp32_improv:
   authorizer: none
 
 # MQTT section is still required by ESPHome; credentials are overridden at
@@ -124,7 +124,7 @@ When set to `true`, the component:
 2. Exposes a `configure_mqtt_credentials()` method callable from the ESPHome API service `configure_mqtt` (see [doc/example.yaml](doc/example.yaml) for the service definition). After receiving new credentials the device saves them to NVS and performs a safe reboot.
 
 This enables the full **zero-secret BLE provisioning flow**:
-- WiFi is provisioned via `esp32_improv_ble` (no serial cable required)
+- WiFi is provisioned via `esp32_improv` (no serial cable required)
 - MQTT credentials are pushed once via the `configure_mqtt` API service from Home Assistant
 - Both sets of credentials are stored in flash and reused on every subsequent boot
 
