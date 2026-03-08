@@ -8,10 +8,26 @@ static void poll(void* context)
 {
   auto self = static_cast<esphome_uart_adapter_t*>(context);
 
-  while (self->uart->available()) {
+  // Snapshot the available byte count once before processing.
+  // This matches the reference implementation (joshualongenecker/
+  // home-assistant-adapter-gea3-poll PR#5, esphome_uart_adapter.cpp) and
+  // ensures we only consume the bytes that were present when the poll started.
+  // Any bytes that arrive *during* event processing — e.g. the half-duplex
+  // reflection of a byte just sent by send_next_byte(), or an appliance
+  // response that begins arriving while send_ack() is executing — are deferred
+  // to the next poll() call.
+  // Without this guard, the receive loop can read the ACK-reflection while
+  // packet_ready is still true (set by send_ack()), causing the subsequent
+  // appliance response STX to be silently dropped in state_idle_cooldown
+  // because the !packet_ready guard fails.  This manifests as ERD reads for
+  // large payloads (e.g. 32-byte model number) always failing while small
+  // payloads (e.g. 1-byte appliance type) succeed by chance.
+  int rx_bytes = self->uart->available();
+
+  while (rx_bytes--) {
     uint8_t byte;
     self->uart->read_byte(&byte);
-    
+
     tiny_uart_on_receive_args_t args = { byte };
     tiny_event_publish(&self->receive_event, &args);
   }

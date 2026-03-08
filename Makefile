@@ -22,6 +22,7 @@ SRC_DIRS := \
 
 SRC_FILES := \
   components/geappliances_bridge/mqtt_bridge.cpp \
+  components/geappliances_bridge/gea2_erd_client_adapter.cpp \
 
 SRCS := $(SRC_FILES) $(shell find $(SRC_DIRS) -maxdepth 1 -name *.cpp -or -name *.c -or -name *.s)
 OBJS := $(SRCS:%=$(BUILD_DIR)/%.o)

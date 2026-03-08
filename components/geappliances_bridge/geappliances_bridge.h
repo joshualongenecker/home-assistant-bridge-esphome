@@ -11,8 +11,12 @@ extern "C" {
 #include "mqtt_bridge_polling.h"
 #include "tiny_gea3_erd_client.h"
 #include "tiny_gea3_interface.h"
+#include "tiny_gea2_erd_client.h"
+#include "tiny_gea2_interface.h"
 #include "tiny_timer.h"
 }
+
+#include "gea2_erd_client_adapter.h"
 
 #include "esphome_uart_adapter.h"
 #include "esphome_mqtt_client_adapter.h"
@@ -64,6 +68,7 @@ class GeappliancesBridge : public Component {
   float get_setup_priority() const override;
 
   void set_gea3_uart(uart::UARTComponent *uart) { this->uart_ = uart; }
+  void set_gea2_uart(uart::UARTComponent *uart) { this->gea2_uart_ = uart; }
   void set_device_id(const std::string &device_id) { this->configured_device_id_ = device_id; }
   void set_mode(uint8_t mode) { this->mode_ = static_cast<BridgeMode>(mode); }
   void set_polling_interval(uint32_t polling_interval) { this->polling_interval_ms_ = polling_interval; }
@@ -120,13 +125,16 @@ class GeappliancesBridge : public Component {
 
   enum AutodiscoveryState {
     AUTODISCOVERY_WAITING_FOR_MQTT,          // Waiting for MQTT connection
-    AUTODISCOVERY_WAITING_20S,               // MQTT connected, waiting 20 seconds
+    AUTODISCOVERY_WAITING_5S,                // MQTT connected, waiting 5 seconds
     AUTODISCOVERY_GEA3_BROADCAST_PENDING,    // About to send GEA3 broadcast
-    AUTODISCOVERY_GEA3_BROADCAST_WAITING,    // Sent GEA3 broadcast, waiting 10s for responses
+    AUTODISCOVERY_GEA3_BROADCAST_WAITING,    // Sent GEA3 broadcast, waiting 5s for responses
+    AUTODISCOVERY_GEA2_BROADCAST_PENDING,    // About to send GEA2 broadcast
+    AUTODISCOVERY_GEA2_BROADCAST_WAITING,    // Sent GEA2 broadcast, waiting 5s for responses
     AUTODISCOVERY_COMPLETE                   // At least one board discovered
   };
 
   uart::UARTComponent *uart_{nullptr};
+  uart::UARTComponent *gea2_uart_{nullptr};
   std::string configured_device_id_;
   std::string generated_device_id_;
   std::string final_device_id_;
@@ -146,6 +154,11 @@ class GeappliancesBridge : public Component {
   uint32_t subscription_start_time_{0};
   static constexpr uint32_t SUBSCRIPTION_TIMEOUT_MS = 30000; // 30 seconds
   
+  // GEA2 tight-loop duration: covers the full TX→RX cycle at 19200 baud
+  // (see doc/geappliances_bridge.md section 13 for detailed explanation)
+  static constexpr uint32_t GEA2_LOOP_DURATION_MS = 200;
+  bool gea2_protocol_active_{false}; // true once a GEA2 appliance is discovered
+  
   DeviceIdState device_id_state_{DEVICE_ID_STATE_IDLE};
   BridgeInitState bridge_init_state_{BRIDGE_INIT_STATE_WAITING_FOR_DEVICE_ID};
 
@@ -153,8 +166,9 @@ class GeappliancesBridge : public Component {
   AutodiscoveryState autodiscovery_state_{AUTODISCOVERY_WAITING_FOR_MQTT};
   uint32_t autodiscovery_timer_start_{0};
   bool gea3_board_discovered_{false};
-  static constexpr uint32_t STARTUP_DELAY_MS = 20000;              // 20s after MQTT connects
-  static constexpr uint32_t AUTODISCOVERY_BROADCAST_WINDOW_MS = 10000; // 10s window per broadcast
+  bool gea2_board_discovered_{false};
+  static constexpr uint32_t STARTUP_DELAY_MS = 5000;               // 5s after MQTT connects
+  static constexpr uint32_t AUTODISCOVERY_BROADCAST_WINDOW_MS = 5000;  // 5s window per broadcast
 
   tiny_gea3_erd_client_request_id_t pending_request_id_;
   uint8_t appliance_type_{0};
@@ -177,12 +191,32 @@ class GeappliancesBridge : public Component {
   tiny_gea3_erd_client_t erd_client_;
   uint8_t client_queue_buffer_[1024];
 
+  // GEA2 components (only used when gea2_uart_ is set)
+  esphome_uart_adapter_t gea2_uart_adapter_;
+
+  tiny_gea2_interface_t gea2_interface_;
+  uint8_t gea2_receive_buffer_[255];
+  uint8_t gea2_send_queue_buffer_[10000];
+
+  tiny_gea2_erd_client_t gea2_erd_client_;
+  uint8_t gea2_client_queue_buffer_[8096];
+
+  // Event fired once per millisecond to drive GEA2 interface's internal timers.
+  // Published manually inside the GEA2 tight loop (not via a timer_group_ periodic
+  // timer) so the 1 ms interrupt never fires in the GEA3 single-pass path and
+  // cannot starve the GEA3/polling-bridge timers in the shared timer_group_.
+  tiny_event_t gea2_msec_interrupt_;
+
+  // Adapter that wraps the GEA2 ERD client as a GEA3 ERD client interface
+  gea2_erd_client_adapter_t gea2_erd_client_adapter_;
+
   i_tiny_gea3_erd_client_t* active_erd_client_{nullptr}; // set during initialize_mqtt_bridge_()
 
   mqtt_bridge_t mqtt_bridge_;
   mqtt_bridge_polling_t mqtt_bridge_polling_;
 
   tiny_event_subscription_t erd_client_activity_subscription_;
+  tiny_event_subscription_t gea2_activity_subscription_;
 };
 
 }  // namespace geappliances_bridge

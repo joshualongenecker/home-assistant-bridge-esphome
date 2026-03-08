@@ -85,7 +85,7 @@ esp32:
 
 # External component configuration
 external_components:
-  - source: github://joshualongenecker/home-assistant-bridge@develop
+  - source: github://joshualongenecker/home-assistant-bridge
     components: [ geappliances_bridge ]
 
 # MQTT configuration for Home Assistant
@@ -105,12 +105,21 @@ uart:
     rx_pin: GPIO20  # D7 on Xiao ESP32-C3
     baud_rate: 230400
 
+  - id: gea2_uart
+    tx_pin: GPIO9  # D9 on Xiao ESP32-C3
+    rx_pin: GPIO10  # D10 on Xiao ESP32-C3
+    baud_rate: 19200
+    rx_full_threshold: 1
+    rx_timeout: 1
+
 # GE Appliances Bridge component
 geappliances_bridge:
   gea3_uart_id: gea3_uart
+  # gea2_uart_id: gea2_uart
   # device_id: "YourDeviceId"     # Optional: Uncomment to use a custom device ID
   # mode: auto                    # Default: auto   Options: auto, subscribe, poll
   # polling_interval: 10000       # Default: 10000 ms (10 seconds), used when in polling mode
+  # polling_onlypublish_onchange: false  # Default: false, only publish if value changed
 ```
 
 ## Configurable Parameters
@@ -140,7 +149,7 @@ The `mode` parameter is **optional**.
 
 ### Autodiscovery
 
-After connecting to the MQTT server, the component waits 20 seconds and then performs a protocol autodiscovery to find the appliance on the bus before generating a device ID.
+After connecting to the MQTT server, the component waits 5 seconds and then performs a protocol autodiscovery to find the appliance on the bus before generating a device ID.
 
 - If `gea3_uart_id` is configured, a GEA3 broadcast is sent; if a board responds its address is used.
 - Discovery repeats until at least one board is found.

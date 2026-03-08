@@ -1,7 +1,11 @@
-esphome:
+substitutions:
   name: gea-esphome
   friendly_name: gea-esphome
-  name_add_mac_suffix: true
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  name_add_mac_suffix: false
 
 api:
   encryption:
@@ -43,13 +47,12 @@ esp32_improv:
 
 esp32:
   board: seeed_xiao_esp32c3
-  variant: esp32c3
   framework: 
     type: esp-idf
 
 # External component configuration
 external_components:
-  - source: github://joshualongenecker/home-assistant-bridge@develop
+  - source: github://joshualongenecker/home-assistant-bridge-esphome
     components: [ geappliances_bridge ]
 
 # MQTT configuration for Home Assistant
@@ -64,19 +67,28 @@ mqtt:
   discovery: true
   discovery_prefix: homeassistant
 
-# UART configuration for GEA3 communication
+# UART configuration
 uart:
-  # UART configuration for GEA3 communication
+  # GEA3 UART (newer appliances)
   - id: gea3_uart
-    tx_pin: GPIO21 #D6 on Xiao ESP32-C3
-    rx_pin: GPIO20 #D7 on Xiao ESP32-C3
+    tx_pin: GPIO21  # D6 on Xiao ESP32-C3
+    rx_pin: GPIO20  # D7 on Xiao ESP32-C3
     baud_rate: 230400
+
+  - id: gea2_uart
+    tx_pin: GPIO9  # D9 on Xiao ESP32-C3
+    rx_pin: GPIO10  # D10 on Xiao ESP32-C3
+    baud_rate: 19200
+    rx_full_threshold: 1
+    rx_timeout: 1
 
 # GE Appliances Bridge component
 geappliances_bridge:
   id: geappliances_bridge_comp
   gea3_uart_id: gea3_uart
   ble_provisioning: true      # Enable NVS-backed MQTT credential storage for BLE provisioning
-  # device_id: "YourDeviceId"   # Optional: Uncomment to use a custom device ID
-  # mode: auto                  # Default: auto   Options: auto, subscribe, poll
-  # polling_interval: 10000     # Default: 10000 ms (10 seconds), used when in polling mode
+  gea2_uart_id: gea2_uart
+  # device_id: "YourDeviceId"     # Optional: Uncomment to use a custom device ID
+  # mode: poll                    # Default: auto   Options: auto, subscribe, poll
+  # polling_interval: 10000       # Default: 10000 ms (10 seconds), used when in polling mode
+  # polling_onlypublish_onchange: false  # Default: false, only publish if value changed
