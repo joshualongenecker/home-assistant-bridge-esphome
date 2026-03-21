@@ -285,27 +285,14 @@ void GeappliancesBridge::loop() {
   // Update checker: handle result from background task and periodic re-check.
   if (this->update_check_done_) {
     this->update_check_done_ = false;
-    // Always clear the in-progress flag so future checks can be scheduled.
     this->update_check_in_progress_ = false;
-    if (!this->final_device_id_.empty()) {
-      this->on_update_check_complete_();
-    } else {
-      // Device ID is not yet ready; save the result and publish once it is.
-      this->update_result_pending_ = true;
-    }
-  }
-
-  // Publish a deferred result once the device ID becomes available.
-  if (this->update_result_pending_ &&
-      !this->final_device_id_.empty() &&
-      mqtt_client != nullptr && mqtt_client->is_connected()) {
-    this->update_result_pending_ = false;
     this->on_update_check_complete_();
   }
 
   // Trigger a periodic re-check every UPDATE_CHECK_INTERVAL_MS.
+  // Require MQTT to be connected as a proxy for network availability before
+  // attempting the HTTPS request to the GitHub API.
   if (!this->update_check_in_progress_ &&
-      !this->final_device_id_.empty() &&
       mqtt_client != nullptr && mqtt_client->is_connected() &&
       this->last_update_check_ms_ != 0 &&
       (millis() - this->last_update_check_ms_ >= UPDATE_CHECK_INTERVAL_MS)) {
@@ -1185,7 +1172,6 @@ void GeappliancesBridge::schedule_update_check_() {
   this->update_check_in_progress_ = true;
   this->update_check_done_ = false;
   this->update_latest_version_buf_[0] = '\0';
-  this->update_release_notes_buf_[0] = '\0';
 
   // Spawn a one-shot background task so the HTTP+TLS request does not block
   // the real-time GEA protocol loop.
@@ -1210,19 +1196,12 @@ void GeappliancesBridge::schedule_update_check_() {
            GEAPPLIANCES_BRIDGE_VERSION);
 
   std::string latest;
-  std::string notes;
-  bool ok = fetch_latest_release_from_github(latest, notes);
+  bool ok = fetch_latest_release_from_github(latest);
 
-  // Copy results into the fixed-size shared buffers before setting the done
-  // flag so the main loop always sees consistent values.
   if (ok && !latest.empty()) {
     strncpy(self->update_latest_version_buf_, latest.c_str(),
             MAX_VERSION_BUF_SIZE - 1);
     self->update_latest_version_buf_[MAX_VERSION_BUF_SIZE - 1] = '\0';
-
-    strncpy(self->update_release_notes_buf_, notes.c_str(),
-            MAX_RELEASE_NOTES_BUF_SIZE - 1);
-    self->update_release_notes_buf_[MAX_RELEASE_NOTES_BUF_SIZE - 1] = '\0';
   }
   self->update_check_done_ = true;
 
@@ -1230,20 +1209,23 @@ void GeappliancesBridge::schedule_update_check_() {
 }
 
 void GeappliancesBridge::on_update_check_complete_() {
-  // update_check_in_progress_ is already cleared by the loop() caller.
   this->last_update_check_ms_ = millis();
 
   const std::string installed(GEAPPLIANCES_BRIDGE_VERSION);
   const std::string latest(this->update_latest_version_buf_);
-  const std::string notes(this->update_release_notes_buf_);
 
-  // Publish (or re-publish) discovery so HA always has the config.
-  publish_update_discovery(this->final_device_id_, installed, latest);
-  this->update_discovery_published_ = true;
+  if (this->installed_version_sensor_ != nullptr) {
+    this->installed_version_sensor_->publish_state(installed);
+  }
 
-  // Publish the current state so HA shows the correct installed/latest values
-  // including the release notes for the latest version.
-  publish_update_state(this->final_device_id_, installed, latest, notes);
+  if (this->latest_version_sensor_ != nullptr && !latest.empty()) {
+    this->latest_version_sensor_->publish_state(latest);
+    if (latest != installed) {
+      ESP_LOGI(TAG, "Update available: v%s -> v%s", installed.c_str(), latest.c_str());
+    } else {
+      ESP_LOGI(TAG, "Firmware is up to date (v%s)", installed.c_str());
+    }
+  }
 }
 
 }  // namespace geappliances_bridge

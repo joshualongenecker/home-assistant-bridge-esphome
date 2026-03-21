@@ -2,7 +2,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins
-from esphome.components import uart, mqtt, esp32
+from esphome.components import uart, mqtt, esp32, text_sensor
 from esphome.const import (
     CONF_ID,
 )
@@ -18,7 +18,7 @@ _LOGGER = logging.getLogger(__name__)
 
 CODEOWNERS = ["@joshualongenecker"]
 DEPENDENCIES = ["uart", "mqtt"]
-AUTO_LOAD = []
+AUTO_LOAD = ["text_sensor"]
 
 # UART configuration keys
 CONF_GEA3_UART_ID = "gea3_uart_id"
@@ -31,6 +31,10 @@ CONF_POLLING_INTERVAL = "polling_interval"
 CONF_POLLING_ONLY_PUBLISH_ON_CHANGE = "polling_onlypublish_onchange"
 CONF_APPLIANCE_API_PARSING = "appliance_api_parsing"
 CONF_CUSTOM_ERDS = "custom_erds"
+
+# Update sensor configuration keys
+CONF_INSTALLED_VERSION = "installed_version"
+CONF_LATEST_VERSION = "latest_version"
 
 # Bridge mode options (polling vs subscriptions)
 MODE_POLL = "poll"
@@ -274,6 +278,8 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_CUSTOM_ERDS, default=[]): cv.ensure_list(
             cv.int_range(min=0, max=0xFFFF)
         ),
+        cv.Optional(CONF_INSTALLED_VERSION): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_LATEST_VERSION): text_sensor.text_sensor_schema(),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 CONFIG_SCHEMA = cv.All(CONFIG_SCHEMA, validate_at_least_one_uart)
@@ -322,7 +328,16 @@ async def to_code(config):
     # Register any user-configured custom ERDs
     for erd in config[CONF_CUSTOM_ERDS]:
         cg.add(var.add_custom_erd(erd))
-    
+
+    # Register optional text sensors for installed and latest version
+    if CONF_INSTALLED_VERSION in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_INSTALLED_VERSION])
+        cg.add(var.set_installed_version_sensor(sens))
+
+    if CONF_LATEST_VERSION in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_LATEST_VERSION])
+        cg.add(var.set_latest_version_sensor(sens))
+
     # Load appliance types from JSON and generate C++ mapping function
     appliance_types = load_appliance_types()
     function_code = generate_appliance_type_function(appliance_types)

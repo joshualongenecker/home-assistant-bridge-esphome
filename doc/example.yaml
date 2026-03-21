@@ -31,9 +31,9 @@ esp32:
     type: esp-idf
 
 # External component configuration
-# Pin to a specific release tag so the update entity in Home Assistant can
-# detect when a newer version is available.  Change the tag here and
-# re-flash to apply an update.
+# Pin to a specific release tag so the "Installed Version" sensor in Home
+# Assistant shows the correct version.  Change the tag here and re-flash to
+# apply an update.
 external_components:
   - source: github://joshualongenecker/home-assistant-bridge-esphome@v1.0.0
     components: [ geappliances_bridge ]
@@ -70,3 +70,7 @@ geappliances_bridge:
   # mode: poll                    # Default: auto   Options: auto, subscribe, poll
   # polling_interval: 10000       # Default: 10000 ms (10 seconds), used when in polling mode
   # polling_onlypublish_onchange: false  # Default: false, only publish if value changed
+  installed_version:
+    name: "GE Bridge Installed Version"
+  latest_version:
+    name: "GE Bridge Latest Version"
