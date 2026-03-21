@@ -31,8 +31,11 @@ esp32:
     type: esp-idf
 
 # External component configuration
+# Pin to a specific release tag so the update entity in Home Assistant can
+# detect when a newer version is available.  Change the tag here and
+# re-flash to apply an update.
 external_components:
-  - source: github://joshualongenecker/home-assistant-bridge-esphome
+  - source: github://joshualongenecker/home-assistant-bridge-esphome@v1.0.0
     components: [ geappliances_bridge ]
 
 # MQTT configuration for Home Assistant

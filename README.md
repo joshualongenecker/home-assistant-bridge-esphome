@@ -1,4 +1,4 @@
-# home-assistant-bridge-esphome
+# Home Assistant Bridge for GE Appliances (ESPHome)
 
 ESPHome external component for GE Appliances bridge supporting the GEA3 protocol.
 
@@ -12,6 +12,26 @@ This component is designed for use with the **FirstBuild Home Assistant Adapter*
 
 Available from [FirstBuild](https://firstbuild.com/inventions/home-assistant-adapter/)
 
+## Update Notifications
+
+When a new release is published on this repository, **Home Assistant automatically shows an update notification** for the bridge.  The notification appears in the *Settings → Updates* panel and displays the currently-installed version alongside the latest available version.
+
+The update check:
+- Runs on every device start-up (after MQTT connects)
+- Repeats every 24 hours while the device is running
+- Queries the GitHub Releases API over HTTPS; no third-party service is involved
+
+### How to apply an update
+
+1. In your ESPHome YAML, change the `@vX.Y.Z` tag in the `external_components` block to the new version shown in the Home Assistant update notification.
+2. Re-flash the device via ESPHome (OTA or USB).
+
+```yaml
+external_components:
+  - source: github://joshualongenecker/home-assistant-bridge-esphome@v1.1.0  # ← bump this
+    components: [ geappliances_bridge ]
+```
+
 ## Configuration
 
 Add to your ESPHome YAML configuration:
@@ -23,9 +43,10 @@ esp32:
   framework: 
     type: esp-idf
 
-# External component configuration
+# Pin to a specific release tag so the update notification in Home Assistant
+# correctly reflects the version that is installed on the device.
 external_components:
-  - source: github://joshualongenecker/home-assistant-bridge
+  - source: github://joshualongenecker/home-assistant-bridge-esphome@v1.0.0
     components: [ geappliances_bridge ]
 
 # MQTT configuration for Home Assistant

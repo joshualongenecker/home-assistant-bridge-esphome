@@ -3,6 +3,8 @@
 #include "esphome/core/log.h"
 #include "esphome_time_source.h"
 #include <cstring>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 namespace esphome {
 namespace geappliances_bridge {
@@ -278,6 +280,36 @@ void GeappliancesBridge::loop() {
   // Check for subscription activity timeout in auto mode
   if (this->mode_ == BRIDGE_MODE_AUTO && this->subscription_mode_active_) {
     this->check_subscription_activity_();
+  }
+
+  // Update checker: handle result from background task and periodic re-check.
+  if (this->update_check_done_) {
+    this->update_check_done_ = false;
+    // Always clear the in-progress flag so future checks can be scheduled.
+    this->update_check_in_progress_ = false;
+    if (!this->final_device_id_.empty()) {
+      this->on_update_check_complete_();
+    } else {
+      // Device ID is not yet ready; save the result and publish once it is.
+      this->update_result_pending_ = true;
+    }
+  }
+
+  // Publish a deferred result once the device ID becomes available.
+  if (this->update_result_pending_ &&
+      !this->final_device_id_.empty() &&
+      mqtt_client != nullptr && mqtt_client->is_connected()) {
+    this->update_result_pending_ = false;
+    this->on_update_check_complete_();
+  }
+
+  // Trigger a periodic re-check every UPDATE_CHECK_INTERVAL_MS.
+  if (!this->update_check_in_progress_ &&
+      !this->final_device_id_.empty() &&
+      mqtt_client != nullptr && mqtt_client->is_connected() &&
+      this->last_update_check_ms_ != 0 &&
+      (millis() - this->last_update_check_ms_ >= UPDATE_CHECK_INTERVAL_MS)) {
+    this->schedule_update_check_();
   }
 
   // Feature bit reading: runs after autodiscovery, before device ID generation.
@@ -716,6 +748,10 @@ void GeappliancesBridge::on_mqtt_connected_() {
     this->autodiscovery_timer_start_ = millis();
     this->autodiscovery_state_ = AUTODISCOVERY_WAITING_5S;
   }
+
+  // Schedule an update check.  We re-schedule on every reconnect so the
+  // update state is always refreshed after a network outage.
+  this->schedule_update_check_();
 }
 
 void GeappliancesBridge::notify_mqtt_disconnected_() {
@@ -1135,6 +1171,70 @@ void GeappliancesBridge::dump_config() {
 float GeappliancesBridge::get_setup_priority() const {
   // Run after UART (priority 600) and MQTT (priority 50)
   return setup_priority::DATA;  // Priority 600
+}
+
+// ---------------------------------------------------------------------------
+// Update checker
+// ---------------------------------------------------------------------------
+
+void GeappliancesBridge::schedule_update_check_() {
+  if (this->update_check_in_progress_) {
+    return;
+  }
+
+  this->update_check_in_progress_ = true;
+  this->update_check_done_ = false;
+  this->update_latest_version_buf_[0] = '\0';
+
+  // Spawn a one-shot background task so the HTTP+TLS request does not block
+  // the real-time GEA protocol loop.
+  BaseType_t rc = xTaskCreate(
+      update_check_task_,
+      "ge_update_check",
+      UPDATE_CHECK_TASK_STACK_SIZE,
+      this,
+      1,  // low priority – must not starve the main ESPHome loop
+      nullptr);
+
+  if (rc != pdPASS) {
+    ESP_LOGW(TAG, "Failed to create update-check task (out of memory?)");
+    this->update_check_in_progress_ = false;
+  }
+}
+
+/* static */ void GeappliancesBridge::update_check_task_(void *param) {
+  auto *self = reinterpret_cast<GeappliancesBridge *>(param);
+
+  ESP_LOGI(TAG, "Checking for updates (installed: v%s)...",
+           GEAPPLIANCES_BRIDGE_VERSION);
+
+  std::string latest = fetch_latest_version_from_github();
+
+  // Copy result into the fixed-size shared buffer before setting the done
+  // flag so the main loop always sees a consistent value.
+  if (!latest.empty()) {
+    strncpy(self->update_latest_version_buf_, latest.c_str(),
+            MAX_VERSION_BUF_SIZE - 1);
+    self->update_latest_version_buf_[MAX_VERSION_BUF_SIZE - 1] = '\0';
+  }
+  self->update_check_done_ = true;
+
+  vTaskDelete(nullptr);
+}
+
+void GeappliancesBridge::on_update_check_complete_() {
+  // update_check_in_progress_ is already cleared by the loop() caller.
+  this->last_update_check_ms_ = millis();
+
+  const std::string installed(GEAPPLIANCES_BRIDGE_VERSION);
+  const std::string latest(this->update_latest_version_buf_);
+
+  // Publish (or re-publish) discovery so HA always has the config.
+  publish_update_discovery(this->final_device_id_, installed, latest);
+  this->update_discovery_published_ = true;
+
+  // Publish the current state so HA shows the correct installed/latest values.
+  publish_update_state(this->final_device_id_, installed, latest);
 }
 
 }  // namespace geappliances_bridge

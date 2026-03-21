@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/mqtt/mqtt_client.h"
+#include "update_checker.h"
 #include <string>
 #include <set>
 #include <vector>
@@ -253,6 +254,28 @@ class GeappliancesBridge : public Component {
 
   tiny_event_subscription_t erd_client_activity_subscription_;
   tiny_event_subscription_t gea2_activity_subscription_;
+
+  // Update checker: runs in a background FreeRTOS task so the HTTP request
+  // does not block the main loop.
+  void schedule_update_check_();
+  void on_update_check_complete_();
+  static void update_check_task_(void *param);
+
+  // Shared between the background task and the main loop.
+  // The task writes update_latest_version_buf_ then sets update_check_done_.
+  char update_latest_version_buf_[MAX_VERSION_BUF_SIZE]{};
+  volatile bool update_check_done_{false};
+  bool update_check_in_progress_{false};
+  // Set when a check completes but final_device_id_ was not yet available;
+  // cleared once the state is published.
+  bool update_result_pending_{false};
+  bool update_discovery_published_{false};
+  uint32_t last_update_check_ms_{0};
+  // Interval between version checks: 24 h expressed in milliseconds.
+  static constexpr uint32_t UPDATE_CHECK_INTERVAL_MS = 86400000UL;
+  // Stack size for the update-check FreeRTOS task.
+  // 8 kB is needed to cover the TLS handshake heap allocations in esp_http_client.
+  static constexpr uint32_t UPDATE_CHECK_TASK_STACK_SIZE = 8192;
 };
 
 }  // namespace geappliances_bridge
