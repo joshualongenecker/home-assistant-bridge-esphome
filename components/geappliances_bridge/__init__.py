@@ -2,10 +2,11 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins
-from esphome.components import uart, mqtt
+from esphome.components import uart, mqtt, esp32
 from esphome.const import (
     CONF_ID,
 )
+from esphome.core import CORE
 import json
 import os
 import re
@@ -286,6 +287,14 @@ async def to_code(config):
     # Add public-appliance-api-documentation as a library dependency
     # This allows users to control the version by updating the library reference
     cg.add_library("https://github.com/geappliances/public-appliance-api-documentation", None)
+
+    # esp_http_client is excluded from the IDF build by default in ESPHome to
+    # save compile time.  Re-enable it so update_checker.cpp can perform the
+    # GitHub release check over HTTPS.
+    if CORE.is_esp32:
+        esp32.include_builtin_idf_component("esp_http_client")
+        # Enable the built-in certificate bundle used by esp_crt_bundle_attach.
+        esp32.add_idf_sdkconfig_option("CONFIG_MBEDTLS_CERTIFICATE_BUNDLE", True)
     
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
