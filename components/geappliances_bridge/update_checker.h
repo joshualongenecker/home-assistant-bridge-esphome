@@ -8,7 +8,9 @@ namespace geappliances_bridge {
 // Current version of the GE Appliances Bridge component.
 // Bump this on every GitHub release and tag the commit with the same version
 // (e.g. tag "v1.0.0" → GEAPPLIANCES_BRIDGE_VERSION "1.0.0").
-static constexpr const char *GEAPPLIANCES_BRIDGE_VERSION = "1.0.0";
+// Must be a preprocessor macro so it can be concatenated with string literals
+// (e.g. for the HTTP User-Agent header).
+#define GEAPPLIANCES_BRIDGE_VERSION "1.0.0"
 
 // GitHub Releases API URL used to check for newer versions.
 static constexpr const char *GITHUB_RELEASES_API_URL =
