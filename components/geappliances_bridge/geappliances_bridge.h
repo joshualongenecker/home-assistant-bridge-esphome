@@ -3,7 +3,6 @@
 #include "esphome/core/component.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/mqtt/mqtt_client.h"
-#include "esphome/components/text_sensor/text_sensor.h"
 #include "update_checker.h"
 #include <string>
 #include <set>
@@ -55,8 +54,7 @@ class GeappliancesBridge : public Component {
   void set_polling_only_publish_on_change(bool only_publish_on_change) { this->polling_only_publish_on_change_ = only_publish_on_change; }
   void set_appliance_api_parsing(bool appliance_api_parsing) { this->appliance_api_parsing_ = appliance_api_parsing; }
   void add_custom_erd(uint16_t erd) { this->custom_erds_vec_.push_back(static_cast<tiny_erd_t>(erd)); }
-  void set_installed_version_sensor(text_sensor::TextSensor *sensor) { this->installed_version_sensor_ = sensor; }
-  void set_latest_version_sensor(text_sensor::TextSensor *sensor) { this->latest_version_sensor_ = sensor; }
+  void set_version_entity_name(const std::string &name) { this->version_entity_name_ = name; }
 
  protected:
   void on_mqtt_connected_();
@@ -264,6 +262,11 @@ class GeappliancesBridge : public Component {
   void on_update_check_complete_();
   static void update_check_task_(void *param);
 
+  // Publish HA MQTT update entity discovery config (called on every MQTT connect).
+  void publish_version_entity_discovery_();
+  // Publish HA MQTT update entity state (called when update check completes).
+  void publish_version_entity_state_(const std::string &installed, const std::string &latest);
+
   // Shared between the background task and the main loop.
   // The task writes update_latest_version_buf_ then sets update_check_done_.
   char update_latest_version_buf_[MAX_VERSION_BUF_SIZE]{};
@@ -276,9 +279,8 @@ class GeappliancesBridge : public Component {
   // 8 kB is needed to cover the TLS handshake heap allocations in esp_http_client.
   static constexpr uint32_t UPDATE_CHECK_TASK_STACK_SIZE = 8192;
 
-  // Text sensors for installed and latest version display in Home Assistant.
-  text_sensor::TextSensor *installed_version_sensor_{nullptr};
-  text_sensor::TextSensor *latest_version_sensor_{nullptr};
+  // Name used for the Home Assistant MQTT update entity.
+  std::string version_entity_name_{"GE Bridge Firmware"};
 };
 
 }  // namespace geappliances_bridge

@@ -736,6 +736,10 @@ void GeappliancesBridge::on_mqtt_connected_() {
     this->autodiscovery_state_ = AUTODISCOVERY_WAITING_5S;
   }
 
+  // (Re-)publish HA MQTT update entity discovery so that any previously cached
+  // retained discovery messages are refreshed and no stale duplicates survive.
+  this->publish_version_entity_discovery_();
+
   // Schedule an update check.  We re-schedule on every reconnect so the
   // update state is always refreshed after a network outage.
   this->schedule_update_check_();
@@ -1214,18 +1218,94 @@ void GeappliancesBridge::on_update_check_complete_() {
   const std::string installed(GEAPPLIANCES_BRIDGE_VERSION);
   const std::string latest(this->update_latest_version_buf_);
 
-  if (this->installed_version_sensor_ != nullptr) {
-    this->installed_version_sensor_->publish_state(installed);
-  }
-
-  if (this->latest_version_sensor_ != nullptr && !latest.empty()) {
-    this->latest_version_sensor_->publish_state(latest);
+  if (!latest.empty()) {
     if (latest != installed) {
       ESP_LOGI(TAG, "Update available: v%s -> v%s", installed.c_str(), latest.c_str());
     } else {
       ESP_LOGI(TAG, "Firmware is up to date (v%s)", installed.c_str());
     }
   }
+
+  this->publish_version_entity_state_(installed, latest);
+}
+
+// ---------------------------------------------------------------------------
+// HA MQTT update entity helpers
+// ---------------------------------------------------------------------------
+
+// Returns a JSON-safe copy of 's': escapes backslashes and double-quotes.
+static std::string json_escape(const std::string &s) {
+  std::string out;
+  out.reserve(s.size());
+  for (char c : s) {
+    if (c == '"' || c == '\\') out += '\\';
+    out += c;
+  }
+  return out;
+}
+
+void GeappliancesBridge::publish_version_entity_discovery_() {
+  auto *client = mqtt::global_mqtt_client;
+  if (client == nullptr || !client->is_connected()) return;
+
+  // Build stable topic paths from the device's MQTT topic prefix.
+  const std::string prefix      = client->get_topic_prefix();
+  const std::string state_topic = prefix + "/update/ge_bridge_firmware";
+  const std::string cmd_topic   = prefix + "/update/ge_bridge_firmware/install";
+
+  // HA MQTT discovery topic for the update entity.
+  const std::string node_id    = App.get_name();
+  const std::string disc_topic = client->get_discovery_prefix() + "/update/" +
+                                  node_id + "_ge_bridge_firmware/config";
+
+  // value_template: evaluates "on" (update available) or "off" (up to date)
+  // from the JSON state payload.  Using state_topic as json_attributes_topic
+  // too lets HA display installed_version and latest_version in More Info.
+  const std::string tmpl =
+      "{% if value_json.latest_version | length > 0 and "
+      "value_json.latest_version != value_json.installed_version %}"
+      "on{% else %}off{% endif %}";
+
+  // Build the discovery payload using string concatenation so there is no
+  // fixed-size limit and no format-string injection risk.
+  const std::string disc =
+      std::string("{") +
+      "\"name\":\"" + json_escape(this->version_entity_name_) + "\"," +
+      "\"device_class\":\"firmware\"," +
+      "\"entity_category\":\"config\"," +
+      "\"state_topic\":\"" + json_escape(state_topic) + "\"," +
+      "\"json_attributes_topic\":\"" + json_escape(state_topic) + "\"," +
+      "\"value_template\":\"" + tmpl + "\"," +
+      "\"command_topic\":\"" + json_escape(cmd_topic) + "\"," +
+      "\"payload_install\":\"INSTALL\"," +
+      "\"release_url\":\"https://github.com/joshualongenecker/home-assistant-bridge-esphome/releases\"," +
+      "\"unique_id\":\"" + App.get_mac_address() + "_ge_bridge_firmware\"," +
+      "\"device\":{\"identifiers\":[\"" + json_escape(node_id) + "\"],"
+      "\"name\":\"" + json_escape(node_id) + "\"}}";
+
+  client->publish(disc_topic, disc, 0, true);  // retain=true
+  ESP_LOGD(TAG, "Published HA update entity discovery: %s", disc_topic.c_str());
+}
+
+void GeappliancesBridge::publish_version_entity_state_(const std::string &installed,
+                                                        const std::string &latest) {
+  auto *client = mqtt::global_mqtt_client;
+  if (client == nullptr || !client->is_connected()) return;
+
+  const std::string state_topic = client->get_topic_prefix() + "/update/ge_bridge_firmware";
+
+  // When latest is empty (fetch failed), report both as installed so the entity
+  // shows "up to date" rather than "update available" with a blank latest version.
+  const std::string &effective_latest = latest.empty() ? installed : latest;
+
+  const std::string state =
+      std::string("{") +
+      "\"installed_version\":\"" + json_escape(installed) + "\"," +
+      "\"latest_version\":\"" + json_escape(effective_latest) + "\"}";
+
+  client->publish(state_topic, state, 0, true);  // retain=true
+  ESP_LOGD(TAG, "Published HA update entity state: installed=%s latest=%s",
+           installed.c_str(), effective_latest.c_str());
 }
 
 }  // namespace geappliances_bridge

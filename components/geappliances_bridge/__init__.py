@@ -2,9 +2,10 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins
-from esphome.components import uart, mqtt, esp32, text_sensor
+from esphome.components import uart, mqtt, esp32
 from esphome.const import (
     CONF_ID,
+    CONF_NAME,
 )
 from esphome.core import CORE
 import json
@@ -18,7 +19,6 @@ _LOGGER = logging.getLogger(__name__)
 
 CODEOWNERS = ["@joshualongenecker"]
 DEPENDENCIES = ["uart", "mqtt"]
-AUTO_LOAD = ["text_sensor"]
 
 # UART configuration keys
 CONF_GEA3_UART_ID = "gea3_uart_id"
@@ -32,9 +32,8 @@ CONF_POLLING_ONLY_PUBLISH_ON_CHANGE = "polling_onlypublish_onchange"
 CONF_APPLIANCE_API_PARSING = "appliance_api_parsing"
 CONF_CUSTOM_ERDS = "custom_erds"
 
-# Update sensor configuration keys
-CONF_INSTALLED_VERSION = "installed_version"
-CONF_LATEST_VERSION = "latest_version"
+# Update entity configuration key
+CONF_VERSION_CHECK = "version_check"
 
 # Bridge mode options (polling vs subscriptions)
 MODE_POLL = "poll"
@@ -278,8 +277,11 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_CUSTOM_ERDS, default=[]): cv.ensure_list(
             cv.int_range(min=0, max=0xFFFF)
         ),
-        cv.Optional(CONF_INSTALLED_VERSION): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_LATEST_VERSION): text_sensor.text_sensor_schema(),
+        # Optional name for the Home Assistant firmware update entity.
+        # When omitted, defaults to "GE Bridge Firmware".
+        cv.Optional(CONF_VERSION_CHECK): cv.Schema({
+            cv.Optional(CONF_NAME, default="GE Bridge Firmware"): cv.string,
+        }),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 CONFIG_SCHEMA = cv.All(CONFIG_SCHEMA, validate_at_least_one_uart)
@@ -329,14 +331,14 @@ async def to_code(config):
     for erd in config[CONF_CUSTOM_ERDS]:
         cg.add(var.add_custom_erd(erd))
 
-    # Register optional text sensors for installed and latest version
-    if CONF_INSTALLED_VERSION in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_INSTALLED_VERSION])
-        cg.add(var.set_installed_version_sensor(sens))
-
-    if CONF_LATEST_VERSION in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_LATEST_VERSION])
-        cg.add(var.set_latest_version_sensor(sens))
+    # Pass the firmware update entity name to C++ (defaults to "GE Bridge Firmware").
+    # The C++ code publishes a single Home Assistant MQTT update entity using this name,
+    # which avoids the duplicate-entity problem caused by ESPHome registering text sensors
+    # with both the native API and MQTT discovery simultaneously.
+    version_check_name = "GE Bridge Firmware"
+    if CONF_VERSION_CHECK in config:
+        version_check_name = config[CONF_VERSION_CHECK][CONF_NAME]
+    cg.add(var.set_version_entity_name(version_check_name))
 
     # Load appliance types from JSON and generate C++ mapping function
     appliance_types = load_appliance_types()

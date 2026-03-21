@@ -71,7 +71,5 @@ geappliances_bridge:
   # mode: poll                    # Default: auto   Options: auto, subscribe, poll
   # polling_interval: 10000       # Default: 10000 ms (10 seconds), used when in polling mode
   # polling_onlypublish_onchange: false  # Default: false, only publish if value changed
-  installed_version:
-    name: "GE Bridge Installed Version"
-  latest_version:
-    name: "GE Bridge Latest Version"
+  # version_check:                # Optional: customize the HA update entity name
+  #   name: "GE Bridge Firmware"  #   Default name when omitted
