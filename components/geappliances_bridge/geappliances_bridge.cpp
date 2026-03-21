@@ -1299,14 +1299,31 @@ void GeappliancesBridge::publish_version_entity_state_(const std::string &instal
   // shows "up to date" rather than "update available" with a blank latest version.
   const std::string &effective_latest = latest.empty() ? installed : latest;
 
+  const bool update_available = !effective_latest.empty() && effective_latest != installed;
+
+  // title and release_summary are displayed by HA in the notification badge popup
+  // and in the More Info panel, giving the user clear context about what to update.
+  std::string title;
+  std::string release_summary;
+  if (update_available) {
+    title = json_escape(this->version_entity_name_) + " " + json_escape(effective_latest) + " Available";
+    release_summary = "Update from " + json_escape(installed) + " to " + json_escape(effective_latest);
+  } else {
+    title = json_escape(this->version_entity_name_);
+    release_summary = "Firmware is up to date (" + json_escape(installed) + ")";
+  }
+
   const std::string state =
       std::string("{") +
       "\"installed_version\":\"" + json_escape(installed) + "\"," +
-      "\"latest_version\":\"" + json_escape(effective_latest) + "\"}";
+      "\"latest_version\":\"" + json_escape(effective_latest) + "\"," +
+      "\"title\":\"" + title + "\"," +
+      "\"release_summary\":\"" + release_summary + "\"," +
+      "\"release_url\":\"https://github.com/joshualongenecker/home-assistant-bridge-esphome/releases\"}";
 
   client->publish(state_topic, state, 0, true);  // retain=true
-  ESP_LOGD(TAG, "Published HA update entity state: installed=%s latest=%s",
-           installed.c_str(), effective_latest.c_str());
+  ESP_LOGD(TAG, "Published HA update entity state: installed=%s latest=%s update_available=%s",
+           installed.c_str(), effective_latest.c_str(), update_available ? "yes" : "no");
 }
 
 }  // namespace geappliances_bridge
