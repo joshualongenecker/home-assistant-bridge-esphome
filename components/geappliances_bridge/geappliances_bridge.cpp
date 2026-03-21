@@ -1,6 +1,7 @@
 #include "geappliances_bridge.h"
 #include "appliance_api_feature_lists.h"
 #include "esphome/core/log.h"
+#include "esphome/core/application.h"
 #include "esphome_time_source.h"
 #include <cstring>
 #include <freertos/FreeRTOS.h>
@@ -1254,8 +1255,8 @@ void GeappliancesBridge::publish_version_entity_discovery_() {
   const std::string cmd_topic   = prefix + "/update/ge_bridge_firmware/install";
 
   // HA MQTT discovery topic for the update entity.
-  const std::string node_id    = App.get_name();
-  const std::string disc_topic = client->get_discovery_prefix() + "/update/" +
+  const std::string node_id    = App.get_name().str();
+  const std::string disc_topic = client->get_discovery_info().prefix + "/update/" +
                                   node_id + "_ge_bridge_firmware/config";
 
   // value_template: evaluates "on" (update available) or "off" (up to date)
@@ -1279,7 +1280,7 @@ void GeappliancesBridge::publish_version_entity_discovery_() {
       "\"command_topic\":\"" + json_escape(cmd_topic) + "\"," +
       "\"payload_install\":\"INSTALL\"," +
       "\"release_url\":\"https://github.com/joshualongenecker/home-assistant-bridge-esphome/releases\"," +
-      "\"unique_id\":\"" + App.get_mac_address() + "_ge_bridge_firmware\"," +
+      "\"unique_id\":\"" + get_mac_address() + "_ge_bridge_firmware\"," +
       "\"device\":{\"identifiers\":[\"" + json_escape(node_id) + "\"],"
       "\"name\":\"" + json_escape(node_id) + "\"}}";
 
