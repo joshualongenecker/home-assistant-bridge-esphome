@@ -12,10 +12,12 @@ namespace geappliances_bridge {
 // (e.g. for the HTTP User-Agent header).
 #define GEAPPLIANCES_BRIDGE_VERSION "1.0.0"
 
-// GitHub Releases API URL used to check for newer versions.
-static constexpr const char *GITHUB_RELEASES_API_URL =
+// GitHub Tags API URL used to check for newer versions.
+// Uses /tags (not /releases/latest) so it works even when no formal
+// GitHub Release has been published — any pushed tag is visible here.
+static constexpr const char *GITHUB_TAGS_API_URL =
     "https://api.github.com/repos/joshualongenecker/"
-    "home-assistant-bridge-esphome/releases/latest";
+    "home-assistant-bridge-esphome/tags";
 
 // Maximum length of a version string (e.g. "10.255.255" = 10 chars; 32 gives headroom).
 static constexpr size_t MAX_VERSION_BUF_SIZE = 32;

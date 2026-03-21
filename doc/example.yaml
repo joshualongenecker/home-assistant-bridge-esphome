@@ -31,11 +31,12 @@ esp32:
     type: esp-idf
 
 # External component configuration
-# Pin to a specific release tag so the "Installed Version" sensor in Home
-# Assistant shows the correct version.  Change the tag here and re-flash to
-# apply an update.
+# Uses the main branch so users always get the latest code automatically
+# when they re-compile.  The "Installed Version" sensor reports the version
+# baked into the firmware at compile time; "Latest Version" shows the newest
+# tagged release available on GitHub.
 external_components:
-  - source: github://joshualongenecker/home-assistant-bridge-esphome@v1.0.0
+  - source: github://joshualongenecker/home-assistant-bridge-esphome@main
     components: [ geappliances_bridge ]
 
 # MQTT configuration for Home Assistant

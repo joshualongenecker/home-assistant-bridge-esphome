@@ -12,10 +12,10 @@ namespace geappliances_bridge {
 static const char *const TAG = "geappliances_bridge.update";
 
 // Maximum bytes to read from the GitHub API response.
-// Using heap allocation so this can be large enough to safely include the
-// "tag_name" field without blowing the FreeRTOS task stack.  4 kB is more
-// than enough since tag_name appears near the top of the GitHub response.
-static constexpr size_t RESPONSE_BUF_SIZE = 4096;
+// The /tags endpoint returns an array; "name" is the first key in the first
+// object so it always appears within the first few hundred bytes regardless
+// of how many tags the repository has.  2 kB gives plenty of headroom.
+static constexpr size_t RESPONSE_BUF_SIZE = 2048;
 
 // ---------------------------------------------------------------------------
 // Helper: extract a JSON string value from a JSON document.
@@ -55,7 +55,7 @@ bool fetch_latest_release_from_github(std::string &out_version) {
   }
 
   esp_http_client_config_t cfg = {};
-  cfg.url = GITHUB_RELEASES_API_URL;
+  cfg.url = GITHUB_TAGS_API_URL;
   cfg.crt_bundle_attach = esp_crt_bundle_attach;
   cfg.timeout_ms = 10000;
   cfg.user_agent = "ESPHome-GEAppliances-Bridge/" GEAPPLIANCES_BRIDGE_VERSION;
@@ -95,22 +95,23 @@ bool fetch_latest_release_from_github(std::string &out_version) {
     return false;
   }
 
-  // Extract "tag_name"
-  const char *tag_key = "\"tag_name\":\"";
-  const char *pos = strstr(buf.get(), tag_key);
+  // The /tags API returns a JSON array sorted newest-first.
+  // The first element's "name" field is the latest tag (e.g. "v1.0.0").
+  const char *name_key = "\"name\":\"";
+  const char *pos = strstr(buf.get(), name_key);
   if (pos == nullptr) {
-    ESP_LOGW(TAG, "tag_name not found in GitHub API response");
+    ESP_LOGW(TAG, "Unable to find tag name in GitHub API response (truncated or no tags)");
     return false;
   }
 
   char version_buf[MAX_VERSION_BUF_SIZE] = {0};
-  const char *tag_end = extract_json_string(pos + strlen(tag_key), version_buf, sizeof(version_buf));
+  const char *tag_end = extract_json_string(pos + strlen(name_key), version_buf, sizeof(version_buf));
   if (tag_end == nullptr) {
-    ESP_LOGW(TAG, "tag_name truncated or malformed in GitHub API response");
+    ESP_LOGW(TAG, "Tag name truncated or malformed in GitHub API response");
     return false;
   }
   if (version_buf[0] == '\0') {
-    ESP_LOGW(TAG, "tag_name is empty in GitHub API response");
+    ESP_LOGW(TAG, "Tag name is empty in GitHub API response");
     return false;
   }
 
