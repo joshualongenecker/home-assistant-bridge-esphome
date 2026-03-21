@@ -1185,6 +1185,7 @@ void GeappliancesBridge::schedule_update_check_() {
   this->update_check_in_progress_ = true;
   this->update_check_done_ = false;
   this->update_latest_version_buf_[0] = '\0';
+  this->update_release_notes_buf_[0] = '\0';
 
   // Spawn a one-shot background task so the HTTP+TLS request does not block
   // the real-time GEA protocol loop.
@@ -1208,14 +1209,20 @@ void GeappliancesBridge::schedule_update_check_() {
   ESP_LOGI(TAG, "Checking for updates (installed: v%s)...",
            GEAPPLIANCES_BRIDGE_VERSION);
 
-  std::string latest = fetch_latest_version_from_github();
+  std::string latest;
+  std::string notes;
+  bool ok = fetch_latest_release_from_github(latest, notes);
 
-  // Copy result into the fixed-size shared buffer before setting the done
-  // flag so the main loop always sees a consistent value.
-  if (!latest.empty()) {
+  // Copy results into the fixed-size shared buffers before setting the done
+  // flag so the main loop always sees consistent values.
+  if (ok && !latest.empty()) {
     strncpy(self->update_latest_version_buf_, latest.c_str(),
             MAX_VERSION_BUF_SIZE - 1);
     self->update_latest_version_buf_[MAX_VERSION_BUF_SIZE - 1] = '\0';
+
+    strncpy(self->update_release_notes_buf_, notes.c_str(),
+            MAX_RELEASE_NOTES_BUF_SIZE - 1);
+    self->update_release_notes_buf_[MAX_RELEASE_NOTES_BUF_SIZE - 1] = '\0';
   }
   self->update_check_done_ = true;
 
@@ -1228,13 +1235,15 @@ void GeappliancesBridge::on_update_check_complete_() {
 
   const std::string installed(GEAPPLIANCES_BRIDGE_VERSION);
   const std::string latest(this->update_latest_version_buf_);
+  const std::string notes(this->update_release_notes_buf_);
 
   // Publish (or re-publish) discovery so HA always has the config.
   publish_update_discovery(this->final_device_id_, installed, latest);
   this->update_discovery_published_ = true;
 
-  // Publish the current state so HA shows the correct installed/latest values.
-  publish_update_state(this->final_device_id_, installed, latest);
+  // Publish the current state so HA shows the correct installed/latest values
+  // including the release notes for the latest version.
+  publish_update_state(this->final_device_id_, installed, latest, notes);
 }
 
 }  // namespace geappliances_bridge

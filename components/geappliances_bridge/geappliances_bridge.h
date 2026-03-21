@@ -262,8 +262,10 @@ class GeappliancesBridge : public Component {
   static void update_check_task_(void *param);
 
   // Shared between the background task and the main loop.
-  // The task writes update_latest_version_buf_ then sets update_check_done_.
+  // The task writes update_latest_version_buf_ / update_release_notes_buf_
+  // then sets update_check_done_.
   char update_latest_version_buf_[MAX_VERSION_BUF_SIZE]{};
+  char update_release_notes_buf_[MAX_RELEASE_NOTES_BUF_SIZE]{};
   volatile bool update_check_done_{false};
   bool update_check_in_progress_{false};
   // Set when a check completes but final_device_id_ was not yet available;
