@@ -292,6 +292,28 @@ void GeappliancesBridge::loop() {
     this->check_subscription_activity_();
   }
 
+  // Deferred custom ERD polling bridge initialization (auto mode, subscription confirmed).
+  // In auto mode, custom_erd_bridge_ is not created in initialize_mqtt_bridge_() because
+  // the operating mode is not yet known. Once subscription activity is confirmed (flag set
+  // in handle_erd_client_activity_), initialize the bridge here in loop() rather than
+  // inside the GEA callback to avoid re-entering the GEA stack from an event handler.
+  if (this->pending_custom_erd_bridge_init_) {
+    mqtt_bridge_polling_init(
+      &this->custom_erd_bridge_,
+      &this->timer_group_,
+      this->active_erd_client_,
+      &this->mqtt_client_adapter_.interface,
+      this->polling_interval_ms_,
+      this->polling_only_publish_on_change_);
+    this->custom_erd_bridge_.api_parsed_list = this->custom_erds_vec_.data();
+    this->custom_erd_bridge_.api_parsed_list_count =
+      static_cast<uint16_t>(this->custom_erds_vec_.size());
+    this->custom_erd_polling_active_ = true;
+    this->pending_custom_erd_bridge_init_ = false;
+    ESP_LOGI(TAG, "Custom ERD polling enabled (auto mode, subscription confirmed): %zu ERD(s)",
+             this->custom_erds_vec_.size());
+  }
+
   // Debug: log polling bridge state machine transitions.
   if (this->mqtt_bridge_initialized_) {
     bool is_poll_mode = !((this->mode_ == BRIDGE_MODE_SUBSCRIBE) ||
@@ -824,6 +846,14 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
     if (!this->subscription_activity_detected_) {
       ESP_LOGI(TAG, "Subscription activity detected - subscription mode is working");
       this->subscription_activity_detected_ = true;
+      // Custom ERD polling was deferred in auto mode to avoid initializing a
+      // polling bridge before the operating mode was confirmed. Now that
+      // subscription is working, schedule custom_erd_bridge_ initialization.
+      // The actual init is deferred to loop() so it runs outside of this GEA
+      // event-handler context.
+      if (!this->custom_erds_vec_.empty() && !this->custom_erd_polling_active_) {
+        this->pending_custom_erd_bridge_init_ = true;
+      }
     }
     // Reset the HA discovery quiet window only when a NEW ERD ID is seen for
     // the first time.  Repeated value updates for already-known ERDs do not
@@ -1099,8 +1129,14 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
       this->active_erd_client_,
       &this->mqtt_client_adapter_.interface,
       this->host_address_);
-    // Custom ERDs must be polled even in subscribe mode.
-    if (!this->custom_erds_vec_.empty()) {
+    // In BRIDGE_MODE_SUBSCRIBE we know the operating mode immediately, so custom
+    // ERDs can be polled right away alongside the subscription bridge.
+    // In BRIDGE_MODE_AUTO we have not yet confirmed the operating mode; defer
+    // custom_erd_bridge_ initialization until subscription activity is detected
+    // (handled in handle_erd_client_activity_ + loop()). If auto mode falls back
+    // to polling instead, mqtt_bridge_polling_ covers custom ERDs via
+    // configure_polling_optional_lists_() and custom_erd_bridge_ is never needed.
+    if (!this->custom_erds_vec_.empty() && this->mode_ == BRIDGE_MODE_SUBSCRIBE) {
       mqtt_bridge_polling_init(
         &this->custom_erd_bridge_,
         &this->timer_group_,
@@ -1627,6 +1663,9 @@ void GeappliancesBridge::check_subscription_activity_() {
       mqtt_bridge_polling_destroy(&this->custom_erd_bridge_);
       this->custom_erd_polling_active_ = false;
     }
+    // Also cancel any deferred custom ERD bridge initialization that may have been
+    // scheduled but not yet executed; the polling bridge handles custom ERDs instead.
+    this->pending_custom_erd_bridge_init_ = false;
 
     mqtt_bridge_polling_init(
       &this->mqtt_bridge_polling_,
