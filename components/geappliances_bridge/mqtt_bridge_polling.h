@@ -54,10 +54,17 @@ typedef struct {
   // discovery mode and api_parsed_list mode.
   const tiny_erd_t* custom_erd_list;
   uint16_t custom_erd_list_count;
+  // Optional pre-configured host address. When non-zero, state_identify_appliance
+  // skips the broadcast read to 0xFF and uses this address directly, allowing the
+  // bridge to start polling immediately with a known appliance address.
+  // Must be set before calling mqtt_bridge_polling_init() (passed as a parameter).
+  uint8_t host_address_override;
 } mqtt_bridge_polling_t;
 
 /*!
  * Initialize the MQTT polling bridge.
+ * @param host_address_override When non-zero, state_identify_appliance skips the
+ *   broadcast read and uses this address directly. Pass 0 for normal discovery.
  */
 void mqtt_bridge_polling_init(
   mqtt_bridge_polling_t* self,
@@ -65,7 +72,8 @@ void mqtt_bridge_polling_init(
   i_tiny_gea3_erd_client_t* erd_client,
   i_mqtt_client_t* mqtt_client,
   uint32_t polling_interval_ms,
-  bool only_publish_on_change);
+  bool only_publish_on_change,
+  uint8_t host_address_override);
 
 /*!
  * Destroy the MQTT polling bridge.

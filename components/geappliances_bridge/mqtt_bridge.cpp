@@ -345,9 +345,17 @@ static tiny_hsm_result_t state_identify_appliance(tiny_hsm_t* hsm, tiny_hsm_sign
 
   switch(signal) {
     case tiny_hsm_signal_entry:
-      self->erd_host_address = tiny_gea_broadcast_address;
       self->polling_list_complete = false;
       self->current_state_name = "identify_appliance";
+      // When the host address is already known (e.g. custom_erd_bridge_ alongside a
+      // subscription bridge), skip the broadcast and read directly from the known address.
+      // This avoids spurious 0xFF traffic when the appliance has already been discovered.
+      if(self->host_address_override != 0) {
+        self->erd_host_address = self->host_address_override;
+      }
+      else {
+        self->erd_host_address = tiny_gea_broadcast_address;
+      }
       __attribute__((fallthrough));
 
     case signal_timer_expired:
@@ -626,13 +634,17 @@ void mqtt_bridge_polling_init(
   i_tiny_gea3_erd_client_t* erd_client,
   i_mqtt_client_t* mqtt_client,
   uint32_t polling_interval_ms,
-  bool only_publish_on_change)
+  bool only_publish_on_change,
+  uint8_t host_address_override)
 {
   self->timer_group = timer_group;
   self->erd_client = erd_client;
   self->mqtt_client = mqtt_client;
   self->polling_interval_ms = polling_interval_ms;
   self->only_publish_on_change = only_publish_on_change;
+  // Set before tiny_hsm_init so that state_identify_appliance's entry signal
+  // can read it and skip the broadcast when the host address is already known.
+  self->host_address_override = host_address_override;
   // Initialized to nullptr/0; set by caller after initialization if needed.
   self->api_parsed_list = nullptr;
   self->api_parsed_list_count = 0;

@@ -304,7 +304,8 @@ void GeappliancesBridge::loop() {
       this->active_erd_client_,
       &this->mqtt_client_adapter_.interface,
       this->polling_interval_ms_,
-      this->polling_only_publish_on_change_);
+      this->polling_only_publish_on_change_,
+      this->host_address_);
     this->custom_erd_bridge_.api_parsed_list = this->custom_erds_vec_.data();
     this->custom_erd_bridge_.api_parsed_list_count =
       static_cast<uint16_t>(this->custom_erds_vec_.size());
@@ -1120,7 +1121,8 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
       this->active_erd_client_,
       &this->mqtt_client_adapter_.interface,
       this->polling_interval_ms_,
-      this->polling_only_publish_on_change_);
+      this->polling_only_publish_on_change_,
+      0);
     this->configure_polling_optional_lists_();
   } else {
     mqtt_bridge_init(
@@ -1143,7 +1145,8 @@ void GeappliancesBridge::initialize_mqtt_bridge_() {
         this->active_erd_client_,
         &this->mqtt_client_adapter_.interface,
         this->polling_interval_ms_,
-        this->polling_only_publish_on_change_);
+        this->polling_only_publish_on_change_,
+        this->host_address_);
       this->custom_erd_bridge_.api_parsed_list = this->custom_erds_vec_.data();
       this->custom_erd_bridge_.api_parsed_list_count =
         static_cast<uint16_t>(this->custom_erds_vec_.size());
@@ -1673,7 +1676,8 @@ void GeappliancesBridge::check_subscription_activity_() {
       this->active_erd_client_,
       &this->mqtt_client_adapter_.interface,
       this->polling_interval_ms_,
-      this->polling_only_publish_on_change_);
+      this->polling_only_publish_on_change_,
+      0);
     this->configure_polling_optional_lists_();
     
     // Mark that we're no longer in subscription mode

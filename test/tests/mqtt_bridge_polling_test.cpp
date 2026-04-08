@@ -61,7 +61,8 @@ TEST_GROUP(mqtt_bridge_polling)
       &erd_client.interface,
       &mqtt_client.interface,
       polling_interval,
-      only_publish_on_change);
+      only_publish_on_change,
+      0);
   }
 
   void after(tiny_timer_ticks_t ticks)
@@ -319,7 +320,8 @@ TEST_GROUP(mqtt_bridge_polling_api_list)
       &erd_client.interface,
       &mqtt_client.interface,
       polling_interval,
-      false);
+      false,
+      0);
     // Set the API-parsed list AFTER init (api_parsed_list is always zeroed in init)
     self.api_parsed_list = api_list;
     self.api_parsed_list_count = 2;
@@ -483,7 +485,8 @@ TEST_GROUP(mqtt_bridge_polling_custom_erds)
       &erd_client.interface,
       &mqtt_client.interface,
       polling_interval,
-      false);
+      false,
+      0);
     self.api_parsed_list = api_list;
     self.api_parsed_list_count = 1;
     self.custom_erd_list = custom_list;
@@ -498,7 +501,8 @@ TEST_GROUP(mqtt_bridge_polling_custom_erds)
       &erd_client.interface,
       &mqtt_client.interface,
       polling_interval,
-      false);
+      false,
+      0);
     self.custom_erd_list = custom_list;
     self.custom_erd_list_count = 2;
   }
@@ -632,13 +636,15 @@ TEST(mqtt_bridge_polling_custom_erds, should_poll_custom_erds_in_discovery_mode)
 }
 
 // When the polling bridge is used only for custom ERDs alongside a subscription bridge
-// (subscribe/auto mode), it is configured with api_parsed_list = custom ERDs. This
-// means discovery is skipped and only the custom ERDs are polled each cycle.
+// (subscribe/auto mode), it is configured with host_address_override + api_parsed_list.
+// The known host address bypasses the 0xFF broadcast; the appliance-type read goes
+// directly to the known address instead.
 TEST(mqtt_bridge_polling_custom_erds, should_poll_only_custom_erds_when_used_alongside_subscribe_bridge)
 {
-  // Bridge init: configured with api_parsed_list = custom ERDs only (no separate custom_erd_list).
-  // This mirrors how geappliances_bridge initializes custom_erd_bridge_ in subscribe mode.
-  should_request_read(0xFF, 0x0008);
+  // Bridge init: host_address_override = 0xC0 (already discovered), api_parsed_list = custom ERDs.
+  // This mirrors how geappliances_bridge initializes custom_erd_bridge_ in subscribe/auto mode.
+  // Read goes to 0xC0 (known address), not 0xFF (broadcast).
+  should_request_read(0xC0, 0x0008);
 
   mqtt_bridge_polling_init(
     &self,
@@ -646,11 +652,12 @@ TEST(mqtt_bridge_polling_custom_erds, should_poll_only_custom_erds_when_used_alo
     &erd_client.interface,
     &mqtt_client.interface,
     polling_interval,
-    false);
+    false,
+    0xC0);
   self.api_parsed_list = custom_list;
   self.api_parsed_list_count = 2;
 
-  // Appliance identified: discovery skipped; both custom ERDs registered and first read starts
+  // Appliance identified at known address: discovery skipped; both custom ERDs registered and first read starts.
   should_register_erd(custom_erd_1);
   should_register_erd(custom_erd_2);
   should_request_read(0xC0, custom_erd_1);
