@@ -10,6 +10,8 @@ from esphome.core import CORE
 import json
 import re
 import logging
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 _LOGGER = logging.getLogger(__name__)
@@ -86,11 +88,16 @@ def sanitize_appliance_name(name):
     return result
 
 
-def load_appliance_types():
-    """Load appliance type mappings from the lib/public-appliance-api-documentation submodule.
+_APPLIANCE_API_RAW_URL = (
+    "https://raw.githubusercontent.com/joshualongenecker/"
+    "public-appliance-api-documentation/main/appliance_api_erd_definitions.json"
+)
 
-    Resolves the submodule path relative to this file, following symlinks.
-    Compilation fails with a clear error if the file is not found.
+
+def load_appliance_types():
+    """Load appliance type mappings from the lib/public-appliance-api-documentation submodule,
+    falling back to fetching from GitHub when the submodule is not initialised (e.g. when
+    used as an ESPHome external_component).
 
     Returns:
         Dictionary mapping appliance type IDs (int) to names (str)
@@ -104,19 +111,28 @@ def load_appliance_types():
         component_dir / ".." / ".." / "lib" / "public-appliance-api-documentation" / json_filename
     ).resolve()
 
-    if not json_path.exists():
-        raise RuntimeError(
-            f"Required library file not found: {json_path}\n"
-            "Ensure the 'lib/public-appliance-api-documentation' submodule is initialised:\n"
-            "  git submodule update --init --recursive"
+    if json_path.exists():
+        try:
+            with open(json_path, 'r') as f:
+                data = json.load(f)
+            _LOGGER.info("Loaded appliance types from local submodule: %s", json_path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to read '{json_path}': {e}") from e
+    else:
+        _LOGGER.info(
+            "Submodule not found at %s, fetching from GitHub: %s",
+            json_path, _APPLIANCE_API_RAW_URL,
         )
-
-    try:
-        with open(json_path, 'r') as f:
-            data = json.load(f)
-        _LOGGER.info("Loaded appliance types from local submodule: %s", json_path)
-    except Exception as e:
-        raise RuntimeError(f"Failed to read '{json_path}': {e}") from e
+        try:
+            with urllib.request.urlopen(_APPLIANCE_API_RAW_URL) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.URLError as e:
+            raise RuntimeError(
+                f"Required library file not found locally ({json_path}) and "
+                f"could not be fetched from GitHub ({_APPLIANCE_API_RAW_URL}): {e}\n"
+                "Ensure network access is available, or initialise the submodule:\n"
+                "  git submodule update --init --recursive"
+            ) from e
 
     try:
         for erd in data.get("erds", []):
