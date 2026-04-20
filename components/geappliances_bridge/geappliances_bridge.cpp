@@ -1199,10 +1199,14 @@ void GeappliancesBridge::publish_ha_discovery_() {
   // the task's count()/iteration and corrupt the red-black tree.
   this->ha_registered_erds_snapshot_ = this->ha_registered_erds_;
 
-  // Stack size 12 KB – enough for HTTPS + cJSON on ESP32.
+  // Stack size 24 KB – required for HTTPS + cJSON on ESP32-C6 (RISC-V).
+  // RISC-V saves more callee-saved registers per frame than Xtensa, and the
+  // mbedTLS TLS handshake alone needs ~6–8 KB of stack. 12 KB was too tight:
+  // the overflow corrupted the task TCB, causing the FreeRTOS idle task to
+  // fault in prvCheckTasksWaitingTermination when freeing the deleted task.
   // Priority 1: below IDF MQTT task (5) so MQTT events aren't starved while
   // the fetch task is actively parsing JSONL lines and filling the queue.
-  BaseType_t rc = xTaskCreate(ha_fetch_task_fn_, "ha_fetch", 12288, this, 1,
+  BaseType_t rc = xTaskCreate(ha_fetch_task_fn_, "ha_fetch", 24576, this, 1,
                               &this->ha_fetch_task_handle_);
   if (rc != pdPASS) {
     ESP_LOGE(TAG, "HA discovery: failed to create fetch task (rc=%d)", (int)rc);
@@ -1210,6 +1214,7 @@ void GeappliancesBridge::publish_ha_discovery_() {
     this->ha_discovery_queue_                 = nullptr;
     this->ha_fetch_task_handle_               = nullptr;
     this->ha_discovery_publish_in_progress_   = false;
+    this->ha_registered_erds_snapshot_.clear();
   }
 #else
   // HA entity discovery requires the ESP-IDF framework (esp_http_client +
