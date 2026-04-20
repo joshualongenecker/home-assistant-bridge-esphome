@@ -1193,6 +1193,12 @@ void GeappliancesBridge::publish_ha_discovery_() {
   ESP_LOGI(TAG, "HA discovery: starting — %zu ERDs registered, launching fetch task",
            this->ha_registered_erds_.size());
 
+  // Snapshot the registered-ERD set before the task starts. The background
+  // task reads this set to filter entities; without a snapshot the main loop's
+  // register_erd() calls (which insert into ha_registered_erds_) can race with
+  // the task's count()/iteration and corrupt the red-black tree.
+  this->ha_registered_erds_snapshot_ = this->ha_registered_erds_;
+
   // Stack size 12 KB – enough for HTTPS + cJSON on ESP32.
   // Priority 1: below IDF MQTT task (5) so MQTT events aren't starved while
   // the fetch task is actively parsing JSONL lines and filling the queue.
@@ -1237,6 +1243,8 @@ void GeappliancesBridge::publish_next_ha_discovery_entity_() {
       vQueueDelete(this->ha_discovery_queue_);
       this->ha_discovery_queue_       = nullptr;
       this->ha_fetch_task_handle_     = nullptr;
+      // Release the snapshot taken at task launch; no longer needed.
+      this->ha_registered_erds_snapshot_.clear();
     } else {
       mqtt_client->publish(item->topic, item->payload, 0, true);  // QoS 0, retain
       ESP_LOGD(TAG, "HA discovery: published %s", item->topic.c_str());
@@ -1283,7 +1291,7 @@ void GeappliancesBridge::fetch_ha_definitions_() {
   // Build a bitmask of needed categories.
   bool need[10] = {};
   need[0] = true;  // common – always needed
-  for (uint16_t erd : this->ha_registered_erds_) {
+  for (uint16_t erd : this->ha_registered_erds_snapshot_) {
     for (int i = 1; i < 10; ++i) {
       if (erd >= CATS[i].lo && erd <= CATS[i].hi) { need[i] = true; break; }
     }
@@ -1413,13 +1421,13 @@ bool GeappliancesBridge::process_jsonl_line_(const char* line,
   const char* paired = get_str("p");
 
   // Filter: only publish entities for ERDs the device actually registered.
-  if (!this->ha_registered_erds_.empty()) {
-    bool registered = this->ha_registered_erds_.count(erd_id) > 0;
+  if (!this->ha_registered_erds_snapshot_.empty()) {
+    bool registered = this->ha_registered_erds_snapshot_.count(erd_id) > 0;
     if (!registered && role[0] == 'r' && paired[0] != '\0') {
       uint16_t paired_id = static_cast<uint16_t>(strtol(paired, nullptr, 16));
       if (paired_id)
-        registered = this->ha_registered_erds_.count(paired_id) > 0
-                  || this->ha_registered_erds_.count(erd_id) > 0;
+        registered = this->ha_registered_erds_snapshot_.count(paired_id) > 0
+                  || this->ha_registered_erds_snapshot_.count(erd_id) > 0;
     }
     if (!registered) { cJSON_Delete(root); return false; }
   }

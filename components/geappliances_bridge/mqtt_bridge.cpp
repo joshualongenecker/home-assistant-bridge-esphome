@@ -281,6 +281,13 @@ void mqtt_bridge_init(
 
 void mqtt_bridge_destroy(mqtt_bridge_t* self)
 {
+  if(self->erd_client) {
+    tiny_event_unsubscribe(tiny_gea3_erd_client_on_activity(self->erd_client), &self->erd_client_activity_subscription);
+  }
+  if(self->mqtt_client) {
+    tiny_event_unsubscribe(mqtt_client_on_write_request(self->mqtt_client), &self->mqtt_write_request_subscription);
+    tiny_event_unsubscribe(mqtt_client_on_mqtt_disconnect(self->mqtt_client), &self->mqtt_disconnect_subscription);
+  }
   delete reinterpret_cast<set<tiny_erd_t>*>(self->erd_set);
 }
 
@@ -701,6 +708,13 @@ void mqtt_bridge_polling_init(
 
 void mqtt_bridge_polling_destroy(mqtt_bridge_polling_t* self)
 {
+  if(self->erd_client) {
+    tiny_event_unsubscribe(tiny_gea3_erd_client_on_activity(self->erd_client), &self->erd_client_activity_subscription);
+  }
+  if(self->mqtt_client) {
+    tiny_event_unsubscribe(mqtt_client_on_write_request(self->mqtt_client), &self->mqtt_write_request_subscription);
+    tiny_event_unsubscribe(mqtt_client_on_mqtt_disconnect(self->mqtt_client), &self->mqtt_disconnect_subscription);
+  }
   delete reinterpret_cast<set<tiny_erd_t>*>(self->erd_set);
   delete reinterpret_cast<map<tiny_erd_t, vector<uint8_t>>*>(self->erd_cache);
 }
