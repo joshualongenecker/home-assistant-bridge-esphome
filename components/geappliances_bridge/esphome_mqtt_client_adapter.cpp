@@ -22,8 +22,24 @@ static constexpr size_t MAX_FLUSH_PER_CALL = 5;
 
 static void build_topic(esphome_mqtt_client_adapter_t* self, char* out, size_t out_size, const char* suffix)
 {
-  // "geappliances/{device_id}{suffix}\0"
-  snprintf(out, out_size, "geappliances/%s%s", self->device_id->c_str(), suffix);
+  // "geappliances/{device_id}{suffix}\0" — use memcpy for the fixed prefix
+  // to avoid snprintf overhead on the hot path.
+  static const char prefix[] = "geappliances/";
+  size_t prefix_len = sizeof(prefix) - 1;
+  size_t id_len = self->device_id->size();
+  size_t suffix_len = strlen(suffix);
+  size_t total = prefix_len + id_len + suffix_len;
+  if (total >= out_size) {
+    total = out_size - 1;
+  }
+  size_t pos = 0;
+  memcpy(out, prefix, prefix_len);
+  pos += prefix_len;
+  memcpy(out + pos, self->device_id->c_str(), id_len);
+  pos += id_len;
+  memcpy(out + pos, suffix, suffix_len);
+  pos += suffix_len;
+  out[pos] = '\0';
 }
 
 // Find an existing dirty entry for this ERD, or return -1 if not found.
@@ -90,9 +106,18 @@ static void update_erd(i_mqtt_client_t* _self, tiny_erd_t erd, const void* value
     return;
   }
 
-  // Build the topic into a stack buffer
-  char topic_suffix[32];
-  snprintf(topic_suffix, sizeof(topic_suffix), "/erd/0x%04x/value", erd);
+  // Build the topic suffix "/erd/0xXXXX/value" using a lookup table
+  static const char hex_chars[] = "0123456789abcdef";
+  char topic_suffix[20];
+  topic_suffix[0] = '/'; topic_suffix[1] = 'e'; topic_suffix[2] = 'r';
+  topic_suffix[3] = 'd'; topic_suffix[4] = '/'; topic_suffix[5] = '0';
+  topic_suffix[6] = 'x';
+  topic_suffix[7] = hex_chars[(erd >> 12) & 0x0f];
+  topic_suffix[8] = hex_chars[(erd >> 8) & 0x0f];
+  topic_suffix[9] = hex_chars[(erd >> 4) & 0x0f];
+  topic_suffix[10] = hex_chars[erd & 0x0f];
+  memcpy(topic_suffix + 11, "/value", 6);
+  topic_suffix[17] = '\0';
 
   const uint8_t* bytes = reinterpret_cast<const uint8_t*>(value);
 
@@ -117,11 +142,11 @@ static void update_erd(i_mqtt_client_t* _self, tiny_erd_t erd, const void* value
       }
     }
   } else {
-    // Convert binary data to hex string
-    for (uint8_t i = 0; i < size && payload_len < (int)(PENDING_PAYLOAD_SIZE - 1); i++) {
-      int n = snprintf(payload_buf + payload_len, PENDING_PAYLOAD_SIZE - payload_len, "%02x", bytes[i]);
-      if (n < 0 || n >= (int)(PENDING_PAYLOAD_SIZE - payload_len)) break;
-      payload_len += n;
+    // Convert binary data to hex string using a lookup table (avoids snprintf)
+    static const char hex_chars[] = "0123456789abcdef";
+    for (uint8_t i = 0; i < size && payload_len + 2 < (int)PENDING_PAYLOAD_SIZE; i++) {
+      payload_buf[payload_len++] = hex_chars[bytes[i] >> 4];
+      payload_buf[payload_len++] = hex_chars[bytes[i] & 0x0f];
     }
   }
   payload_buf[payload_len] = '\0';
@@ -155,16 +180,28 @@ static void update_erd_write_result(
 {
   auto self = reinterpret_cast<esphome_mqtt_client_adapter_t*>(_self);
 
-  char topic_suffix[48];
-  snprintf(topic_suffix, sizeof(topic_suffix), "/erd/0x%04x/write_result", erd);
+  static const char hex_chars[] = "0123456789abcdef";
+  char topic_suffix[25];
+  topic_suffix[0] = '/'; topic_suffix[1] = 'e'; topic_suffix[2] = 'r';
+  topic_suffix[3] = 'd'; topic_suffix[4] = '/'; topic_suffix[5] = '0';
+  topic_suffix[6] = 'x';
+  topic_suffix[7] = hex_chars[(erd >> 12) & 0x0f];
+  topic_suffix[8] = hex_chars[(erd >> 8) & 0x0f];
+  topic_suffix[9] = hex_chars[(erd >> 4) & 0x0f];
+  topic_suffix[10] = hex_chars[erd & 0x0f];
+  memcpy(topic_suffix + 11, "/write_result", 13);
+  topic_suffix[24] = '\0';
+
   char topic[PENDING_TOPIC_SIZE];
   build_topic(self, topic, PENDING_TOPIC_SIZE, topic_suffix);
 
   char payload[64];
   if (success) {
-    snprintf(payload, sizeof(payload), "success");
+    memcpy(payload, "success", 7);
+    payload[7] = '\0';
   } else {
-    snprintf(payload, sizeof(payload), "failure (reason: %d)", failure_reason);
+    int len = snprintf(payload, sizeof(payload), "failure (reason: %d)", failure_reason);
+    (void)len;
   }
 
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
