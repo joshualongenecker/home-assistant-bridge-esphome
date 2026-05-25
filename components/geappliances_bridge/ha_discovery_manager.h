@@ -76,8 +76,6 @@ class HaDiscoveryManager {
 
   bool is_complete() const { return state_ == HA_DISCOVERY_COMPLETE; }
   bool is_failed()   const { return state_ == HA_DISCOVERY_FAILED; }
-  bool is_publishing() const { return state_ == HA_DISCOVERY_PUBLISHING; }
-  bool is_ready_to_start() const { return state_ == HA_DISCOVERY_WAITING_FOR_READY; }
 
   HaDiscoveryState get_state() const { return state_; }
 
