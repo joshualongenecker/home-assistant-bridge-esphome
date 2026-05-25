@@ -70,7 +70,7 @@ void GeappliancesBridge::initialize_mqtt_client_()
   }
   if (!this->ha_string_erds_set_.empty()) {
     esphome_mqtt_client_adapter_set_string_erds_filter(
-      &this->mqtt_client_adapter_, &this->ha_string_erds_set_);
+      &this->mqtt_client_adapter_, ha_string_erd_ids, ha_string_erd_count);
   }
 
   this->mqtt_client_adapter_initialized_ = true;
@@ -92,11 +92,12 @@ void GeappliancesBridge::initialize_mqtt_bridge_()
   // Apply the valid-ERD filter when appliance API parsing is enabled and
   // produced results. An empty set would silently suppress all publishes.
   if (this->appliance_api_parsing_ && this->feature_bit_manager_.is_valid_list_ready() &&\
-      !this->feature_bit_manager_.get_valid_erds().empty()) {
+      !this->feature_bit_manager_.get_valid_erds_vec().empty()) {
+    const std::vector<tiny_erd_t>& vec = this->feature_bit_manager_.get_valid_erds_vec();
     esphome_mqtt_client_adapter_set_valid_erds_filter(
-      &this->mqtt_client_adapter_, &this->feature_bit_manager_.get_valid_erds());
+      &this->mqtt_client_adapter_, vec.data(), vec.size());
     ESP_LOGI(TAG, "Appliance API parsing enabled: publishing filtered to %zu valid ERDs",
-             this->feature_bit_manager_.get_valid_erds().size());
+             vec.size());
   }
 
   // Select operating mode.

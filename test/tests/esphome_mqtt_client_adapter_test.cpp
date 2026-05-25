@@ -81,8 +81,8 @@ TEST_GROUP(esphome_mqtt_client_adapter)
   esphome_mqtt_client_adapter_t adapter;
   MockMqttClient mock_client;
   std::string device_id_str;
-  std::set<tiny_erd_t> valid_erds;
-  std::set<tiny_erd_t> string_erds;
+  std::vector<tiny_erd_t> valid_erds;
+  std::vector<tiny_erd_t> string_erds;
   std::set<tiny_erd_t> registered_erds_out;
 
   void setup()
@@ -112,8 +112,8 @@ TEST_GROUP(esphome_mqtt_client_adapter)
   void init_adapter_with_filters()
   {
     init_adapter();
-    esphome_mqtt_client_adapter_set_valid_erds_filter(&adapter, &valid_erds);
-    esphome_mqtt_client_adapter_set_string_erds_filter(&adapter, &string_erds);
+    esphome_mqtt_client_adapter_set_valid_erds_filter(&adapter, valid_erds.data(), valid_erds.size());
+    esphome_mqtt_client_adapter_set_string_erds_filter(&adapter, string_erds.data(), string_erds.size());
     esphome_mqtt_client_adapter_set_registered_erds_out(&adapter, &registered_erds_out);
   }
 };
@@ -140,7 +140,7 @@ TEST(esphome_mqtt_client_adapter, init_creates_device_id)
 
 TEST(esphome_mqtt_client_adapter, register_erd_tracks_in_output_set)
 {
-  valid_erds.insert(0x0008);
+  valid_erds.push_back(0x0008);
   init_adapter_with_filters();
   adapter.interface.api->register_erd(&adapter.interface, 0x0008);
   CHECK_EQUAL(1u, registered_erds_out.size());
@@ -176,9 +176,9 @@ TEST(esphome_mqtt_client_adapter, update_erd_publishes_hex_when_connected)
 
 TEST(esphome_mqtt_client_adapter, update_erd_publishes_string_when_in_filter)
 {
-  string_erds.insert(0x0001);
+  string_erds.push_back(0x0001);
   init_adapter();
-  esphome_mqtt_client_adapter_set_string_erds_filter(&adapter, &string_erds);
+  esphome_mqtt_client_adapter_set_string_erds_filter(&adapter, string_erds.data(), string_erds.size());
   mock_client.connected = true;
 
   uint8_t data[] = "Hello";
@@ -198,7 +198,7 @@ TEST(esphome_mqtt_client_adapter, update_erd_publishes_string_when_in_filter)
 
 TEST(esphome_mqtt_client_adapter, update_erd_skips_erd_not_in_valid_filter)
 {
-  valid_erds.insert(0x0092);
+  valid_erds.push_back(0x0092);
   init_adapter_with_filters();
   mock_client.connected = true;
 

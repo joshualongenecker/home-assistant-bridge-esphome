@@ -11,6 +11,8 @@ extern "C" {
 #include <cstring>
 #include <string>
 #include <cctype>
+#include <algorithm>
+#include <vector>
 
 static const char *const TAG __attribute__((unused)) = "geappliances_bridge.mqtt";
 
@@ -95,9 +97,12 @@ static void update_erd(i_mqtt_client_t* _self, tiny_erd_t erd, const void* value
 
   // If a valid ERD filter is set (appliance_api_parsing mode), skip ERDs not
   // in the validated list. This applies to both subscription and polling modes.
-  if(self->valid_erds_filter != nullptr &&
-     self->valid_erds_filter->find(erd) == self->valid_erds_filter->end()) {
-    return;
+  if(self->valid_erds_filter != nullptr) {
+    if (!std::binary_search(self->valid_erds_filter,
+                            self->valid_erds_filter + self->valid_erds_filter_count,
+                            erd)) {
+      return;
+    }
   }
 
   // Validate inputs
@@ -124,7 +129,9 @@ static void update_erd(i_mqtt_client_t* _self, tiny_erd_t erd, const void* value
   // String-type ERDs: publish the raw bytes as a null-terminated ASCII string
   // instead of a hex string so Home Assistant displays human-readable text.
   bool is_string = (self->string_erds_filter != nullptr &&
-                    self->string_erds_filter->find(erd) != self->string_erds_filter->end());
+                    std::binary_search(self->string_erds_filter,
+                                       self->string_erds_filter + self->string_erds_filter_count,
+                                       erd));
 
   // Build payload into a stack buffer
   char payload_buf[PENDING_PAYLOAD_SIZE];
@@ -243,7 +250,9 @@ extern "C" void esphome_mqtt_client_adapter_init(
   memset(self->pending_entries, 0, sizeof(self->pending_entries));
   self->pending_count = 0;
   self->valid_erds_filter = nullptr;
+  self->valid_erds_filter_count = 0;
   self->string_erds_filter = nullptr;
+  self->string_erds_filter_count = 0;
   self->registered_erds_out = nullptr;
   self->wildcard_subscribed   = false;
   self->mqtt_connected_at_ms  = 0;
@@ -254,16 +263,18 @@ extern "C" void esphome_mqtt_client_adapter_init(
 
 extern "C" void esphome_mqtt_client_adapter_set_valid_erds_filter(
   esphome_mqtt_client_adapter_t* self,
-  const std::set<tiny_erd_t>* valid_erds_filter)
+  const tiny_erd_t* valid_erds, size_t count)
 {
-  self->valid_erds_filter = valid_erds_filter;
+  self->valid_erds_filter = valid_erds;
+  self->valid_erds_filter_count = count;
 }
 
 extern "C" void esphome_mqtt_client_adapter_set_string_erds_filter(
   esphome_mqtt_client_adapter_t* self,
-  const std::set<tiny_erd_t>* string_erds_filter)
+  const tiny_erd_t* string_erds, size_t count)
 {
-  self->string_erds_filter = string_erds_filter;
+  self->string_erds_filter = string_erds;
+  self->string_erds_filter_count = count;
 }
 
 extern "C" void esphome_mqtt_client_adapter_set_registered_erds_out(
