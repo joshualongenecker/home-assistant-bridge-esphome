@@ -55,7 +55,7 @@ class AutodiscoveryManager {
   uint8_t  get_host_address()       const { return host_address_; }
   i_tiny_gea3_erd_client_t* get_active_erd_client() const { return active_erd_client_; }
   bool     is_gea2_protocol()       const { return gea2_protocol_active_; }
-  uint32_t get_retry_count()        const { return retry_count_; }
+  uint32_t get_retry_count()        const { return retry_count_; }  /* Test-only. */
   AutodiscoveryState get_state()    const { return state_; }
 
  private:

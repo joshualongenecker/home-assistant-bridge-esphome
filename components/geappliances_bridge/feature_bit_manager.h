@@ -104,7 +104,7 @@ class FeatureBitManager {
   const FeatureBitErdData& get_erd_data() const { return erd_data_; }
 
   FeatureBitState get_state() const { return state_; }
-  uint32_t get_queue_retry_count() const { return queue_retry_count_; }
+  uint32_t get_queue_retry_count() const { return queue_retry_count_; }  /* Test-only. */
 
  private:
   void skip_to_next_feature_erd_(tiny_erd_t failed_erd);

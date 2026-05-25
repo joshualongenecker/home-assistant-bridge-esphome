@@ -108,7 +108,7 @@ class DeviceIdentityManager {
   DeviceIdState get_state() const { return state_; }
 
   /*!
-   * Get the current queue retry count.
+   * Get the current queue retry count. (Test-only.)
    */
   uint32_t get_queue_retry_count() const { return queue_retry_count_; }
 
