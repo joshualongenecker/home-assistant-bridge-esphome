@@ -8,26 +8,48 @@ extern "C" {
 }
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <cctype>
-#include <map>
 
 static const char *const TAG __attribute__((unused)) = "geappliances_bridge.mqtt";
 
-// Maximum number of distinct ERDs that can be pending (safety bound — in
-// practice bounded by the number of ERDs the appliance registers, typically <100).
-static constexpr size_t MAX_PENDING_UPDATES = 200;
-
 // Maximum number of pending ERD updates flushed to MQTT in a single
-// notify_connected() / loop() drain call.  Keeping this small (≤5) ensures
+// notify_connected() / loop() drain call.  Keeping this small ensures
 // the main loop() does not stall while the IDF MQTT client's API mutex is
-// held by the MQTT task sending previous PUBLISH packets.  At 5 per call and
-// a typical loop rate of ~200 Hz, 200 pending updates drain in ≤200 ms.
+// held by the MQTT task sending previous PUBLISH packets.
 static constexpr size_t MAX_FLUSH_PER_CALL = 5;
 
-static std::string build_topic(esphome_mqtt_client_adapter_t* self, const char* suffix)
+static void build_topic(esphome_mqtt_client_adapter_t* self, char* out, size_t out_size, const char* suffix)
 {
-  return std::string("geappliances/") + *self->device_id + suffix;
+  // "geappliances/{device_id}{suffix}\0"
+  snprintf(out, out_size, "geappliances/%s%s", self->device_id->c_str(), suffix);
+}
+
+// Find an existing dirty entry for this ERD, or return -1 if not found.
+static int find_pending_entry(esphome_mqtt_client_adapter_t* self, tiny_erd_t erd)
+{
+  for (size_t i = 0; i < self->pending_count; i++) {
+    if (self->pending_entries[i].dirty && self->pending_entries[i].erd == erd) {
+      return (int)i;
+    }
+  }
+  return -1;
+}
+
+// Compact the pending array by removing non-dirty entries.
+static void compact_pending(esphome_mqtt_client_adapter_t* self)
+{
+  size_t write_idx = 0;
+  for (size_t i = 0; i < self->pending_count; i++) {
+    if (self->pending_entries[i].dirty) {
+      if (write_idx != i) {
+        self->pending_entries[write_idx] = self->pending_entries[i];
+      }
+      write_idx++;
+    }
+  }
+  self->pending_count = write_idx;
 }
 
 static void register_erd(i_mqtt_client_t* _self, tiny_erd_t erd)
@@ -67,10 +89,10 @@ static void update_erd(i_mqtt_client_t* _self, tiny_erd_t erd, const void* value
     ESP_LOGW(TAG, "Invalid ERD update: null value or zero size for ERD 0x%04X", erd);
     return;
   }
-  
+
+  // Build the topic into a stack buffer
   char topic_suffix[32];
   snprintf(topic_suffix, sizeof(topic_suffix), "/erd/0x%04x/value", erd);
-  std::string topic = build_topic(self, topic_suffix);
 
   const uint8_t* bytes = reinterpret_cast<const uint8_t*>(value);
 
@@ -79,15 +101,16 @@ static void update_erd(i_mqtt_client_t* _self, tiny_erd_t erd, const void* value
   bool is_string = (self->string_erds_filter != nullptr &&
                     self->string_erds_filter->find(erd) != self->string_erds_filter->end());
 
-  std::string payload;
+  // Build payload into a stack buffer
+  char payload_buf[PENDING_PAYLOAD_SIZE];
+  int payload_len = 0;
   if (is_string) {
     // Reserve only up to the first null byte (or full size if no null found)
     uint8_t str_len = 0;
     while (str_len < size && bytes[str_len] != 0) str_len++;
-    payload.reserve(str_len);
-    for (uint8_t i = 0; i < str_len; i++) {
+    for (uint8_t i = 0; i < str_len && payload_len < (int)(PENDING_PAYLOAD_SIZE - 1); i++) {
       if (isprint(bytes[i])) {
-        payload += static_cast<char>(bytes[i]);
+        payload_buf[payload_len++] = static_cast<char>(bytes[i]);
       } else {
         ESP_LOGD(TAG, "ERD 0x%04X: skipping non-printable byte 0x%02X at offset %u",
                  erd, bytes[i], i);
@@ -95,29 +118,32 @@ static void update_erd(i_mqtt_client_t* _self, tiny_erd_t erd, const void* value
     }
   } else {
     // Convert binary data to hex string
-    payload.reserve(size * 2);
-    for (uint8_t i = 0; i < size; i++) {
-      char hex[3];
-      snprintf(hex, sizeof(hex), "%02x", bytes[i]);
-      payload += hex;
+    for (uint8_t i = 0; i < size && payload_len < (int)(PENDING_PAYLOAD_SIZE - 1); i++) {
+      int n = snprintf(payload_buf + payload_len, PENDING_PAYLOAD_SIZE - payload_len, "%02x", bytes[i]);
+      if (n < 0 || n >= (int)(PENDING_PAYLOAD_SIZE - payload_len)) break;
+      payload_len += n;
     }
   }
-  
-  // Always queue the update in the pending map rather than publishing
-  // directly.  The map key is the ERD so a repeated update overwrites the
-  // previous pending value — only the most recent value is ever published.
-  //
-  // This keeps the main loop non-blocking even when the IDF MQTT outbox is
-  // full (e.g., slow network or busy broker).  The notify_connected() drain
-  // (called every loop() iteration while MQTT is connected) publishes up to
-  // MAX_FLUSH_PER_CALL per call, spreading the burst across multiple loop
-  // iterations without stalling the loop.
-  if (self->pending_updates != nullptr && self->pending_updates->size() < MAX_PENDING_UPDATES) {
-    (*self->pending_updates)[erd] = {topic, payload};
-  } else if (self->pending_updates == nullptr) {
-    ESP_LOGW(TAG, "Pending updates queue not initialized, dropping ERD update for 0x%04X", erd);
+  payload_buf[payload_len] = '\0';
+
+  // Find or create a pending entry for this ERD
+  int idx = find_pending_entry(self, erd);
+  if (idx >= 0) {
+    // Overwrite existing entry in place
+    build_topic(self, self->pending_entries[idx].topic, PENDING_TOPIC_SIZE, topic_suffix);
+    memcpy(self->pending_entries[idx].payload, payload_buf, payload_len + 1);
   } else {
-    ESP_LOGW(TAG, "Pending update queue full, dropping ERD update for 0x%04X", erd);
+    // Append a new entry
+    if (self->pending_count >= MAX_PENDING_ENTRIES) {
+      ESP_LOGW(TAG, "Pending update queue full, dropping ERD update for 0x%04X", erd);
+      return;
+    }
+    idx = (int)self->pending_count;
+    self->pending_entries[idx].dirty = true;
+    self->pending_entries[idx].erd = erd;
+    build_topic(self, self->pending_entries[idx].topic, PENDING_TOPIC_SIZE, topic_suffix);
+    memcpy(self->pending_entries[idx].payload, payload_buf, payload_len + 1);
+    self->pending_count++;
   }
 }
 
@@ -128,26 +154,27 @@ static void update_erd_write_result(
   tiny_gea3_erd_client_write_failure_reason_t failure_reason)
 {
   auto self = reinterpret_cast<esphome_mqtt_client_adapter_t*>(_self);
-  
+
   char topic_suffix[48];
   snprintf(topic_suffix, sizeof(topic_suffix), "/erd/0x%04x/write_result", erd);
-  std::string topic = build_topic(self, topic_suffix);
-  
-  std::string payload = success ? "success" : "failure";
-  if (!success) {
-    char reason[16];
-    snprintf(reason, sizeof(reason), " (reason: %d)", failure_reason);
-    payload += reason;
+  char topic[PENDING_TOPIC_SIZE];
+  build_topic(self, topic, PENDING_TOPIC_SIZE, topic_suffix);
+
+  char payload[64];
+  if (success) {
+    snprintf(payload, sizeof(payload), "success");
+  } else {
+    snprintf(payload, sizeof(payload), "failure (reason: %d)", failure_reason);
   }
-  
+
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
   if (mqtt_client != nullptr && mqtt_client->is_connected()) {
     mqtt_client->publish(topic, payload, 0, false);  // QoS 0, no retain
   } else {
     ESP_LOGD(TAG, "MQTT not connected, skipping write result for 0x%04X", erd);
   }
-  
-  ESP_LOGD(TAG, "Write result for ERD 0x%04X: %s", erd, payload.c_str());
+
+  ESP_LOGD(TAG, "Write result for ERD 0x%04X: %s", erd, payload);
 }
 
 static i_tiny_event_t* on_write_request(i_mqtt_client_t* _self)
@@ -176,7 +203,8 @@ extern "C" void esphome_mqtt_client_adapter_init(
 {
   self->interface.api = &api;
   self->device_id = new std::string(device_id);
-  self->pending_updates = new std::map<tiny_erd_t, PendingErdUpdate>();
+  memset(self->pending_entries, 0, sizeof(self->pending_entries));
+  self->pending_count = 0;
   self->valid_erds_filter = nullptr;
   self->string_erds_filter = nullptr;
   self->registered_erds_out = nullptr;
@@ -238,11 +266,12 @@ extern "C" void esphome_mqtt_client_adapter_notify_connected(
   if (!self->wildcard_subscribed) {
     auto mqtt_client = esphome::mqtt::global_mqtt_client;
     if (mqtt_client != nullptr && mqtt_client->is_connected()) {
-      std::string wildcard_topic = build_topic(self, "/erd/+/write");
-      ESP_LOGI(TAG, "Subscribing to wildcard write topic: %s", wildcard_topic.c_str());
+      char wildcard_topic[PENDING_TOPIC_SIZE];
+      build_topic(self, wildcard_topic, PENDING_TOPIC_SIZE, "/erd/+/write");
+      ESP_LOGI(TAG, "Subscribing to wildcard write topic: %s", wildcard_topic);
 
       mqtt_client->subscribe(
-        wildcard_topic,
+        std::string(wildcard_topic),
         [self](const std::string& topic, const std::string& payload) {
           // Parse the ERD number from the topic.
           // Topic format: geappliances/{device_id}/erd/0xXXXX/write
@@ -261,7 +290,7 @@ extern "C" void esphome_mqtt_client_adapter_notify_connected(
           char* end;
           unsigned long val = strtoul(erd_str.c_str(), &end, 16);
           if (*end != '\0' || val > 0xFFFF) {
-            ESP_LOGW(TAG, "Invalid ERD value in topic: %s", topic.c_str());
+            ESP_LOGW(TAG, "Invalid ERD value in topic: %s", erd_str.c_str());
             return;
           }
           tiny_erd_t erd = static_cast<tiny_erd_t>(val);
@@ -306,7 +335,7 @@ extern "C" void esphome_mqtt_client_adapter_notify_connected(
   // Flush up to MAX_FLUSH_PER_CALL pending ERD updates per call.
   // loop() calls this every iteration while MQTT is connected so the full
   // backlog drains across multiple loop cycles without stalling the loop.
-  if (self->pending_updates == nullptr || self->pending_updates->empty()) {
+  if (self->pending_count == 0) {
     return;
   }
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
@@ -314,14 +343,20 @@ extern "C" void esphome_mqtt_client_adapter_notify_connected(
     return;
   }
   size_t flushed = 0;
-  while (!self->pending_updates->empty() && flushed < MAX_FLUSH_PER_CALL) {
-    auto it = self->pending_updates->begin();
-    mqtt_client->publish(it->second.topic, it->second.payload, 0, true);  // QoS 0, retain
-    self->pending_updates->erase(it);
+  for (size_t i = 0; i < self->pending_count && flushed < MAX_FLUSH_PER_CALL; i++) {
+    if (!self->pending_entries[i].dirty) {
+      continue;
+    }
+    mqtt_client->publish(self->pending_entries[i].topic, self->pending_entries[i].payload, 0, true);  // QoS 0, retain
+    self->pending_entries[i].dirty = false;
     flushed++;
   }
-  if (flushed > 0 && self->pending_updates->empty()) {
-    ESP_LOGV(TAG, "Flushed all pending ERD updates");
+  // Compact the array periodically to keep it small
+  if (flushed > 0) {
+    compact_pending(self);
+    if (self->pending_count == 0) {
+      ESP_LOGV(TAG, "Flushed all pending ERD updates");
+    }
   }
 }
 
@@ -332,17 +367,17 @@ extern "C" void esphome_mqtt_client_adapter_destroy(
     delete self->device_id;
     self->device_id = nullptr;
   }
-  if (self->pending_updates != nullptr) {
-    delete self->pending_updates;
-    self->pending_updates = nullptr;
-  }
+  // pending_entries is inline, no heap cleanup needed
 }
 
 extern "C" size_t esphome_mqtt_client_adapter_get_pending_update_count(
   const esphome_mqtt_client_adapter_t* self)
 {
-  if (self->pending_updates == nullptr) {
-    return 0;
+  size_t count = 0;
+  for (size_t i = 0; i < self->pending_count; i++) {
+    if (self->pending_entries[i].dirty) {
+      count++;
+    }
   }
-  return self->pending_updates->size();
+  return count;
 }

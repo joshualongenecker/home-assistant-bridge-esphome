@@ -1,7 +1,6 @@
 #pragma once
 
 #include <string>
-#include <map>
 #include <set>
 
 extern "C" {
@@ -9,20 +8,36 @@ extern "C" {
 #include "tiny_event.h"
 }
 
-struct PendingErdUpdate {
-  std::string topic;
-  std::string payload;
+// Flat pending update entry with inline buffers — no heap allocation per ERD
+// update.  Topic is "geappliances/{device_id}/erd/0xXXXX/value" which is at
+// most ~50 chars.  Payload is hex-encoded ERD data; max ERD value is 255 bytes
+// = 510 hex chars, but in practice ERD values are <32 bytes so 64 chars is
+// sufficient for the common case.  If the payload is longer it is silently
+// truncated (the appliance won't send payloads that large for ERD values).
+static constexpr size_t PENDING_TOPIC_SIZE = 64;
+static constexpr size_t PENDING_PAYLOAD_SIZE = 64;
+
+struct PendingErdEntry {
+  bool dirty;
+  tiny_erd_t erd;
+  char topic[PENDING_TOPIC_SIZE];
+  char payload[PENDING_PAYLOAD_SIZE];
 };
+
+static constexpr size_t MAX_PENDING_ENTRIES = 200;
 
 typedef struct {
   i_mqtt_client_t interface;
   std::string* device_id;
   tiny_event_t on_write_request_event;
   tiny_event_t on_mqtt_disconnect_event;
-  // Keyed by ERD so repeated updates while MQTT is down keep only the latest
-  // value per ERD. This prevents the queue from filling with duplicates during
-  // a polling reconnect cycle and bounds its size to the number of distinct ERDs.
-  std::map<tiny_erd_t, PendingErdUpdate>* pending_updates;
+  // Flat array of pending entries.  On update we search linearly for an
+  // existing entry for this ERD (overwriting in place), or append a new one.
+  // On drain we mark published entries as !dirty and compact.  This avoids
+  // all heap allocation on the hot path — the topic/payload buffers are
+  // inline in the struct.
+  PendingErdEntry pending_entries[MAX_PENDING_ENTRIES];
+  size_t pending_count;  // Number of dirty entries in pending_entries[]
   // Optional filter: when non-null, update_erd only publishes ERDs that are
   // present in this set. Used when appliance_api_parsing is enabled.
   const std::set<tiny_erd_t>* valid_erds_filter;
