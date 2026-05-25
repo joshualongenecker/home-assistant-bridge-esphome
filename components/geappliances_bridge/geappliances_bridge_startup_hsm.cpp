@@ -78,7 +78,7 @@ tiny_hsm_result_t startup_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, c
 tiny_hsm_result_t startup_state_protocol_stack(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data)
 {
   GeappliancesBridge* bridge = bridge_from_hsm(hsm);
-  (void)bridge;  /* Used only in ESP_LOG calls below. */
+  (void)bridge;
   (void)data;
 
   switch (signal) {

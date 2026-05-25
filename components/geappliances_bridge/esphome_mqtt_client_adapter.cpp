@@ -1,7 +1,6 @@
 #include "esphome_mqtt_client_adapter.h"
 #include "esphome/components/mqtt/mqtt_client.h"
 #include "esphome/core/log.h"
-#include "esphome/core/application.h"
 
 extern "C" {
 #include "tiny_utils.h"

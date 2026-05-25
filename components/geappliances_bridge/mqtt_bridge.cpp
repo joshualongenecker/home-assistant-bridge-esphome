@@ -113,7 +113,6 @@ static tiny_hsm_result_t state_subscribed(tiny_hsm_t* hsm, tiny_hsm_signal_t sig
 {
   mqtt_bridge_t* self = container_of(mqtt_bridge_t, hsm, hsm);
   (void)data;
-  (void)self;
 
   switch(signal) {
     case tiny_hsm_signal_entry:

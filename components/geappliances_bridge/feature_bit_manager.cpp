@@ -47,26 +47,15 @@ void FeatureBitManager::run()
     this->parse_and_log_feature_bits_();
     // Check if parsing is now fully complete (not just pending).
     if (!this->parse_pending_) {
-      this->parse_pending_ = false;
+      /* Parsing is complete — parse_pending_ is already false. */
     }
     return;
   }
 
   // Map current READING state to the ERD we need to read next.
   tiny_erd_t  feature_erd  = 0;
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-but-set-variable"
-#elif defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
-#endif
   const char* feature_name = nullptr;
-#ifdef __clang__
-#pragma clang diagnostic pop
-#elif defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
+  (void)feature_name; /* Used in ESP_LOG calls that may be compiled out. */
 
   switch (this->state_) {
     case FEATURE_BIT_STATE_READING_0008: feature_erd = ERD_APPLIANCE_TYPE;        feature_name = "appliance type (0x0008)";              break;
@@ -211,22 +200,11 @@ void FeatureBitManager::parse_and_log_feature_bits_()
   }
 
   // Static tables for appliance ERDs (indexed 0-9).
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-variable"
-#elif defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-variable"
-#endif
   static const char* const erd_names[10] = {
     "0x0093", "0x0094", "0x0095", "0x0096", "0x0097",
     "0x0109", "0x010A", "0x010B", "0x010C", "0x010D"
   };
-#ifdef __clang__
-#pragma clang diagnostic pop
-#elif defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
+  (void)erd_names; /* Used in ESP_LOG calls that may be compiled out. */
 
   // Process one appliance ERD per call to avoid blocking loop() for too long.
   while (this->parse_erd_idx_ < 10) {

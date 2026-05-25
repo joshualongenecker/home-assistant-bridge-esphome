@@ -130,7 +130,7 @@ void AutodiscoveryManager::run()
 void AutodiscoveryManager::on_broadcast_response(uint8_t address, uint8_t appliance_type,
                                                   bool is_gea3)
 {
-  (void)appliance_type;  /* Used only in ESP_LOG calls below. */
+  (void)appliance_type; /* Used in ESP_LOG calls that may be compiled out. */
   if (this->state_ == AUTODISCOVERY_COMPLETE) return;
 
   bool in_gea3_waiting = (this->state_ == AUTODISCOVERY_GEA3_BROADCAST_WAITING);

@@ -8,7 +8,6 @@
 
 #include "geappliances_bridge.h"
 #include "esphome/core/log.h"
-#include <cstring>
 
 namespace esphome {
 namespace geappliances_bridge {

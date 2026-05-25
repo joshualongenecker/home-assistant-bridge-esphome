@@ -5,7 +5,7 @@
 namespace esphome {
 namespace geappliances_bridge {
 
-static const char *const TAG = "geappliances_bridge.health";
+static const char *const TAG __attribute__((unused)) = "geappliances_bridge.health";
 
 void GeappliancesBridgeHealthSensor::update() {
   if (this->parent_ == nullptr) {

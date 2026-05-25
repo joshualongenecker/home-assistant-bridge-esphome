@@ -101,19 +101,8 @@ void GeappliancesBridge::initialize_mqtt_bridge_()
 
   // Select operating mode.
   bool        use_polling = false;
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-but-set-variable"
-#elif defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
-#endif
   const char* mode_name   = "unknown";
-#ifdef __clang__
-#pragma clang diagnostic pop
-#elif defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
+  (void)mode_name; /* Used in ESP_LOG that may be compiled out. */
 
   if (this->autodiscovery_manager_.is_gea2_protocol()) {
     use_polling = true;
