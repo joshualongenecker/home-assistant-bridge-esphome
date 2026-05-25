@@ -9,7 +9,6 @@
 #include "device_identity_manager.h"
 #include "geappliances_bridge_constants.h"
 #include "esphome/core/log.h"
-#include <cstring>
 
 // Forward declaration (generated from appliance API data)
 std::string appliance_type_to_string(uint8_t appliance_type);
