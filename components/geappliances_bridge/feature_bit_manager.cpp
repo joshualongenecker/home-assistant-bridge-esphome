@@ -361,7 +361,7 @@ void FeatureBitManager::parse_next_step_()
     if (this->erd_data_.sizes[0] > 0) {
       uint32_t common_bits = static_cast<uint32_t>(
         read_be64(this->erd_data_.data[0], this->erd_data_.sizes[0]) & 0xFFFFFFFFu);
-      ESP_LOGI(TAG, "Common feature API (0x0092) value: 0x%08X", common_bits);
+      ESP_LOGI(TAG, "Common feature API (0x0092) value: 0x%08lX", (unsigned long)common_bits);
       (void)common_bits; /* Used in ESP_LOGI that may be compiled out. */
     }
   }
@@ -378,8 +378,8 @@ void FeatureBitManager::parse_next_step_()
       for (uint16_t i = start; i < end; i++) {
         const auto& desc = common_feature_descriptors[i];
         if (common_bits & desc.bit_mask) {
-          ESP_LOGI(TAG, "  [SET] Common feature: %s (mask 0x%08X, %u ERDs)",
-                   desc.name, desc.bit_mask, desc.erd_count);
+          ESP_LOGI(TAG, "  [SET] Common feature: %s (mask 0x%08lX, %u ERDs)",
+                   desc.name, (unsigned long)desc.bit_mask, desc.erd_count);
           for (uint16_t j = 0; j < desc.erd_count; j++) {
             this->add_valid_erd_(desc.erds[j]);
           }
@@ -424,16 +424,16 @@ void FeatureBitManager::parse_next_step_()
       this->parse_erd_idx_++;
       return;  /* Will process next ERD on next tick */
     }
-    ESP_LOGI(TAG, "Appliance feature ERD %s: type 0x%04X, version %u, features 0x%08X",
-             erd_names[idx], appliance_type, version, feature_bitmap);
+    ESP_LOGI(TAG, "Appliance feature ERD %s: type 0x%04X, version %u, features 0x%08lX",
+             erd_names[idx], appliance_type, version, (unsigned long)feature_bitmap);
     bool found_descriptor = false;
     for (uint16_t i = 0; i < appliance_feature_api_descriptor_count; i++) {
       const auto& desc = appliance_feature_api_descriptors[i];
       if (desc.feature_type != appliance_type || desc.version != version) continue;
       found_descriptor = true;
       if (feature_bitmap & desc.bit_mask) {
-        ESP_LOGI(TAG, "  [SET] %s (mask 0x%08X, %u ERDs)",
-                 desc.name, desc.bit_mask, desc.erd_count);
+        ESP_LOGI(TAG, "  [SET] %s (mask 0x%08lX, %u ERDs)",
+                 desc.name, (unsigned long)desc.bit_mask, desc.erd_count);
         for (uint16_t j = 0; j < desc.erd_count; j++) {
           this->add_valid_erd_(desc.erds[j]);
         }

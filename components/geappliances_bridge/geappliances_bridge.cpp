@@ -219,8 +219,8 @@ void GeappliancesBridge::setup() {
   // device_id_state_ stays IDLE until autodiscovery completes
 
   // The startup HSM handles the boot stabilization delay before autodiscovery.
-  ESP_LOGI(TAG, "Waiting %u seconds before starting autodiscovery...",
-           AUTODISCOVERY_STARTUP_DELAY_MS / 1000);
+  ESP_LOGI(TAG, "Waiting %lu seconds before starting autodiscovery...",
+           (unsigned long)(AUTODISCOVERY_STARTUP_DELAY_MS / 1000));
 
   // Initialize OTA cleanup manager with references to needed bridge state.
   this->ota_cleanup_manager_.init(
@@ -287,7 +287,7 @@ void GeappliancesBridge::loop() {
   tiny_hsm_send_signal(&this->startup_hsm_wrapper_.hsm, signal_run_loop, nullptr);
   uint32_t hsm_elapsed = esphome::millis() - hsm_start;
   if (hsm_elapsed >= 1000) {
-    ESP_LOGW(TAG, "Long HSM run_loop: %ums", hsm_elapsed);
+    ESP_LOGW(TAG, "Long HSM run_loop: %lums", (unsigned long)hsm_elapsed);
   }
 #ifdef USE_ESP32
   // Feed the task watchdog after the HSM run_loop signal — in steady-state
@@ -432,8 +432,8 @@ void GeappliancesBridge::run_protocol_stack_()
   }
   uint32_t loop_elapsed = esphome::millis() - protocol_stack_start;
   if (loop_elapsed >= 1000) {
-    ESP_LOGW(TAG, "Long run_protocol_stack: %ums (mode=%s, polling=%s)",
-             loop_elapsed, this->mode_ == BRIDGE_MODE_SUBSCRIBE ? "sub" : (this->mode_ == BRIDGE_MODE_AUTO ? "auto" : "poll"),
+    ESP_LOGW(TAG, "Long run_protocol_stack: %lums (mode=%s, polling=%s)",
+             (unsigned long)loop_elapsed, this->mode_ == BRIDGE_MODE_SUBSCRIBE ? "sub" : (this->mode_ == BRIDGE_MODE_AUTO ? "auto" : "poll"),
              this->erd_bridge_initialized_ ? "yes" : "no");
   }
 }
@@ -546,7 +546,7 @@ void GeappliancesBridge::dump_config() {
   {
     subscription_state_t sub_state = this->get_subscription_state();
     if (this->mode_ == BRIDGE_MODE_POLL || !subscription_is_active(sub_state)) {
-      ESP_LOGCONFIG(TAG, "  Polling Interval: %u ms", this->polling_interval_ms_);
+      ESP_LOGCONFIG(TAG, "  Polling Interval: %lu ms", (unsigned long)this->polling_interval_ms_);
     }
   }
   ESP_LOGCONFIG(TAG, "  Appliance API Parsing: %s", this->appliance_api_parsing_ ? "enabled" : "disabled");

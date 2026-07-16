@@ -196,8 +196,11 @@ async def to_code(config: dict[str, Any]) -> None:
     """
     # Add library dependencies (pinned to specific commit SHAs to prevent
     # silent breakage from upstream branch movement)
-    cg.add_library("https://github.com/ryanplusplus/tiny#3747b6ff65eec4b38367c3c8fa94e6ed2a1ccf35", None)
-    cg.add_library("https://github.com/geappliances/tiny-gea-api#4fa8fee8297e24baa91bfe4a464088a73e7c6a5a", None)
+    # tiny-gea-api transitively depends on ryanplusplus/tiny (^7.1.3).
+    # Pinning tiny-gea-api to a commit SHA is sufficient — adding tiny
+    # directly creates a duplicate graph node ("ryanplusplus/tiny" vs "tiny")
+    # that triggers a deduplication warning in ESPHome 2026.x.
+    cg.add_library("tiny-gea-api", None, "https://github.com/geappliances/tiny-gea-api#4fa8fee8297e24baa91bfe4a464088a73e7c6a5a")
     
     var = cg.new_Pvariable(config[CONF_ID])
     # Deprecation warning for polling_onlypublish_onchange

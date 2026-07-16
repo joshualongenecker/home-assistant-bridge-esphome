@@ -912,8 +912,8 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
 
                 size_t dst_size = sizeof(self->decomp_buf);
                 if (chunk_decompress(self, src, chunk->size, self->decomp_buf, &dst_size) != 0) {
-                    ESP_LOGE(TAG, "Decompression failed for category '%s' chunk %u (offset %u, size %u)",
-                        cat->name, self->current_chunk, chunk->offset, chunk->size);
+                    ESP_LOGE(TAG, "Decompression failed for category '%s' chunk %u (offset %lu, size %u)",
+                        cat->name, self->current_chunk, (unsigned long)chunk->offset, chunk->size);
                     self->state = ha_discovery_state_failed;
                     return;
                 }
@@ -961,8 +961,8 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
 
                     /* Log category progress periodically. */
                     if (self->total_published % 50 == 0) {
-                        ESP_LOGI(TAG, "Category %s: %u discovered, %u published",
-                            cat->name, self->total_discovered, self->total_published);
+                        ESP_LOGI(TAG, "Category %s: %lu discovered, %lu published",
+                            cat->name, (unsigned long)self->total_discovered, (unsigned long)self->total_published);
                     }
 
                     /* One entity per call — return to main loop. */
@@ -996,8 +996,8 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
 
         size_t free_heap __attribute__((unused)) = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         size_t largest_free __attribute__((unused)) = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-        ESP_LOGI(TAG, "HA discovery complete: %u published, %u filtered",
-            self->total_published, self->total_filtered);
+        ESP_LOGI(TAG, "HA discovery complete: %lu published, %lu filtered",
+            (unsigned long)self->total_published, (unsigned long)self->total_filtered);
         ESP_LOGV(TAG, "Heap after discovery: free=%u, largest_block=%u, fragmentation=%.1f%%",
             (unsigned)free_heap, (unsigned)largest_free,
             (free_heap > 0) ? (1.0 - (double)largest_free / free_heap) * 100.0 : 0.0);
