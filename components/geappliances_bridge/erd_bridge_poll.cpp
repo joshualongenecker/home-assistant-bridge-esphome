@@ -162,8 +162,8 @@ static void send_next_poll_read_request(erd_bridge_poll_t* self)
       }
     }
     if (elapsed >= 500) {
-      ESP_LOGW(TAG, "Slow read request: %ums for ERD 0x%04x (queued=%s)",
-               elapsed, self->erd_polling_list[self->erd_index - 1], queued ? "yes" : "no");
+      ESP_LOGW(TAG, "Slow read request: %lums for ERD 0x%04x (queued=%s)",
+               (unsigned long)elapsed, self->erd_polling_list[self->erd_index - 1], queued ? "yes" : "no");
     }
   }
 }
@@ -222,7 +222,7 @@ static bool send_cycle_reads(erd_bridge_poll_t* self)
   self->cycle_sending_in_progress = false;
   uint32_t elapsed = esphome::millis() - send_start;
   if (elapsed >= 1000) {
-    ESP_LOGW(TAG, "Long cycle send: %ums for %u ERDs", elapsed, self->polling_list_count);
+    ESP_LOGW(TAG, "Long cycle send: %lums for %u ERDs", (unsigned long)elapsed, self->polling_list_count);
   }
   return true;
 }
@@ -307,8 +307,8 @@ static tiny_hsm_result_t state_probe_list(tiny_hsm_t* hsm, tiny_hsm_signal_t sig
     if (self->polling_list_count > 0) {
       clear_discovery_state(self);
     }
-    ESP_LOGI(TAG, "Polling bridge: %u ERDs to verify, interval %u ms",
-        self->probe_list_count, (unsigned)self->polling_interval_ms);
+    ESP_LOGI(TAG, "Polling bridge: %u ERDs to verify, interval %lu ms",
+        self->probe_list_count, (unsigned long)self->polling_interval_ms);
     if (self->probe_list_count > 0) {
       send_next_read_request(self);
     } else {
@@ -349,8 +349,8 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       arm_polling_timer(self, self->polling_interval_ms);
       self->polling_list_complete = true;
       self->current_state = polling_state_polling;
-      ESP_LOGI(TAG, "Entered steady-state polling: %u ERDs, interval %u ms",
-               self->polling_list_count, self->polling_interval_ms);
+      ESP_LOGI(TAG, "Entered steady-state polling: %u ERDs, interval %lu ms",
+               self->polling_list_count, (unsigned long)self->polling_interval_ms);
       // Notify startup HSM that discovery is complete.  Safe to call
       // synchronously from inside the polling HSM's state entry because:
       // 1. The callback sends a signal to the *startup* HSM (a different
