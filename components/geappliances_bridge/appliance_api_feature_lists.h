@@ -213,6 +213,7 @@ extern const tiny_erd_t appliance_api_clothes_washer_v4_mabe_washer_foundation_e
 extern const tiny_erd_t appliance_api_clothes_washer_v4_mabe_washer_diagnostics_erds[];
 extern const tiny_erd_t appliance_api_clothes_washer_v4_commercial_free_mode_erds[];
 extern const tiny_erd_t appliance_api_clothes_washer_v4_remote_pet_hair_removal_option_erds[];
+extern const tiny_erd_t appliance_api_clothes_washer_v4_remote_wash2x_option_erds[];
 extern const tiny_erd_t appliance_api_refrigeration_v1_foundation_erds[];
 extern const tiny_erd_t appliance_api_refrigeration_v1_hot_water_erds[];
 extern const tiny_erd_t appliance_api_refrigeration_v1_single_serve_erds[];
@@ -397,6 +398,7 @@ extern const tiny_erd_t* appliance_api_cooking_v3_ui_misconfiguration_detection_
 extern const tiny_erd_t appliance_api_cooking_v3_enhanced_sabbath_manual_mode_erds[];
 extern const tiny_erd_t appliance_api_cooking_v3_upper_local_available_cook_modes_erds[];
 extern const tiny_erd_t appliance_api_cooking_v3_lower_local_available_cook_modes_erds[];
+extern const tiny_erd_t appliance_api_cooking_v3_enhanced_sabbath_override_settings_erds[];
 extern const tiny_erd_t appliance_api_window_ac_v1_foundation_erds[];
 extern const tiny_erd_t appliance_api_window_ac_v1_demand_response_erds[];
 extern const tiny_erd_t appliance_api_window_ac_v1_energy_reporting_erds[];
