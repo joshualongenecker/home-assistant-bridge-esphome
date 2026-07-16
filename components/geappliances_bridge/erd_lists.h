@@ -13,7 +13,7 @@
 
 // Maximum number of ERDs that can be held in the polling list.
 // Sized for the worst case: common ERDs + energy ERDs + appliance API feature ERDs + largest appliance-specific ERD list.
-#define POLLING_LIST_MAX_SIZE 649
+#define POLLING_LIST_MAX_SIZE 653
 
 // 0x0000 to 0x0FFF: common ERDs (all appliance types)
 extern const tiny_erd_t commonErds[];

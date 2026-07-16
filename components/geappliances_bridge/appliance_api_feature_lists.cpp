@@ -1106,6 +1106,11 @@ const tiny_erd_t appliance_api_clothes_washer_v4_remote_pet_hair_removal_option_
   0x2232,
 };
 
+const tiny_erd_t appliance_api_clothes_washer_v4_remote_wash2x_option_erds[] = {
+  0x205a,
+  0x205b,
+};
+
 const tiny_erd_t appliance_api_refrigeration_v1_foundation_erds[] = {
   0x1004,
   0x1005,
@@ -2307,6 +2312,13 @@ const tiny_erd_t appliance_api_cooking_v3_upper_local_available_cook_modes_erds[
 
 const tiny_erd_t appliance_api_cooking_v3_lower_local_available_cook_modes_erds[] = {
   0x522c,
+};
+
+const tiny_erd_t appliance_api_cooking_v3_enhanced_sabbath_override_settings_erds[] = {
+  0x5034,
+  0x5035,
+  0x5036,
+  0x5037,
 };
 
 const tiny_erd_t appliance_api_window_ac_v1_foundation_erds[] = {
@@ -5791,6 +5803,7 @@ const appliance_feature_api_descriptor_t appliance_feature_api_descriptors[] = {
   {0x0002, 4, 0x00000010, "Clothes Washer / Mabe Washer Diagnostics", appliance_api_clothes_washer_v4_mabe_washer_diagnostics_erds, 6},
   {0x0002, 4, 0x00000020, "Clothes Washer / Commercial Free Mode", appliance_api_clothes_washer_v4_commercial_free_mode_erds, 2},
   {0x0002, 4, 0x00000200, "Clothes Washer / Remote Pet Hair Removal Option", appliance_api_clothes_washer_v4_remote_pet_hair_removal_option_erds, 3},
+  {0x0002, 4, 0x00000800, "Clothes Washer / Remote Wash2x Option", appliance_api_clothes_washer_v4_remote_wash2x_option_erds, 2},
   {0x0003, 1, 0x00000001, "Refrigeration / Foundation", appliance_api_refrigeration_v1_foundation_erds, 31},
   {0x0003, 1, 0x00000002, "Refrigeration / Hot Water", appliance_api_refrigeration_v1_hot_water_erds, 4},
   {0x0003, 1, 0x00000004, "Refrigeration / Single Serve", appliance_api_refrigeration_v1_single_serve_erds, 1},
@@ -5975,6 +5988,7 @@ const appliance_feature_api_descriptor_t appliance_feature_api_descriptors[] = {
   {0x0007, 3, 0x00000002, "Cooking / Enhanced Sabbath Manual Mode", appliance_api_cooking_v3_enhanced_sabbath_manual_mode_erds, 5},
   {0x0007, 3, 0x00000004, "Cooking / Upper Local Available Cook Modes", appliance_api_cooking_v3_upper_local_available_cook_modes_erds, 1},
   {0x0007, 3, 0x00000008, "Cooking / Lower Local Available Cook Modes", appliance_api_cooking_v3_lower_local_available_cook_modes_erds, 1},
+  {0x0007, 3, 0x00000010, "Cooking / Enhanced Sabbath Override Settings", appliance_api_cooking_v3_enhanced_sabbath_override_settings_erds, 4},
   {0x000a, 1, 0x00000001, "Window AC / Foundation", appliance_api_window_ac_v1_foundation_erds, 10},
   {0x000a, 1, 0x00000002, "Window AC / Demand Response", appliance_api_window_ac_v1_demand_response_erds, 2},
   {0x000a, 1, 0x00000004, "Window AC / Energy Reporting", appliance_api_window_ac_v1_energy_reporting_erds, 4},

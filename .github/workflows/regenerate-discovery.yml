@@ -1,4 +1,4 @@
-name: Regenerate Discovery
+name: Regenerate Generated Artifacts
 
 on:
   workflow_dispatch:
@@ -32,6 +32,11 @@ jobs:
       with:
         python-version: '3.x'
 
+    - name: Install test dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        python3 -m pip install pytest jinja2
+
     - name: Validate submodule commit input
       run: |
         if ! [[ "${{ github.event.inputs.submodule_commit }}" =~ ^[0-9a-f]{40}$ ]]; then
@@ -46,13 +51,17 @@ jobs:
         git checkout ${{ github.event.inputs.submodule_commit }}
         cd ../..
 
-    - name: Run pipeline
+    - name: Regenerate ERD and HA discovery artifacts
       run: |
+        python3 scripts/generate_erd_lists.py
         python3 scripts/ha_discovery/run_pipeline.py
 
     - name: Validate generated output
       run: |
-        python -m pytest scripts/test_*.py -v
+        PYTHONPATH="$GITHUB_WORKSPACE" python3 -m pytest -v \
+          scripts/test_compress_ha_discovery.py \
+          scripts/test_ha_discovery.py \
+          scripts/test_pipeline.py
 
     - name: Commit changes to feature branch
       run: |
@@ -62,13 +71,20 @@ jobs:
         BRANCH="regenerate-discovery/${{ github.event.inputs.submodule_commit }}"
         git checkout -b "$BRANCH"
         git add -A
-        git commit -m "regenerate: update discovery from public-appliance-api-documentation ${{ github.event.inputs.submodule_commit }}" || echo "No changes to commit"
+        git commit -m "regenerate: update generated artifacts from public-appliance-api-documentation ${{ github.event.inputs.submodule_commit }}" || echo "No changes to commit"
         git push origin "$BRANCH"
 
     - name: Create or update pull request
       run: |
         BRANCH="regenerate-discovery/${{ github.event.inputs.submodule_commit }}"
-        BODY="Auto-generated PR updating HA discovery files from \`lib/public-appliance-api-documentation\` commit \`${{ github.event.inputs.submodule_commit }}\`."
+        BODY=$(cat <<EOF
+        Auto-generated PR updating generated artifacts from \`lib/public-appliance-api-documentation\` commit \`${{ github.event.inputs.submodule_commit }}\`.
+
+        Regenerated outputs include:
+        - ERD/API feature list files via \`scripts/generate_erd_lists.py\`
+        - HA discovery processed data, JSONL payloads, and compressed header via \`scripts/ha_discovery/run_pipeline.py\`
+        EOF
+        )
 
         # Check if a PR already exists for this branch
         EXISTING_PR=$(gh pr list --head "$BRANCH" --base "${{ github.event.inputs.base_branch }}" --json number --jq '.[0].number')
@@ -80,7 +96,7 @@ jobs:
           gh pr create \
             --base "${{ github.event.inputs.base_branch }}" \
             --head "$BRANCH" \
-            --title "regenerate: update discovery from public-appliance-api-documentation" \
+            --title "regenerate: update generated artifacts from public-appliance-api-documentation" \
             --body "$BODY"
           echo "Created new PR"
         fi
