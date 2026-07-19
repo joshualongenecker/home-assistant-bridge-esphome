@@ -947,12 +947,14 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
                 /* Process the line. */
                 if (process_jsonl_line(self, self->line_buf)) {
                     /* Publish. */
-                    bool sent = false;
-                    if (self->mqtt_client) {
-                        sent = mqtt_client_publish_raw(self->mqtt_client, self->topic_buf,
-                            self->payload_buf, strlen(self->payload_buf), true);
+                    if (!self->mqtt_client) {
+                        /* No MQTT client yet — skip this entity.
+                         * Discovery will be retried later when MQTT connects. */
+                        self->current_offset = (uint32_t)(line_end - decomp) + 1;
+                        return;
                     }
-                    if (!sent) {
+                    if (!mqtt_client_publish_raw(self->mqtt_client, self->topic_buf,
+                        self->payload_buf, strlen(self->payload_buf), true)) {
                         /* Publish dropped (queue full) — don't advance offset
                          * so the entity is retried on the next run() call. */
                         return;
