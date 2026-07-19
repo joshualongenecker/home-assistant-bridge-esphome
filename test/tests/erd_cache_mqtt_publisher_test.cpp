@@ -3,25 +3,28 @@
  * @brief Unit tests for the ERD cache MQTT publisher module.
  */
 
+#include "CppUTest/TestHarness.h"
+
+/* Undef CppUTest's new macro before including any STL headers */
+#ifdef new
+#undef new
+#endif
+
 extern "C" {
 #include "erd_cache.h"
 #include "erd_cache_mqtt_publisher.h"
 }
 
 #include "esphome_mqtt_client_adapter.h"
+#include "double/mqtt_test_double.hpp"
 #include "double/esphome_hal_double.hpp"
-
-#include "CppUTest/TestHarness.h"
-
-/* ------------------------------------------------------------------ */
-/* Test group                                                          */
-/* ------------------------------------------------------------------ */
 
 TEST_GROUP(erd_cache_mqtt_publisher)
 {
   erd_cache_mqtt_publisher_t publisher;
   erd_cache_t cache;
   esphome_mqtt_client_adapter_t adapter;
+  esphome::mqtt::MqttTestDouble mqtt_double;
 
   void setup()
   {
@@ -32,6 +35,8 @@ TEST_GROUP(erd_cache_mqtt_publisher)
     memset(&publisher, 0, sizeof(publisher));
     erd_cache_init(&cache);
     esphome_mqtt_client_adapter_init(&adapter, "test_device");
+    esphome::mqtt::global_mqtt_client = &mqtt_double;
+    mqtt_double.connected_ = true;
   }
 
   void teardown()
@@ -41,6 +46,8 @@ TEST_GROUP(erd_cache_mqtt_publisher)
     }
     erd_cache_destroy(&cache);
     esphome_mqtt_client_adapter_destroy(&adapter);
+    esphome::mqtt::global_mqtt_client = nullptr;
+    mqtt_double.connected_ = false;
   }
 };
 
@@ -58,7 +65,8 @@ TEST(erd_cache_mqtt_publisher, init_sets_cache_pointer)
 
   CHECK(publisher.cache != nullptr);
   CHECK_EQUAL(0u, publisher.publish_index);
-  CHECK(!publisher.mqtt_connected);  // Initially disconnected; set via on_connected
+  erd_cache_mqtt_publisher_on_disconnected(&publisher); // double starts connected in setup
+  CHECK(!publisher.mqtt_connected);
   CHECK_EQUAL(0u, publisher.total_published);
   CHECK_EQUAL(0u, publisher.missed_loops);
   CHECK(strncmp(publisher.device_id, "my_device", 8) == 0);
@@ -71,8 +79,8 @@ TEST(erd_cache_mqtt_publisher, init_sets_mqtt_connected_false)
     &cache,
     &adapter.interface,
     "device");
-
-  CHECK(!publisher.mqtt_connected);  // Starts disconnected; on_connected sets true
+  erd_cache_mqtt_publisher_on_disconnected(&publisher); // double starts connected in setup
+  CHECK(!publisher.mqtt_connected);
 }
 
 TEST(erd_cache_mqtt_publisher, destroy_unsubscribes_events)
@@ -288,7 +296,8 @@ TEST(erd_cache_mqtt_publisher, on_disconnected_sets_flag)
     &cache,
     &adapter.interface,
     "device");
-  // Initially disconnected by default
+  // Double starts connected in setup; disconnect to test the flag
+  erd_cache_mqtt_publisher_on_disconnected(&publisher);
   CHECK(!publisher.mqtt_connected);
 
   // Disconnect, then reconnect
@@ -305,8 +314,8 @@ TEST(erd_cache_mqtt_publisher, on_disconnected_then_connected_toggles_flag)
     &cache,
     &adapter.interface,
     "device");
-
-  // Initially disconnected by default
+  // Double starts connected in setup; disconnect to test the flag
+  erd_cache_mqtt_publisher_on_disconnected(&publisher);
   CHECK(!publisher.mqtt_connected);
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
   CHECK(!publisher.mqtt_connected);

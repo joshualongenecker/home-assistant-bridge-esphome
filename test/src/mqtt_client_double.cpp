@@ -92,7 +92,7 @@ void mqtt_client_double_trigger_mqtt_connect(
   tiny_event_publish(&self->on_mqtt_connect, nullptr);
 }
 
-void mqtt_client_double_publish_raw(
+bool mqtt_client_double_publish_raw(
   i_mqtt_client_t* _self,
   const char* topic,
   const char* payload,
@@ -106,4 +106,5 @@ void mqtt_client_double_publish_raw(
     .withParameterOfType("const char*", "payload", payload)
     .withParameter("payload_len", payload_len)
     .withParameter("retain", retain);
+  return true;
 }

@@ -71,8 +71,9 @@ void esphome_mqtt_client_adapter_destroy(
 /*!
  * Publish raw MQTT message (C-string topic and payload).
  * Implements the i_mqtt_client_t publish_raw vtable slot.
+ * Returns true if the message was sent or queued, false if it was dropped.
  */
-void esphome_mqtt_client_adapter_publish_raw(
+bool esphome_mqtt_client_adapter_publish_raw(
   i_mqtt_client_t* self,
   const char* topic,
   const char* payload,

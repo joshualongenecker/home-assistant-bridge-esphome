@@ -199,7 +199,7 @@ extern "C" void esphome_mqtt_client_adapter_destroy(
   self->write_topic_[0] = '\0';
   self->device_id = nullptr;
 }
-extern "C" void esphome_mqtt_client_adapter_publish_raw(
+extern "C" bool esphome_mqtt_client_adapter_publish_raw(
   i_mqtt_client_t* _self,
   const char* topic,
   const char* payload,
@@ -209,8 +209,9 @@ extern "C" void esphome_mqtt_client_adapter_publish_raw(
   (void)_self;
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
   if (mqtt_client != nullptr && mqtt_client->is_connected()) {
-    mqtt_client->publish(topic, payload, payload_len, 0, retain);
+    return mqtt_client->publish(topic, payload, payload_len, 0, retain);
   }
+  return false;
 }
 
 extern "C" void esphome_mqtt_client_adapter_subscribe(

@@ -47,8 +47,9 @@ void mqtt_client_double_trigger_mqtt_connect(
 
 /*!
  * Implement the publish_raw vtable slot for the test double.
+ * Returns true (simulates successful publish).
  */
-void mqtt_client_double_publish_raw(
+bool mqtt_client_double_publish_raw(
   i_mqtt_client_t* self,
   const char* topic,
   const char* payload,

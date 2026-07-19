@@ -85,7 +85,7 @@ static void mqtt_publisher_task(void* arg)
         self->task_hex[data_len * 2] = '\0';
 
         uint32_t t_publish = self->get_time_ms();
-        mqtt_client_publish_raw(self->mqtt_client, self->task_topic,
+        bool sent = mqtt_client_publish_raw(self->mqtt_client, self->task_topic,
             self->task_hex, data_len * 2, true);
         uint32_t elapsed = self->get_time_ms() - t_publish;
 
@@ -93,9 +93,15 @@ static void mqtt_publisher_task(void* arg)
           ESP_LOGW(PUBLISHER_TAG, "Slow publish: %lums for ERD 0x%04x", (unsigned long)elapsed, entry->erd);
         }
 
-        erd_cache_mark_published(self->cache, entry);
-        self->total_published++;
-        self->publish_count_window++;
+        if (sent) {
+          erd_cache_mark_published(self->cache, entry);
+          self->total_published++;
+          self->publish_count_window++;
+        } else {
+          /* Publish dropped (queue full or not connected) — re-set
+           * update_required so the entry is picked up on the next wake. */
+          erd_cache_mark_unpublished(self->cache, entry);
+        }
       } else if (topic_len >= (int)sizeof(self->task_topic)) {
         ESP_LOGW(PUBLISHER_TAG, "MQTT topic truncated (device_id too long: %s)", self->device_id);
       }
@@ -314,16 +320,20 @@ bool erd_cache_mqtt_publisher_loop(erd_cache_mqtt_publisher_t* self)
   hex[data_len * 2] = '\0';
 
   uint32_t t_publish = self->get_time_ms();
-  mqtt_client_publish_raw(self->mqtt_client, topic, hex, data_len * 2, true);
+  bool sent = mqtt_client_publish_raw(self->mqtt_client, topic, hex, data_len * 2, true);
   uint32_t elapsed = self->get_time_ms() - t_publish;
 
   if (elapsed >= 1000) {
     ESP_LOGW(PUBLISHER_TAG, "Slow publish: %lums for ERD 0x%04x", (unsigned long)elapsed, entry->erd);
   }
 
-  erd_cache_mark_published(self->cache, entry);
-  self->total_published++;
-  self->publish_count_window++;
+  if (sent) {
+    erd_cache_mark_published(self->cache, entry);
+    self->total_published++;
+    self->publish_count_window++;
+  } else {
+    erd_cache_mark_unpublished(self->cache, entry);
+  }
 
   return true;
 }

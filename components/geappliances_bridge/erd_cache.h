@@ -78,6 +78,19 @@ static inline void erd_cache_mark_published(erd_cache_t* self, erd_cache_entry_t
   entry->publish_cooldown = self->max_cooldown;
 }
 
+/* Mark an ERD entry as NOT published (publish failed or was dropped).
+ * Re-sets update_required so the entry is picked up on the next iteration.
+ * Call when mqtt_client_publish_raw() returns false.
+ * Static inline — trivial operation, no locking needed (same thread that
+ * cleared update_required via erd_cache_get_next_updated() is the only
+ * caller). */
+static inline void erd_cache_mark_unpublished(erd_cache_t* self, erd_cache_entry_t* entry) {
+  (void)self;
+  if (entry != NULL) {
+    entry->update_required = true;
+  }
+}
+
 /* Decrement publish_cooldown for all entries with update_required=true.
  * Call once per second. Static inline — zero overhead when max_cooldown is 0.
  *

@@ -52,7 +52,7 @@ typedef struct i_mqtt_client_api_t {
 
   i_tiny_event_t* (*on_mqtt_connect)(i_mqtt_client_t* self);
 
-  void (*publish_raw)(i_mqtt_client_t* self, const char* topic, const char* payload, size_t payload_len, bool retain);
+  bool (*publish_raw)(i_mqtt_client_t* self, const char* topic, const char* payload, size_t payload_len, bool retain);
 
   void (*subscribe)(i_mqtt_client_t* self, const char* topic, void (*callback)(const char* topic, const char* payload, size_t payload_len, void* arg), void* arg);
 
@@ -95,10 +95,11 @@ static inline i_tiny_event_t* mqtt_client_on_mqtt_connect(i_mqtt_client_t* self)
 
 /*!
  * Publish a raw MQTT message (C-string topic and payload).
+ * Returns true if the message was sent or queued, false if it was dropped.
  */
-static inline void mqtt_client_publish_raw(i_mqtt_client_t* self, const char* topic, const char* payload, size_t payload_len, bool retain)
+static inline bool mqtt_client_publish_raw(i_mqtt_client_t* self, const char* topic, const char* payload, size_t payload_len, bool retain)
 {
-  self->api->publish_raw(self, topic, payload, payload_len, retain);
+  return self->api->publish_raw(self, topic, payload, payload_len, retain);
 }
 
 /*!
