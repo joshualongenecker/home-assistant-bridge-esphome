@@ -201,6 +201,17 @@ async def to_code(config: dict[str, Any]) -> None:
     # directly creates a duplicate graph node ("ryanplusplus/tiny" vs "tiny")
     # that triggers a deduplication warning in ESPHome 2026.x.
     cg.add_library("tiny-gea-api", None, "https://github.com/geappliances/tiny-gea-api#4fa8fee8297e24baa91bfe4a464088a73e7c6a5a")
+    # Force async MQTT sends on ESP32 to prevent TWDT crashes.
+    # ESPHome defaults idf_send_async to False for ESP32, which means
+    # esp_mqtt_client_publish() is synchronous and can block for seconds
+    # (network timeout, send buffer full, message fragmentation).
+    # On single-core ESP32 variants (C3, C6, S3), a blocking publish from
+    # the background mqtt_publisher_task stalls the MQTT library's internal
+    # state machine, preventing the main task from running and feeding the
+    # Task Watchdog Timer — resulting in a TWDT reset.
+    # The enqueue path (USE_MQTT_IDF_ENQUEUE) uses a lock-free queue and a
+    # dedicated background task to drain publishes, making publish() non-blocking.
+    cg.add_define("USE_MQTT_IDF_ENQUEUE")
     
     var = cg.new_Pvariable(config[CONF_ID])
     # Deprecation warning for polling_onlypublish_onchange
