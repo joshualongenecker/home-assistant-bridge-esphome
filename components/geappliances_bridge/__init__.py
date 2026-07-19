@@ -8,7 +8,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import button, sensor, uart
 from esphome.const import CONF_ID, CONF_STATE_CLASS
-from esphome.core import EnumValue, ID
+from esphome.core import CORE, EnumValue, ID
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -211,7 +211,8 @@ async def to_code(config: dict[str, Any]) -> None:
     # Task Watchdog Timer — resulting in a TWDT reset.
     # The enqueue path (USE_MQTT_IDF_ENQUEUE) uses a lock-free queue and a
     # dedicated background task to drain publishes, making publish() non-blocking.
-    cg.add_define("USE_MQTT_IDF_ENQUEUE")
+    if CORE.is_esp32:
+        cg.add_define("USE_MQTT_IDF_ENQUEUE")
     
     var = cg.new_Pvariable(config[CONF_ID])
     # Deprecation warning for polling_onlypublish_onchange
