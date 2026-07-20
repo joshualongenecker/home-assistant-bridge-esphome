@@ -416,16 +416,17 @@ void AutodiscoveryManager::run()
                                      GEA_BROADCAST_ADDRESS, ERD_APPLIANCE_TYPE)) {
         ESP_LOGI(TAG, "Sent GEA3 broadcast (ERD 0x%04X) to address 0x%02X",
                  ERD_APPLIANCE_TYPE, GEA_BROADCAST_ADDRESS);
-        // Start the broadcast window timer.
-        tiny_timer_start(this->timer_group_,
-                         &this->broadcast_window_timer_,
-                         AUTODISCOVERY_BROADCAST_WINDOW_MS,
-                         this,
-                         AutodiscoveryManager::timer_callback_);
-        this->state_ = AUTODISCOVERY_GEA3_BROADCAST_WAITING;
       } else {
-        ESP_LOGD(TAG, "Broadcast read failed (queue full), retrying next loop iteration");
+        ESP_LOGW(TAG, "GEA3 broadcast read failed (queue full), will retry after timeout");
       }
+      // Always start the timer and transition to WAITING so the state
+      // machine keeps moving even if the broadcast couldn't be queued.
+      tiny_timer_start(this->timer_group_,
+                       &this->broadcast_window_timer_,
+                       AUTODISCOVERY_BROADCAST_WINDOW_MS,
+                       this,
+                       AutodiscoveryManager::timer_callback_);
+      this->state_ = AUTODISCOVERY_GEA3_BROADCAST_WAITING;
       break;
     }
 
@@ -440,15 +441,17 @@ void AutodiscoveryManager::run()
                                      GEA_BROADCAST_ADDRESS, ERD_APPLIANCE_TYPE)) {
         ESP_LOGI(TAG, "Sent GEA2 broadcast (ERD 0x%04X) to address 0x%02X",
                  ERD_APPLIANCE_TYPE, GEA_BROADCAST_ADDRESS);
-        tiny_timer_start(this->timer_group_,
-                         &this->broadcast_window_timer_,
-                         AUTODISCOVERY_BROADCAST_WINDOW_MS,
-                         this,
-                         AutodiscoveryManager::timer_callback_);
-        this->state_ = AUTODISCOVERY_GEA2_BROADCAST_WAITING;
       } else {
-        ESP_LOGD(TAG, "Broadcast read failed (queue full), retrying next loop iteration");
+        ESP_LOGW(TAG, "GEA2 broadcast read failed (queue full), will retry after timeout");
       }
+      // Always start the timer and transition to WAITING so the state
+      // machine keeps moving even if the broadcast couldn't be queued.
+      tiny_timer_start(this->timer_group_,
+                       &this->broadcast_window_timer_,
+                       AUTODISCOVERY_BROADCAST_WINDOW_MS,
+                       this,
+                       AutodiscoveryManager::timer_callback_);
+      this->state_ = AUTODISCOVERY_GEA2_BROADCAST_WAITING;
       break;
     }
 
