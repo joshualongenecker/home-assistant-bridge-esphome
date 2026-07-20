@@ -78,6 +78,12 @@ void AutodiscoveryManager::init(tiny_timer_group_t* timer_group,
 
 void AutodiscoveryManager::cleanup()
 {
+  // Stop the broadcast window timer first to prevent the callback from
+  // firing while we unsubscribe and nullify pointers.
+  if (this->timer_group_ != nullptr) {
+    tiny_timer_stop(this->timer_group_, &this->broadcast_window_timer_);
+  }
+
   // Unsubscribe from UART byte-level receive events.
   if (this->has_gea3_uart_ && this->gea3_uart_adapter_ != nullptr) {
     tiny_event_unsubscribe(
@@ -89,12 +95,6 @@ void AutodiscoveryManager::cleanup()
     tiny_event_unsubscribe(
       &this->gea2_uart_adapter_->receive_event.interface,
       &this->gea2_byte_subscription_);
-  }
-
-
-  // Stop the broadcast window timer.
-  if (this->timer_group_ != nullptr) {
-    tiny_timer_stop(this->timer_group_, &this->broadcast_window_timer_);
   }
 
   // Reset state so a subsequent init() starts fresh.
@@ -118,6 +118,9 @@ void AutodiscoveryManager::start()
 {
   if (this->state_ != AUTODISCOVERY_IDLE) {
     return;  // idempotent: already running or complete
+  }
+  if (!this->has_gea3_uart_ && !this->has_gea2_uart_) {
+    return;  // nothing to do after cleanup()
   }
 
   ESP_LOGI(TAG, "Starting autodiscovery");
@@ -198,11 +201,11 @@ void AutodiscoveryManager::process_byte_(uint8_t byte, bool is_gea3)
   if (is_gea3 && !gea3_waiting) return;
   if (!is_gea3 && !gea2_waiting) return;
 
-  // Handle escape sequences
+  // Handle escape sequences.
+  // The GEA protocol sends 0xE0 followed by the raw byte for control characters.
+  // On receive, the escaped byte is passed through as-is (no transformation).
   if (rx->escaped) {
     rx->escaped = false;
-    // Inverse the escape: XOR with 0x20
-    byte ^= 0x20;
     goto buffer_byte;
   }
 
@@ -218,17 +221,21 @@ void AutodiscoveryManager::process_byte_(uint8_t byte, bool is_gea3)
       return;
 
     case tiny_gea_etx: {
+      // Guard: ETX without preceding STX is not a valid packet.
+      if (!rx->stx_received) {
+        return;
+      }
       rx->stx_received = false;
+      rx->escaped = false;
+
       // Validate CRC
       if (rx->crc != 0) {
         rx->count = 0;
         return;
       }
 
-      // We have a complete packet in rx->buffer[0..rx->count-1]
-      // Packet format: destination(1), payload_length(1), source(1), payload(N)
-      // payload_length includes destination + payload_length + source + payload
-      if (rx->count < 5) {  // minimum: dst + len + src + 1 byte payload
+      // Minimum: dst(1) + len(1) + src(1) + payload(1) + CRC(2) = 6
+      if (rx->count < 6) {
         rx->count = 0;
         return;
       }
@@ -236,7 +243,12 @@ void AutodiscoveryManager::process_byte_(uint8_t byte, bool is_gea3)
       uint8_t destination = rx->buffer[0];
       uint8_t payload_length_on_wire = rx->buffer[1];
       uint8_t source = rx->buffer[2];
-      // payload starts at buffer[3]
+
+      // Guard against payload_length_on_wire underflow.
+      if (payload_length_on_wire < tiny_gea_packet_transmission_overhead) {
+        rx->count = 0;
+        return;
+      }
       uint8_t app_payload_len = payload_length_on_wire - tiny_gea_packet_transmission_overhead;
 
       // Only interested in packets addressed to us or broadcast
