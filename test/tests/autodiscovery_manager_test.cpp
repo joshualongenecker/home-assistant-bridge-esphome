@@ -133,7 +133,7 @@ TEST_GROUP(autodiscovery_manager)
    * For GEA3: payload = A1 cmd | request_id | result | erd(2) | data_size | data
    * For GEA2: payload = F0 cmd | erd_count | erd(2) | data_size | data
    */
-  void simulate_broadcast_response(uint8_t address, uint8_t appliance_type, bool is_gea3)
+  void simulate_broadcast_response(uint8_t address, uint8_t appliance_type, bool is_gea3, uint8_t destination = 0xE4)
   {
     // Build the application payload
     uint8_t payload[16];
@@ -164,7 +164,7 @@ TEST_GROUP(autodiscovery_manager)
     // destination | payload_length_on_wire | source | payload
     uint8_t frame[256];
     int frame_idx = 0;
-    frame[frame_idx++] = 0xE4;  // destination (bridge address)
+    frame[frame_idx++] = destination;  // destination (bridge address)
     int payload_length_on_wire = tiny_gea_packet_transmission_overhead + payload_len;
     frame[frame_idx++] = payload_length_on_wire;
     frame[frame_idx++] = address;  // source (board address)
@@ -433,4 +433,62 @@ TEST(autodiscovery_manager, is_gea2_protocol_true_for_gea2_discovery)
   advance_timers();
 
   CHECK_TRUE(manager.is_gea2_protocol());
+}
+
+/* ------------------------------------------------------------------ */
+/* Non-default client address regression tests                         */
+/* ------------------------------------------------------------------ */
+
+TEST(autodiscovery_manager, non_default_client_address_accepts_response)
+{
+  // Regression test: when adapter_address is configured to a non-default
+  // value (e.g. 0xE5), discovery responses addressed to that value must
+  // be accepted. Previously, the destination filter hardcoded 0xE4.
+  manager.init(&timer_group,
+               &gea3_client.interface,
+               &gea2_client.interface,
+               &gea2_adapter.interface,
+               nullptr, nullptr,
+               true, true,
+               0xE5,     /* client_address — non-default */
+               [this]() { callback_called = true; });
+
+  expect_gea3_broadcast_read();
+  manager.start();
+
+  // Response addressed to 0xE5 (our configured address) — must be accepted.
+  simulate_broadcast_response(0xB8, 0x03, true, 0xE5);
+  esphome_hal_double_set_millis(AUTODISCOVERY_BROADCAST_WINDOW_MS + 100);
+  advance_timers();
+
+  CHECK_EQUAL(AUTODISCOVERY_COMPLETE, manager.get_state());
+  CHECK_EQUAL(0xB8, manager.get_host_address());
+  CHECK_TRUE(callback_called);
+}
+
+TEST(autodiscovery_manager, non_default_client_address_rejects_wrong_destination)
+{
+  // Negative test: a response addressed to a different client address
+  // must be silently ignored.
+  manager.init(&timer_group,
+               &gea3_client.interface,
+               &gea2_client.interface,
+               &gea2_adapter.interface,
+               nullptr, nullptr,
+               true, true,
+               0xE5,     /* client_address */
+               [this]() { callback_called = true; });
+
+  expect_gea3_broadcast_read();
+  manager.start();
+  expect_gea2_broadcast_read();  // GEA2 fallback after GEA3 timeout
+
+  // Response addressed to 0xE4 (not us) — must be ignored.
+  simulate_broadcast_response(0xB8, 0x03, true, 0xE4);
+  esphome_hal_double_set_millis(AUTODISCOVERY_BROADCAST_WINDOW_MS + 100);
+  advance_timers();
+
+  // Discovery should have timed out (no valid response received).
+  CHECK(manager.get_state() != AUTODISCOVERY_COMPLETE);
+  CHECK_FALSE(callback_called);
 }
