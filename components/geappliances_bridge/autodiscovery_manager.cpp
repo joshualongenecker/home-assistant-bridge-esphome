@@ -300,7 +300,7 @@ void AutodiscoveryManager::process_byte_(uint8_t byte, bool is_gea3)
         uint8_t appliance_type = rx->buffer[9];
         this->on_broadcast_response(source, appliance_type, true);
       } else {
-        // GEA2: read response command is 0xF0
+        // GEA2: read response command is 0xF0, same value as read request per spec.
         if (command != tiny_gea2_erd_api_command_read_response) {
           rx->count = 0;
           return;
@@ -342,6 +342,9 @@ buffer_byte:
       if (rx->count < sizeof(rx->buffer)) {
         rx->buffer[rx->count++] = byte;
         rx->crc = tiny_crc16_byte(rx->crc, byte);
+      } else {
+        ESP_LOGW(TAG, "Discovery packet buffer overflow (count=%u), dropping byte",
+                 (unsigned)rx->count);
       }
       return;
   }
