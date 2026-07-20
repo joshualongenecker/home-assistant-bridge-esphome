@@ -50,7 +50,7 @@ void AutodiscoveryManager::init(tiny_timer_group_t* timer_group,
   this->gea3_rx_              = discover_rx_t{};
   this->gea2_rx_              = discover_rx_t{};
 
-  // Subscribe to UART byte-level receive events (primary path).
+  // Subscribe to UART byte-level receive events.
   // Each byte is fed into our own packet assembler, independent of
   // the GEA interface. This ensures we see ALL packets even when
   // the interface's single-packet buffer drops bytes.
@@ -74,31 +74,6 @@ void AutodiscoveryManager::init(tiny_timer_group_t* timer_group,
       &this->gea2_byte_subscription_);
   }
 
-  // Subscribe to ERD client activity events as fallback.
-  // These still work when there's no broadcast contention (single board).
-  if (this->has_gea3_uart_ && this->gea3_erd_client_ != nullptr) {
-    tiny_event_subscription_init(
-      &this->gea3_activity_subscription_,
-      this,
-      +[](void* ctx, const void* args) {
-        reinterpret_cast<AutodiscoveryManager*>(ctx)->on_gea3_activity_(args);
-      });
-    tiny_event_subscribe(
-      tiny_gea3_erd_client_on_activity(this->gea3_erd_client_),
-      &this->gea3_activity_subscription_);
-  }
-
-  if (this->has_gea2_uart_ && this->gea2_adapter_client_ != nullptr) {
-    tiny_event_subscription_init(
-      &this->gea2_activity_subscription_,
-      this,
-      +[](void* ctx, const void* args) {
-        reinterpret_cast<AutodiscoveryManager*>(ctx)->on_gea2_activity_(args);
-      });
-    tiny_event_subscribe(
-      tiny_gea3_erd_client_on_activity(this->gea2_adapter_client_),
-      &this->gea2_activity_subscription_);
-  }
 }
 
 void AutodiscoveryManager::cleanup()
@@ -116,19 +91,6 @@ void AutodiscoveryManager::cleanup()
       &this->gea2_byte_subscription_);
   }
 
-  // Unsubscribe from GEA3 ERD client activity events.
-  if (this->has_gea3_uart_ && this->gea3_erd_client_ != nullptr) {
-    tiny_event_unsubscribe(
-      tiny_gea3_erd_client_on_activity(this->gea3_erd_client_),
-      &this->gea3_activity_subscription_);
-  }
-
-  // Unsubscribe from GEA2 adapter ERD client activity events.
-  if (this->has_gea2_uart_ && this->gea2_adapter_client_ != nullptr) {
-    tiny_event_unsubscribe(
-      tiny_gea3_erd_client_on_activity(this->gea2_adapter_client_),
-      &this->gea2_activity_subscription_);
-  }
 
   // Stop the broadcast window timer.
   if (this->timer_group_ != nullptr) {
@@ -198,44 +160,9 @@ void AutodiscoveryManager::timer_callback_(void* context)
   }
 }
 
-void AutodiscoveryManager::on_gea3_activity_(const void* args)
-{
-  const tiny_gea3_erd_client_on_activity_args_t* a =
-    reinterpret_cast<const tiny_gea3_erd_client_on_activity_args_t*>(args);
-
-  // We only care about read_completed during a GEA3 discovery window.
-  if (a->type != tiny_gea3_erd_client_activity_type_read_completed) return;
-  if (a->read_completed.erd != ERD_APPLIANCE_TYPE)                   return;
-  if (a->read_completed.data_size < 1)                              return;
-  if (this->active_erd_client_ != nullptr)                          return;  // single response wins
-
-  uint8_t app_type = reinterpret_cast<const uint8_t*>(a->read_completed.data)[0];
-
-  if (this->state_ == AUTODISCOVERY_GEA3_BROADCAST_WAITING) {
-    this->on_broadcast_response(a->address, app_type, true);
-  }
-}
-
-void AutodiscoveryManager::on_gea2_activity_(const void* args)
-{
-  const tiny_gea3_erd_client_on_activity_args_t* a =
-    reinterpret_cast<const tiny_gea3_erd_client_on_activity_args_t*>(args);
-
-  // We only care about read_completed during a GEA2 discovery window.
-  if (a->type != tiny_gea3_erd_client_activity_type_read_completed) return;
-  if (a->read_completed.erd != ERD_APPLIANCE_TYPE)                   return;
-  if (a->read_completed.data_size < 1)                              return;
-  if (this->active_erd_client_ != nullptr)                          return;  // single response wins
-
-  uint8_t app_type = reinterpret_cast<const uint8_t*>(a->read_completed.data)[0];
-
-  if (this->state_ == AUTODISCOVERY_GEA2_BROADCAST_WAITING) {
-    this->on_broadcast_response(a->address, app_type, false);
-  }
-}
 
 // =============================================================================
-// UART byte-level receive callbacks (primary discovery path)
+// UART byte-level receive callbacks
 //
 // Each byte from the UART is fed into our own packet assembler,
 // completely independent of the GEA interface. This ensures we see

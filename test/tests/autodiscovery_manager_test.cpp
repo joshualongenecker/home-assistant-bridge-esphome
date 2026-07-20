@@ -3,7 +3,7 @@
  * @brief Unit tests for the AutodiscoveryManager class.
  *
  * Validates initialization, self-driving state machine transitions,
- * broadcast handling via event subscriptions, retry logic, and
+ * broadcast handling via byte-level UART subscription, retry logic, and
  * completion behavior.
  */
 
@@ -21,6 +21,11 @@
 #include "double/tiny_gea3_erd_client_double.hpp"
 #include "double/tiny_gea2_erd_client_double.hpp"
 #include "tiny_timer.h"
+#include "tiny_crc16.h"
+#include "tiny_gea_constants.h"
+#include "tiny_gea_packet.h"
+#include "tiny_gea3_erd_api.h"
+#include "tiny_gea2_erd_api.h"
 
 #include "geappliances_bridge_constants.h"
 
@@ -115,24 +120,72 @@ TEST_GROUP(autodiscovery_manager)
       .andReturnValue(true);
   }
 
-  /* Simulate a broadcast response by triggering the ERD client activity event. */
+  /*
+   * Simulate a broadcast response by feeding raw GEA packet bytes
+   * through the manager's byte-level packet assembler.
+   *
+   * Constructs a valid GEA frame:
+   *   STX | destination | payload_length | source | payload | CRC(2) | ETX
+   *
+   * For GEA3: payload = A1 cmd | request_id | result | erd(2) | data_size | data
+   * For GEA2: payload = F0 cmd | erd_count | erd(2) | data_size | data
+   */
   void simulate_broadcast_response(uint8_t address, uint8_t appliance_type, bool is_gea3)
   {
-    tiny_gea3_erd_client_on_activity_args_t args;
-    args.type = tiny_gea3_erd_client_activity_type_read_completed;
-    args.address = address;
-    args.read_completed.request_id = 0;
-    args.read_completed.erd = ERD_APPLIANCE_TYPE;
-    uint8_t data[1] = { appliance_type };
-    args.read_completed.data = data;
-    args.read_completed.data_size = 1;
+    // Build the application payload
+    uint8_t payload[16];
+    int payload_len;
 
-    // Use the double's trigger function to publish to the correct client.
     if (is_gea3) {
-      tiny_gea3_erd_client_double_trigger_activity_event(&gea3_client, &args);
+      // GEA3 read response: cmd | request_id | result | erd(2) | data_size | data
+      payload[0] = tiny_gea3_erd_api_command_read_response;
+      payload[1] = 0;  // request_id
+      payload[2] = tiny_gea3_erd_api_read_result_success;
+      payload[3] = (ERD_APPLIANCE_TYPE >> 8) & 0xFF;
+      payload[4] = ERD_APPLIANCE_TYPE & 0xFF;
+      payload[5] = 1;  // data_size
+      payload[6] = appliance_type;
+      payload_len = 7;
     } else {
-      tiny_gea3_erd_client_double_trigger_activity_event(&gea2_adapter, &args);
+      // GEA2 read response: cmd | erd_count | erd(2) | data_size | data
+      payload[0] = tiny_gea2_erd_api_command_read_response;
+      payload[1] = 1;  // erd_count
+      payload[2] = (ERD_APPLIANCE_TYPE >> 8) & 0xFF;
+      payload[3] = ERD_APPLIANCE_TYPE & 0xFF;
+      payload[4] = 1;  // data_size
+      payload[5] = appliance_type;
+      payload_len = 6;
     }
+
+    // Build the GEA frame (without STX/ETX/CRC)
+    // destination | payload_length_on_wire | source | payload
+    uint8_t frame[256];
+    int frame_idx = 0;
+    frame[frame_idx++] = 0xE4;  // destination (bridge address)
+    int payload_length_on_wire = tiny_gea_packet_transmission_overhead + payload_len;
+    frame[frame_idx++] = payload_length_on_wire;
+    frame[frame_idx++] = address;  // source (board address)
+    for (int i = 0; i < payload_len; i++) {
+      frame[frame_idx++] = payload[i];
+    }
+    int frame_len = frame_idx;
+
+    // Compute CRC over the frame bytes, then include CRC bytes themselves
+    // so that the running CRC ends at 0 (matching receiver behavior).
+    uint16_t crc = tiny_gea_crc_seed;
+    for (int i = 0; i < frame_len; i++) {
+      crc = tiny_crc16_byte(crc, frame[i]);
+    }
+
+    // Feed bytes through the manager: STX, frame bytes, CRC(2), ETX
+    // CRC is transmitted MSB first, then LSB (matching GEA protocol).
+    manager.feed_byte(tiny_gea_stx, is_gea3);
+    for (int i = 0; i < frame_len; i++) {
+      manager.feed_byte(frame[i], is_gea3);
+    }
+    manager.feed_byte((crc >> 8) & 0xFF, is_gea3); // CRC MSB
+    manager.feed_byte(crc & 0xFF, is_gea3);       // CRC LSB
+    manager.feed_byte(tiny_gea_etx, is_gea3);
   }
 
   /* Advance timers by running the timer group (services expired timers). */
@@ -191,7 +244,7 @@ TEST(autodiscovery_manager, start_is_idempotent)
   manager.start();
   CHECK_EQUAL(AUTODISCOVERY_GEA3_BROADCAST_WAITING, manager.get_state());
 
-  // Second call should be a no-op.
+  // Calling start() again should be a no-op (state is not IDLE).
   manager.start();
   CHECK_EQUAL(AUTODISCOVERY_GEA3_BROADCAST_WAITING, manager.get_state());
 }
@@ -206,7 +259,7 @@ TEST(autodiscovery_manager, gea3_discovery_completes_on_broadcast_response)
   expect_gea3_broadcast_read();
   manager.start();  /* -> GEA3_BROADCAST_WAITING */
 
-  // Simulate a broadcast response arriving via the event subscription.
+  // Simulate a broadcast response arriving via byte-level UART.
   simulate_broadcast_response(0xB8, 0x03, true);
 
   // Advance timers to trigger the broadcast window expiry.

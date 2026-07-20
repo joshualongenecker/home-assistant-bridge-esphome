@@ -92,21 +92,20 @@ class AutodiscoveryManager {
   bool     is_gea2_protocol()       const { return gea2_protocol_active_; }
   AutodiscoveryState get_state()    const { return state_; }
 
+  /// Feed a raw UART byte for discovery packet assembly.
+  /// Used by UART receive callbacks and tests.
+  void feed_byte(uint8_t byte, bool is_gea3) { process_byte_(byte, is_gea3); }
+
  private:
   /// Drive the state machine forward (called from timer callbacks).
   void run();
 
-  /// Called from the ERD client activity subscription callback (fallback).
+  /// Handle a valid broadcast response from either the UART byte parser.
   void on_broadcast_response(uint8_t address, uint8_t appliance_type, bool is_gea3);
 
   /// Timer callback wrapper (static for tiny_timer API).
   static void timer_callback_(void* context);
 
-  /// Called from the GEA3 ERD client activity subscription callback (fallback).
-  void on_gea3_activity_(const void* args);
-
-  /// Called from the GEA2 adapter activity subscription callback (fallback).
-  void on_gea2_activity_(const void* args);
 
   /// Called from the GEA3 UART adapter byte-level receive subscription.
   static void on_gea3_byte_(void* context, const void* args);
@@ -115,7 +114,6 @@ class AutodiscoveryManager {
   static void on_gea2_byte_(void* context, const void* args);
 
   /// Process a received byte for discovery packet assembly.
-  /// Returns true if a valid success response was completed.
   void process_byte_(uint8_t byte, bool is_gea3);
 
   /// Determine which broadcast to attempt next and transition.
@@ -152,10 +150,7 @@ class AutodiscoveryManager {
   discover_rx_t gea3_rx_{};
   discover_rx_t gea2_rx_{};
 
-  // Event subscriptions for ERD client activity (kept as fallback)
-  tiny_event_subscription_t gea3_activity_subscription_;
-  tiny_event_subscription_t gea2_activity_subscription_;
-  // Event subscriptions for UART byte-level receive (primary path)
+  // Event subscriptions for UART byte-level receive
   tiny_event_subscription_t gea3_byte_subscription_;
   tiny_event_subscription_t gea2_byte_subscription_;
 };
