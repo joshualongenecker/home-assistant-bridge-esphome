@@ -284,8 +284,6 @@ void AutodiscoveryManager::process_byte_(uint8_t byte, bool is_gea3)
         }
 
         uint8_t appliance_type = rx->buffer[9];
-        ESP_LOGD(TAG, "GEA3 board discovered (byte): address=0x%02X appliance_type=%u",
-                 source, appliance_type);
         this->on_broadcast_response(source, appliance_type, true);
       } else {
         // GEA2: read response command is 0xF0
@@ -318,8 +316,6 @@ void AutodiscoveryManager::process_byte_(uint8_t byte, bool is_gea3)
         }
 
         uint8_t appliance_type = rx->buffer[8];
-        ESP_LOGD(TAG, "GEA2 board discovered (byte): address=0x%02X appliance_type=%u",
-                 source, appliance_type);
         this->on_broadcast_response(source, appliance_type, false);
       }
 
@@ -352,13 +348,9 @@ void AutodiscoveryManager::on_broadcast_response(uint8_t address, uint8_t applia
   bool in_gea2_waiting = (this->state_ == AUTODISCOVERY_GEA2_BROADCAST_WAITING);
 
   if (is_gea3 && in_gea3_waiting) {
-    ESP_LOGD(TAG, "GEA3 board discovered: address=0x%02X appliance_type=%u",
-             address, appliance_type);
     this->host_address_       = address;
     this->active_erd_client_  = this->gea3_erd_client_;
   } else if (!is_gea3 && in_gea2_waiting) {
-    ESP_LOGD(TAG, "GEA2 board discovered: address=0x%02X appliance_type=%u",
-             address, appliance_type);
     this->host_address_       = address;
     this->active_erd_client_  = this->gea2_adapter_client_;
   }
