@@ -5,6 +5,7 @@
 
 #include "erd_cache_mqtt_publisher.h"
 #include "erd_cache.h"
+#include "erd_registry.h"
 #include "geappliances_bridge_log.h"
 #include "i_mqtt_client.h"
 #include "esphome/core/log.h"
@@ -73,6 +74,11 @@ static void mqtt_publisher_task(void* arg)
      * publish_index and cache access. */
     erd_cache_entry_t* entry = erd_cache_get_next_updated(self->cache, &self->publish_index);
     if (entry) {
+      /* Skip ERDs not in the valid set (feature-bit + custom ERD filter). */
+      auto* registry = static_cast<esphome::geappliances_bridge::ErdRegistry*>(self->erd_registry);
+      if (registry && !registry->is_valid(entry->erd)) {
+        continue;
+      }
       const uint8_t* data = erd_cache_entry_data(self->cache, entry);
 
       int topic_len = snprintf(self->task_topic, sizeof(self->task_topic),
@@ -182,6 +188,12 @@ void erd_cache_mqtt_publisher_init(
   }
 
   ESP_LOGI(PUBLISHER_TAG, "ERD cache MQTT publisher initialized with device ID: %s", self->device_id);
+}
+
+void erd_cache_mqtt_publisher_set_erd_registry(
+  erd_cache_mqtt_publisher_t* self, void* erd_registry)
+{
+  self->erd_registry = erd_registry;
 }
 
 void erd_cache_mqtt_publisher_destroy(erd_cache_mqtt_publisher_t* self)
@@ -299,6 +311,12 @@ bool erd_cache_mqtt_publisher_loop(erd_cache_mqtt_publisher_t* self)
     if (!self->first_round_done) {
       self->first_round_done = true;
     }
+    return false;
+  }
+
+  /* Skip ERDs not in the valid set (feature-bit + custom ERD filter). */
+  auto* registry = static_cast<esphome::geappliances_bridge::ErdRegistry*>(self->erd_registry);
+  if (registry && !registry->is_valid(entry->erd)) {
     return false;
   }
 

@@ -43,6 +43,12 @@ class ErdRegistry {
   /// filtering. An empty set is ignored so filtering stays disabled.
   void set_valid_erds(const tiny_erd_t* erds, uint16_t count);
 
+  /// Append additional ERDs to the valid set (e.g., custom ERDs).
+  /// Deduplicates against existing entries and re-sorts.
+  /// If the valid set has not been initialized by set_valid_erds(), this
+  /// call is a no-op (filtering stays disabled).
+  void add_valid_erds(const tiny_erd_t* erds, uint16_t count);
+
   /// Reset the registered-ERD set. Call before bridge (re-)initialization.
   void clear_registered_erds();
 

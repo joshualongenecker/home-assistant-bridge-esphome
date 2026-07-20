@@ -68,6 +68,9 @@ typedef struct {
   // Pre-allocated buffers for the background task to avoid stack overflow.
   char task_topic[128];
   char task_hex[512];
+  // Opaque pointer to ErdRegistry for valid-ERD filtering during publish.
+  // Set via erd_cache_mqtt_publisher_set_erd_registry(). Cast in .cpp.
+  void* erd_registry;
 } erd_cache_mqtt_publisher_t;
 
 #ifdef __cplusplus
@@ -157,6 +160,13 @@ uint32_t erd_cache_mqtt_publisher_get_disconnect_count(erd_cache_mqtt_publisher_
  * Thread-safe — acquires the state mutex with the ESP-IDF framework.
  */
 uint32_t erd_cache_mqtt_publisher_get_last_disconnect_duration_ms(erd_cache_mqtt_publisher_t* self);
+
+/*!
+ * Set the ErdRegistry for valid-ERD filtering during publish.
+ * Pass nullptr to disable filtering (all ERDs published).
+ */
+void erd_cache_mqtt_publisher_set_erd_registry(
+  erd_cache_mqtt_publisher_t* self, void* erd_registry);
 
 #ifdef __cplusplus
 }

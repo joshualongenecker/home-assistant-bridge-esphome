@@ -206,7 +206,17 @@ void GeappliancesBridge::initialize_erd_bridge_()
       this->feature_bit_manager_.get_valid_erd_count() > 0) {
     this->erd_registry_.set_valid_erds(this->feature_bit_manager_.get_valid_erds(),
                                        this->feature_bit_manager_.get_valid_erd_count());
+    // Merge custom ERDs so they always pass the filter.
+    if (this->custom_erds_count_ > 0) {
+      this->erd_registry_.add_valid_erds(this->custom_erds_, this->custom_erds_count_);
+    }
   }
+
+  // Wire the ErdRegistry to both publishers so they filter by valid ERDs.
+  // When appliance_api_parsing is disabled, the registry has no filter active
+  // (is_valid returns true for all ERDs), so this is a no-op.
+  erd_cache_mqtt_publisher_set_erd_registry(&this->erd_cache_publisher_, &this->erd_registry_);
+  ha_discovery_manager_set_erd_registry(&this->ha_discovery_manager_, &this->erd_registry_);
 
   // Select operating mode.
   bool        use_polling = false;
