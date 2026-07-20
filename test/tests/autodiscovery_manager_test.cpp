@@ -60,8 +60,8 @@ TEST_GROUP(autodiscovery_manager)
                  &gea3_client.interface,
                  &gea2_client.interface,
                  &gea2_adapter.interface,
-                 nullptr,  /* gea3_interface (not mocked in tests) */
-                 nullptr,  /* gea2_interface (not mocked in tests) */
+                 nullptr,  /* gea3_uart_adapter (not mocked in tests) */
+                 nullptr,  /* gea2_uart_adapter (not mocked in tests) */
                  true,     /* has_gea3_uart */
                  true,     /* has_gea2_uart */
                  [this]() { callback_called = true; });
@@ -73,8 +73,8 @@ TEST_GROUP(autodiscovery_manager)
                  &gea3_client.interface,
                  nullptr,
                  nullptr,
-                 nullptr,  /* gea3_interface (not mocked in tests) */
-                 nullptr,  /* gea2_interface (not mocked in tests) */
+                 nullptr,  /* gea3_uart_adapter (not mocked in tests) */
+                 nullptr,  /* gea2_uart_adapter (not mocked in tests) */
                  true,     /* has_gea3_uart */
                  false,    /* has_gea2_uart */
                  [this]() { callback_called = true; });
@@ -86,8 +86,8 @@ TEST_GROUP(autodiscovery_manager)
                  nullptr,
                  &gea2_client.interface,
                  &gea2_adapter.interface,  // GEA2 adapter (wraps GEA2 client as GEA3 interface)
-                 nullptr,  /* gea3_interface (not mocked in tests) */
-                 nullptr,  /* gea2_interface (not mocked in tests) */
+                 nullptr,  /* gea3_uart_adapter (not mocked in tests) */
+                 nullptr,  /* gea2_uart_adapter (not mocked in tests) */
                  false,    /* has_gea3_uart */
                  true,     /* has_gea2_uart */
                  [this]() { callback_called = true; });
@@ -305,8 +305,8 @@ TEST(autodiscovery_manager, completion_with_null_callback_does_not_crash)
                &gea3_client.interface,
                &gea2_client.interface,
                &gea2_adapter.interface,
-               nullptr,  /* gea3_interface (not mocked) */
-               nullptr,  /* gea2_interface (not mocked) */
+               nullptr,  /* gea3_uart_adapter (not mocked) */
+               nullptr,  /* gea2_uart_adapter (not mocked) */
                true, true,
                nullptr);  /* No callback */
 
