@@ -195,13 +195,14 @@ void GeappliancesBridge::setup() {
   }
 
   // Initialize autodiscovery manager (timer-driven, self-driving)
-  // Must be called AFTER ERD clients are initialized, so the manager can
-  // subscribe to their activity events on valid interfaces.
+  // Must be called AFTER ERD clients and interfaces are initialized.
   this->autodiscovery_manager_.init(
       &this->timer_group_,
       this->uart_ != nullptr ? &this->erd_client_.interface : nullptr,
       this->gea2_uart_ != nullptr ? &this->gea2_erd_client_.interface : nullptr,
       this->gea2_uart_ != nullptr ? &this->gea2_erd_client_adapter_.interface : nullptr,
+      this->uart_ != nullptr ? &this->gea3_interface_.interface : nullptr,
+      this->gea2_uart_ != nullptr ? &this->gea2_interface_.interface : nullptr,
       this->uart_ != nullptr,
       this->gea2_uart_ != nullptr,
       [this]() {

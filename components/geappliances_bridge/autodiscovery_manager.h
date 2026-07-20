@@ -8,9 +8,6 @@
  * GEA3 <-> GEA2 fallback if both UARTs are configured.
  */
 
-// =============================================================================
-// MODULE GOAL
-// =============================================================================
 // Goal: Locate the connected appliance on the GEA bus by broadcasting to
 //       address 0xFF and recording the first responding device's address,
 //       protocol type, and active ERD client.
@@ -19,7 +16,9 @@
 //   - Manage the GEA3->GEA2 fallback broadcast discovery sequence
 //   - Retry indefinitely until an appliance responds
 //   - Own timer-based state machine (no polling from bridge)
-//   - Subscribe to ERD client activity events directly
+//   - Subscribe to interface-level on_receive events to detect broadcast
+//     responses (bypassing the ERD client request_id filter, which drops
+//     valid responses when an unsupported_erd response arrives first)
 //   - Expose the discovered host address and active ERD client via getters
 //
 // NOT responsible for:
@@ -30,6 +29,7 @@
 //
 // Dependencies:
 //   - i_tiny_gea3_erd_client, i_tiny_gea2_erd_client
+//   - i_tiny_gea_interface (for raw packet-level on_receive events)
 //   - tiny_timer, tiny_event
 // =============================================================================
 
@@ -41,6 +41,7 @@
 extern "C" {
 #include "i_tiny_gea3_erd_client.h"
 #include "i_tiny_gea2_erd_client.h"
+#include "i_tiny_gea_interface.h"
 #include "tiny_event.h"
 #include "tiny_event_subscription.h"
 #include "tiny_timer.h"
@@ -66,6 +67,8 @@ class AutodiscoveryManager {
             i_tiny_gea3_erd_client_t* gea3_erd_client,
             i_tiny_gea2_erd_client_t* gea2_erd_client,
             i_tiny_gea3_erd_client_t* gea2_adapter_client,
+            i_tiny_gea_interface_t* gea3_interface,
+            i_tiny_gea_interface_t* gea2_interface,
             bool has_gea3_uart,
             bool has_gea2_uart,
             std::function<void()> on_complete_cb);
@@ -96,6 +99,12 @@ class AutodiscoveryManager {
   /// Called from the GEA2 adapter activity subscription callback.
   void on_gea2_activity_(const void* args);
 
+  /// Called from the GEA3 interface on_receive subscription callback.
+  static void on_gea3_interface_receive_(void* context, const void* args);
+
+  /// Called from the GEA2 interface on_receive subscription callback.
+  static void on_gea2_interface_receive_(void* context, const void* args);
+
   /// Determine which broadcast to attempt next and transition.
   void schedule_next_broadcast_();
 
@@ -103,6 +112,8 @@ class AutodiscoveryManager {
   i_tiny_gea3_erd_client_t* gea3_erd_client_   = nullptr;
   i_tiny_gea2_erd_client_t* gea2_erd_client_   = nullptr;
   i_tiny_gea3_erd_client_t* gea2_adapter_client_ = nullptr;
+  i_tiny_gea_interface_t* gea3_interface_ = nullptr;
+  i_tiny_gea_interface_t* gea2_interface_ = nullptr;
   bool has_gea3_uart_ = false;
   bool has_gea2_uart_ = false;
   std::function<void()> on_complete_cb_;
@@ -114,9 +125,12 @@ class AutodiscoveryManager {
   i_tiny_gea3_erd_client_t* active_erd_client_ = nullptr;
   bool gea2_protocol_active_ = false;
 
-  // Event subscriptions for ERD client activity
+  // Event subscriptions for ERD client activity (kept as fallback)
   tiny_event_subscription_t gea3_activity_subscription_;
   tiny_event_subscription_t gea2_activity_subscription_;
+  // Event subscriptions for interface-level packet receive (primary path)
+  tiny_event_subscription_t gea3_interface_subscription_;
+  tiny_event_subscription_t gea2_interface_subscription_;
 };
 
 }  // namespace geappliances_bridge

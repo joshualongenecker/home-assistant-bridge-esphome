@@ -9,6 +9,8 @@
 
 #include "autodiscovery_manager.h"
 #include "geappliances_bridge_constants.h"
+#include "tiny_gea3_erd_api.h"
+#include "tiny_gea2_erd_api.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -18,12 +20,12 @@ GEA_TAG(TAG) = "autodiscovery";
 
 // =============================================================================
 // Public API
-// =============================================================================
-
 void AutodiscoveryManager::init(tiny_timer_group_t* timer_group,
                                  i_tiny_gea3_erd_client_t* gea3_erd_client,
                                  i_tiny_gea2_erd_client_t* gea2_erd_client,
                                  i_tiny_gea3_erd_client_t* gea2_adapter_client,
+                                 i_tiny_gea_interface_t* gea3_interface,
+                                 i_tiny_gea_interface_t* gea2_interface,
                                  bool has_gea3_uart,
                                  bool has_gea2_uart,
                                  std::function<void()> on_complete_cb)
@@ -32,6 +34,8 @@ void AutodiscoveryManager::init(tiny_timer_group_t* timer_group,
   this->gea3_erd_client_      = gea3_erd_client;
   this->gea2_erd_client_      = gea2_erd_client;
   this->gea2_adapter_client_  = gea2_adapter_client;
+  this->gea3_interface_       = gea3_interface;
+  this->gea2_interface_       = gea2_interface;
   this->has_gea3_uart_        = has_gea3_uart;
   this->has_gea2_uart_        = has_gea2_uart;
   this->on_complete_cb_       = std::move(on_complete_cb);
@@ -40,8 +44,33 @@ void AutodiscoveryManager::init(tiny_timer_group_t* timer_group,
   this->active_erd_client_    = nullptr;
   this->gea2_protocol_active_ = false;
 
-  // Subscribe to ERD client activity events so we can detect broadcast
-  // responses without the bridge routing them to us.
+  // Subscribe to interface-level on_receive events (primary path).
+  // These fire for every valid packet before the ERD client filters by
+  // request_id, so we see all broadcast responses even when an
+  // unsupported_erd response from one board arrives before the success
+  // response from the actual target board.
+  if (this->has_gea3_uart_ && this->gea3_interface_ != nullptr) {
+    tiny_event_subscription_init(
+      &this->gea3_interface_subscription_,
+      this,
+      AutodiscoveryManager::on_gea3_interface_receive_);
+    tiny_event_subscribe(
+      tiny_gea_interface_on_receive(this->gea3_interface_),
+      &this->gea3_interface_subscription_);
+  }
+
+  if (this->has_gea2_uart_ && this->gea2_interface_ != nullptr) {
+    tiny_event_subscription_init(
+      &this->gea2_interface_subscription_,
+      this,
+      AutodiscoveryManager::on_gea2_interface_receive_);
+    tiny_event_subscribe(
+      tiny_gea_interface_on_receive(this->gea2_interface_),
+      &this->gea2_interface_subscription_);
+  }
+
+  // Subscribe to ERD client activity events as fallback.
+  // These still work when there's no broadcast contention (single board).
   if (this->has_gea3_uart_ && this->gea3_erd_client_ != nullptr) {
     tiny_event_subscription_init(
       &this->gea3_activity_subscription_,
@@ -69,8 +98,20 @@ void AutodiscoveryManager::init(tiny_timer_group_t* timer_group,
 
 void AutodiscoveryManager::cleanup()
 {
+  // Unsubscribe from interface-level on_receive events.
+  if (this->has_gea3_uart_ && this->gea3_interface_ != nullptr) {
+    tiny_event_unsubscribe(
+      tiny_gea_interface_on_receive(this->gea3_interface_),
+      &this->gea3_interface_subscription_);
+  }
+
+  if (this->has_gea2_uart_ && this->gea2_interface_ != nullptr) {
+    tiny_event_unsubscribe(
+      tiny_gea_interface_on_receive(this->gea2_interface_),
+      &this->gea2_interface_subscription_);
+  }
+
   // Unsubscribe from GEA3 ERD client activity events.
-  // Match the guards in init(): only unsubscribe if we actually subscribed.
   if (this->has_gea3_uart_ && this->gea3_erd_client_ != nullptr) {
     tiny_event_unsubscribe(
       tiny_gea3_erd_client_on_activity(this->gea3_erd_client_),
@@ -78,7 +119,6 @@ void AutodiscoveryManager::cleanup()
   }
 
   // Unsubscribe from GEA2 adapter ERD client activity events.
-  // Match the guards in init(): only unsubscribe if we actually subscribed.
   if (this->has_gea2_uart_ && this->gea2_adapter_client_ != nullptr) {
     tiny_event_unsubscribe(
       tiny_gea3_erd_client_on_activity(this->gea2_adapter_client_),
@@ -95,6 +135,8 @@ void AutodiscoveryManager::cleanup()
   this->gea3_erd_client_ = nullptr;
   this->gea2_erd_client_ = nullptr;
   this->gea2_adapter_client_ = nullptr;
+  this->gea3_interface_ = nullptr;
+  this->gea2_interface_ = nullptr;
   this->has_gea3_uart_ = false;
   this->has_gea2_uart_ = false;
   this->on_complete_cb_ = std::function<void()>();
@@ -181,6 +223,78 @@ void AutodiscoveryManager::on_gea2_activity_(const void* args)
   if (this->state_ == AUTODISCOVERY_GEA2_BROADCAST_WAITING) {
     this->on_broadcast_response(a->address, app_type, false);
   }
+}
+
+// =============================================================================
+// Interface-level packet receive callbacks (primary discovery path)
+//
+// These subscribe to the interface on_receive event, which fires for every
+// valid packet BEFORE the ERD client filters by request_id. This allows us
+// to see all broadcast responses, even when an unsupported_erd response from
+// one board arrives before the success response from the actual target board.
+// =============================================================================
+
+void AutodiscoveryManager::on_gea3_interface_receive_(void* context, const void* _args)
+{
+  auto self = reinterpret_cast<AutodiscoveryManager*>(context);
+  if (self->active_erd_client_ != nullptr) return;  // already discovered
+  if (self->state_ != AUTODISCOVERY_GEA3_BROADCAST_WAITING) return;
+
+  const tiny_gea_interface_on_receive_args_t* args =
+    reinterpret_cast<const tiny_gea_interface_on_receive_args_t*>(_args);
+  const tiny_gea_packet_t* packet = args->packet;
+
+  // Only interested in read responses (command 0xA1)
+  if (packet->payload_length < 3) return;
+  if (packet->payload[0] != tiny_gea3_erd_api_command_read_response) return;
+
+  uint8_t result = packet->payload[2];
+
+  // Skip unsupported_erd responses — keep waiting for a success.
+  if (result != tiny_gea3_erd_api_read_result_success) return;
+
+  // Success response: verify it's for ERD_APPLIANCE_TYPE with data.
+  if (packet->payload_length < 6) return;
+  uint16_t erd = (static_cast<uint16_t>(packet->payload[3]) << 8) | packet->payload[4];
+  if (erd != ERD_APPLIANCE_TYPE) return;
+
+  uint8_t data_size = packet->payload[5];
+  if (data_size < 1) return;
+
+  uint8_t appliance_type = packet->payload[6];
+  ESP_LOGD(TAG, "GEA3 board discovered (interface): address=0x%02X appliance_type=%u",
+           packet->source, appliance_type);
+  self->on_broadcast_response(packet->source, appliance_type, true);
+}
+
+void AutodiscoveryManager::on_gea2_interface_receive_(void* context, const void* _args)
+{
+  auto self = reinterpret_cast<AutodiscoveryManager*>(context);
+  if (self->active_erd_client_ != nullptr) return;  // already discovered
+  if (self->state_ != AUTODISCOVERY_GEA2_BROADCAST_WAITING) return;
+
+  const tiny_gea_interface_on_receive_args_t* args =
+    reinterpret_cast<const tiny_gea_interface_on_receive_args_t*>(_args);
+  const tiny_gea_packet_t* packet = args->packet;
+
+  // GEA2 read response: command 0xF0, erd_count, erd_msb, erd_lsb, data_size, data...
+  if (packet->payload_length < 5) return;
+  if (packet->payload[0] != tiny_gea2_erd_api_command_read_response) return;
+
+  uint8_t erd_count = packet->payload[1];
+  if (erd_count != 1) return;
+
+  uint16_t erd = (static_cast<uint16_t>(packet->payload[2]) << 8) | packet->payload[3];
+  if (erd != ERD_APPLIANCE_TYPE) return;
+
+  uint8_t data_size = packet->payload[4];
+  if (data_size < 1) return;
+  if (packet->payload_length < 5 + data_size) return;
+
+  uint8_t appliance_type = packet->payload[5];
+  ESP_LOGD(TAG, "GEA2 board discovered (interface): address=0x%02X appliance_type=%u",
+           packet->source, appliance_type);
+  self->on_broadcast_response(packet->source, appliance_type, false);
 }
 
 // =============================================================================
