@@ -32,6 +32,7 @@ void AutodiscoveryManager::init(tiny_timer_group_t* timer_group,
                                  esphome_uart_adapter_t* gea2_uart_adapter,
                                  bool has_gea3_uart,
                                  bool has_gea2_uart,
+                                 uint8_t client_address,
                                  std::function<void()> on_complete_cb)
 {
   this->timer_group_          = timer_group;
@@ -42,6 +43,7 @@ void AutodiscoveryManager::init(tiny_timer_group_t* timer_group,
   this->gea2_uart_adapter_    = gea2_uart_adapter;
   this->has_gea3_uart_        = has_gea3_uart;
   this->has_gea2_uart_        = has_gea2_uart;
+  this->client_address_       = client_address;
   this->on_complete_cb_       = std::move(on_complete_cb);
   this->state_                = AUTODISCOVERY_IDLE;
   this->host_address_         = 0;
@@ -252,7 +254,7 @@ void AutodiscoveryManager::process_byte_(uint8_t byte, bool is_gea3)
       uint8_t app_payload_len = payload_length_on_wire - tiny_gea_packet_transmission_overhead;
 
       // Only interested in packets addressed to us or broadcast
-      if (destination != 0xE4 && destination != tiny_gea_broadcast_address) {
+      if (destination != this->client_address_ && destination != tiny_gea_broadcast_address) {
         rx->count = 0;
         return;
       }

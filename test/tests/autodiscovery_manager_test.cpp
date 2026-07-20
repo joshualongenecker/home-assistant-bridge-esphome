@@ -69,6 +69,7 @@ TEST_GROUP(autodiscovery_manager)
                  nullptr,  /* gea2_uart_adapter (not mocked in tests) */
                  true,     /* has_gea3_uart */
                  true,     /* has_gea2_uart */
+                 0xE4,     /* client_address */
                  [this]() { callback_called = true; });
   }
 
@@ -82,6 +83,7 @@ TEST_GROUP(autodiscovery_manager)
                  nullptr,  /* gea2_uart_adapter (not mocked in tests) */
                  true,     /* has_gea3_uart */
                  false,    /* has_gea2_uart */
+                 0xE4,     /* client_address */
                  [this]() { callback_called = true; });
   }
 
@@ -95,6 +97,7 @@ TEST_GROUP(autodiscovery_manager)
                  nullptr,  /* gea2_uart_adapter (not mocked in tests) */
                  false,    /* has_gea3_uart */
                  true,     /* has_gea2_uart */
+                 0xE4,     /* client_address */
                  [this]() { callback_called = true; });
   }
 
@@ -361,6 +364,7 @@ TEST(autodiscovery_manager, completion_with_null_callback_does_not_crash)
                nullptr,  /* gea3_uart_adapter (not mocked) */
                nullptr,  /* gea2_uart_adapter (not mocked) */
                true, true,
+               0xE4,     /* client_address */
                nullptr);  /* No callback */
 
   expect_gea3_broadcast_read();

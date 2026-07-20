@@ -80,6 +80,7 @@ class AutodiscoveryManager {
             esphome_uart_adapter_t* gea2_uart_adapter,
             bool has_gea3_uart,
             bool has_gea2_uart,
+            uint8_t client_address,
             std::function<void()> on_complete_cb);
 
   /// Unsubscribe from events and stop timers. Safe to call multiple times.
@@ -133,6 +134,7 @@ class AutodiscoveryManager {
   tiny_timer_t broadcast_window_timer_;
 
   uint8_t  host_address_       = 0;
+  uint8_t  client_address_     = 0xE4;
   i_tiny_gea3_erd_client_t* active_erd_client_ = nullptr;
   bool gea2_protocol_active_ = false;
 

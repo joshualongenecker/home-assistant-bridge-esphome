@@ -205,6 +205,7 @@ void GeappliancesBridge::setup() {
       this->gea2_uart_ != nullptr ? &this->gea2_uart_adapter_ : nullptr,
       this->uart_ != nullptr,
       this->gea2_uart_ != nullptr,
+      this->client_address_,
       [this]() {
         // Signal the HSM to transition to the device_id phase.
         // The HSM handles DeviceIdentityManager::init() directly.
