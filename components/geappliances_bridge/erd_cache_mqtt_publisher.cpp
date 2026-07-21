@@ -75,10 +75,11 @@ static void mqtt_publisher_task(void* arg)
     erd_cache_entry_t* entry = erd_cache_get_next_updated(self->cache, &self->publish_index);
     if (entry) {
       /* Skip ERDs not in the valid set (feature-bit + custom ERD filter).
-       * Restore update_required so the entry is not permanently lost. */
+       * The filter is static (set once at bridge init), so filtered entries
+       * are never re-published. Don't restore update_required — let the
+       * iterator advance past them permanently to avoid wasting wake cycles. */
       auto* registry = static_cast<esphome::geappliances_bridge::ErdRegistry*>(self->erd_registry);
       if (registry && !registry->is_valid(entry->erd)) {
-        erd_cache_mark_unpublished(self->cache, entry);
       } else {
         const uint8_t* data = erd_cache_entry_data(self->cache, entry);
 
@@ -317,10 +318,10 @@ bool erd_cache_mqtt_publisher_loop(erd_cache_mqtt_publisher_t* self)
   }
 
   /* Skip ERDs not in the valid set (feature-bit + custom ERD filter).
-   * Restore update_required so the entry is not permanently lost. */
+   * The filter is static (set once at bridge init), so filtered entries
+   * are never re-published. Don't restore update_required. */
   auto* registry = static_cast<esphome::geappliances_bridge::ErdRegistry*>(self->erd_registry);
   if (registry && !registry->is_valid(entry->erd)) {
-    erd_cache_mark_unpublished(self->cache, entry);
     return false;
   }
 
