@@ -252,6 +252,7 @@ void erd_bridge_subscribe_init(
   self->erd_client = erd_client;
   self->erd_host_address = address;
   self->erd_cache = cache;
+  self->erd_registry = nullptr;
   self->current_state = subscription_state_none;
   self->subscribe_failure_count = 0;
   erd_set_init(&self->erd_set);

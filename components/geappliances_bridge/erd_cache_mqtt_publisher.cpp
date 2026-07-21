@@ -5,7 +5,6 @@
 
 #include "erd_cache_mqtt_publisher.h"
 #include "erd_cache.h"
-#include "erd_registry.h"
 #include "geappliances_bridge_log.h"
 #include "i_mqtt_client.h"
 #include "esphome/core/log.h"
