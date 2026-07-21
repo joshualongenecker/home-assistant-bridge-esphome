@@ -89,7 +89,9 @@ namespace geappliances_bridge {
 
 
 class GeappliancesBridge : public Component, public IBridgeServices {
-  friend ErdPollListResult build_poll_list_(GeappliancesBridge* bridge);
+  friend ErdPollListResult build_poll_list_(GeappliancesBridge* bridge,
+                                            const uint16_t* custom_erds,
+                                            uint16_t custom_erds_count);
   friend tiny_time_source_ticks_t gea2_tick_ticks(i_tiny_time_source_t*);
 
  public:
@@ -121,6 +123,7 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   void set_custom_ha_discovery_data(const uint8_t* data, const void* chunks, uint16_t count, uint16_t max_chunk, uint32_t hash) {
     ha_discovery_manager_set_custom_data(&this->ha_discovery_manager_, data, chunks, count, max_chunk, hash);
   }
+  void add_custom_erds(const uint16_t* erds, uint16_t count);
   void add_custom_erd(tiny_erd_t erd);
   void trigger_discovery_refresh();
 
@@ -196,7 +199,8 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   void update_publisher_state_();       // Publisher pause/resume + steady-state detection
   void start_feature_bit_reading_();
   void init_erd_cache_publisher_();
-  void init_polling_bridge_(bool log_as_info);
+  void init_polling_bridge_(bool log_as_info, const uint16_t* custom_erds = nullptr,
+                            uint16_t custom_erds_count = 0);
   void on_poll_discovery_complete_();
   bool should_route_to_feature_bits_(tiny_erd_t erd);
 
@@ -226,6 +230,8 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   static constexpr uint16_t CUSTOM_ERDS_MAX = 128;
   tiny_erd_t custom_erds_[CUSTOM_ERDS_MAX];
   uint16_t custom_erds_count_{0};
+  uint16_t subscription_unseen_custom_erds_[CUSTOM_ERDS_MAX];
+  uint16_t subscription_unseen_custom_erds_count_{0};
 
   // Fixed-capacity set for tracking seen subscription ERDs (replaces std::set).
   erd_set_t custom_erd_subscription_seen_erds_;

@@ -58,6 +58,12 @@ void GeappliancesBridge::add_custom_erd(tiny_erd_t erd)
   this->custom_erds_[this->custom_erds_count_++] = erd;
 }
 
+void GeappliancesBridge::add_custom_erds(const uint16_t* erds, uint16_t count)
+{
+  if (erds == nullptr) return;
+  for (uint16_t i = 0; i < count; i++) this->add_custom_erd(erds[i]);
+}
+
 static const tiny_gea3_erd_client_configuration_t client_configuration = {
   .request_timeout = 250,
   .request_retries = 10

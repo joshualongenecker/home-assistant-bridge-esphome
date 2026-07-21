@@ -53,7 +53,9 @@ void GeappliancesBridge::on_poll_discovery_complete_()
 // Build the poll list using the erd_poll_list_builder module
 // ---------------------------------------------------------------------------
 
-ErdPollListResult build_poll_list_(GeappliancesBridge* bridge)
+ErdPollListResult build_poll_list_(GeappliancesBridge* bridge,
+                                   const uint16_t* custom_erds,
+                                   uint16_t custom_erds_count)
 {
   ErdPollListConfig config;
   config.mode = bridge->mode_;
@@ -64,8 +66,9 @@ ErdPollListResult build_poll_list_(GeappliancesBridge* bridge)
   config.appliance_api_parsing = bridge->appliance_api_parsing_;
   config.feature_bit_valid_erds = bridge->feature_bit_manager_.get_valid_erds();
   config.feature_bit_valid_erds_count = bridge->feature_bit_manager_.get_valid_erd_count();
-  config.custom_erds = bridge->custom_erds_count_ > 0 ? bridge->custom_erds_ : nullptr;
-  config.custom_erds_count = bridge->custom_erds_count_;
+  config.custom_erds = custom_erds ? custom_erds :
+      (bridge->custom_erds_count_ > 0 ? bridge->custom_erds_ : nullptr);
+  config.custom_erds_count = custom_erds ? custom_erds_count : bridge->custom_erds_count_;
   config.appliance_type = bridge->device_identity_manager_.get_appliance_type();
   return build_erd_poll_list(config);
 }
@@ -74,7 +77,9 @@ ErdPollListResult build_poll_list_(GeappliancesBridge* bridge)
 // Shared polling bridge initialization (used by all three init paths)
 // ---------------------------------------------------------------------------
 
-void GeappliancesBridge::init_polling_bridge_(bool log_as_info)
+void GeappliancesBridge::init_polling_bridge_(bool log_as_info,
+                                              const uint16_t* custom_erds,
+                                              uint16_t custom_erds_count)
 {
   // Wire the discovery-complete callback BEFORE initializing the bridge,
   // so the HSM cannot fire the callback before it's set (race condition
@@ -84,7 +89,7 @@ void GeappliancesBridge::init_polling_bridge_(bool log_as_info)
   };
   this->erd_bridge_poll_.on_discovery_complete_context = this;
 
-  auto result = build_poll_list_(this);
+  auto result = build_poll_list_(this, custom_erds, custom_erds_count);
   this->poll_probe_list_count_ = result.erds_count;
   std::memcpy(this->poll_probe_list_, result.erds, result.erds_count * sizeof(uint16_t));
 
@@ -286,13 +291,30 @@ void GeappliancesBridge::start_custom_erd_polling_()
   if (this->custom_erds_count_ == 0) {
     return;
   }
+  this->subscription_unseen_custom_erds_count_ = 0;
+  for (uint16_t i = 0; i < this->custom_erds_count_; i++) {
+    tiny_erd_t erd = this->custom_erds_[i];
+    if (!erd_set_contains(&this->custom_erd_subscription_seen_erds_, erd)) {
+      this->subscription_unseen_custom_erds_[this->subscription_unseen_custom_erds_count_++] = erd;
+    }
+  }
+  if (this->subscription_unseen_custom_erds_count_ == 0) {
+    ESP_LOGI(TAG, "All %u custom ERDs are covered by subscription; custom polling not started",
+             this->custom_erds_count_);
+    this->custom_erd_polling_started_ = true;
+    return;
+  }
+  ESP_LOGI(TAG, "Custom polling: %u subscribed ERDs skipped, %u ERDs remaining",
+           this->custom_erds_count_ - this->subscription_unseen_custom_erds_count_,
+           this->subscription_unseen_custom_erds_count_);
   // Do NOT destroy the subscription bridge - it continues to handle all
   // standard ERD publications. The polling bridge runs alongside it, only
   // polling the custom ERDs that may not be covered by subscription.
   // Both bridges subscribe to the same ERD client activity event, but they
   // handle different event types (subscription vs read_completed).
 
-  this->init_polling_bridge_(true);
+  this->init_polling_bridge_(true, this->subscription_unseen_custom_erds_,
+                             this->subscription_unseen_custom_erds_count_);
   this->custom_erd_polling_started_ = true;
 }
 
