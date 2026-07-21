@@ -34,19 +34,23 @@ static tiny_hsm_result_t sub_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       auto args = reinterpret_cast<const tiny_gea3_erd_client_on_activity_args_t*>(data);
       auto erd = args->subscription_publication_received.erd;
 
+      /* Skip ERDs not in the valid set (feature-bit + custom ERD filter).
+       * The filter is static (set once at bridge init), so filtered ERDs
+       * are never cached and never affect HSM state. This check runs before
+       * erd_set insertion so that filtered ERDs don't count toward the
+       * quiet-period decision — if only invalid ERDs are published, the
+       * bridge correctly falls through to state_failed. */
+      auto* registry = static_cast<esphome::geappliances_bridge::ErdRegistry*>(self->erd_registry);
+      if (registry && !registry->is_valid(erd)) {
+        break;
+      }
+
       bool is_new = !erd_set_contains(&self->erd_set, erd);
       if (is_new) {
         erd_set_insert(&self->erd_set, erd);
         // New ERD registered — restart the quiet timer.
         // If we're in steady state, a new ERD means we're no longer quiet.
         tiny_hsm_transition(hsm, state_subscribed);
-      }
-      /* Skip ERDs not in the valid set (feature-bit + custom ERD filter).
-       * The filter is static (set once at bridge init), so filtered ERDs
-       * are never cached. This avoids wasting cache slots and publish cycles. */
-      auto* registry = static_cast<esphome::geappliances_bridge::ErdRegistry*>(self->erd_registry);
-      if (registry && !registry->is_valid(erd)) {
-        break;
       }
 
       erd_cache_update(self->erd_cache, erd,
