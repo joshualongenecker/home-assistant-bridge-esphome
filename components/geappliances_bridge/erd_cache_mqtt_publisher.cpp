@@ -184,7 +184,6 @@ void erd_cache_mqtt_publisher_init(
   ESP_LOGI(PUBLISHER_TAG, "ERD cache MQTT publisher initialized with device ID: %s", self->device_id);
 }
 
-
 void erd_cache_mqtt_publisher_destroy(erd_cache_mqtt_publisher_t* self)
 {
   erd_cache_mqtt_publisher_stop(self);
@@ -302,7 +301,6 @@ bool erd_cache_mqtt_publisher_loop(erd_cache_mqtt_publisher_t* self)
     }
     return false;
   }
-
 
   const uint8_t* data = erd_cache_entry_data(self->cache, entry);
 

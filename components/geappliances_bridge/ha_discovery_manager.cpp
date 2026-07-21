@@ -1073,4 +1073,3 @@ ha_discovery_state_t ha_discovery_manager_get_state(ha_discovery_manager_t* self
     return self->state;
 }
 
-

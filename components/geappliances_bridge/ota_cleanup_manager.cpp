@@ -30,6 +30,7 @@ void OtaCleanupManager::init(
     esphome_mqtt_client_adapter_t& mqtt_client_adapter,
     erd_cache_t* erd_cache,
     bool generate_device_config,
+    bool appliance_api_parsing,
     bool filter_config_topics,
     bool& steady_state_reached,
     bool& mqtt_initialized,
@@ -40,6 +41,7 @@ void OtaCleanupManager::init(
   this->mqtt_client_adapter_ = &mqtt_client_adapter;
   this->erd_cache_ = erd_cache;
   this->generate_device_config_ = generate_device_config;
+  this->appliance_api_parsing_ = appliance_api_parsing;
   this->filter_config_topics_ = filter_config_topics;
   this->steady_state_reached_ = &steady_state_reached;
   this->mqtt_initialized_ = &mqtt_initialized;
@@ -112,15 +114,19 @@ void OtaCleanupManager::check_discovery_changes(const char* current_device_id) {
     return;
   }
 
-  // Compare hash and device ID.
+  // Compare hash, device ID, and config flags.
   bool hash_changed = (stored.hash != HA_DISCOVERY_DATA_HASH);
   bool device_id_changed = (stored.device_id[0] != '\0' &&
                             strcmp(stored.device_id, current_device_id) != 0);
+  bool api_parsing_changed = (stored.appliance_api_parsing != this->appliance_api_parsing_);
+  bool filter_topics_changed = (stored.filter_config_topics != this->filter_config_topics_);
 
-  if (hash_changed || device_id_changed) {
-    ESP_LOGI(TAG, "Discovery state changed (hash=%s, device_id=%s), cleaning old topics",
+  if (hash_changed || device_id_changed || api_parsing_changed || filter_topics_changed) {
+    ESP_LOGI(TAG, "Discovery state changed (hash=%s, device_id=%s, api_parsing=%s, filter_topics=%s), cleaning old topics",
              hash_changed ? "changed" : "same",
-             device_id_changed ? "changed" : "same");
+             device_id_changed ? "changed" : "same",
+             api_parsing_changed ? "changed" : "same",
+             filter_topics_changed ? "changed" : "same");
     this->trigger_ota_cleanup();
     return;
   }
@@ -268,10 +274,14 @@ void OtaCleanupManager::loop() {
                 this->device_identity_manager_->get_device_id(),
                 sizeof(state.device_id) - 1);
         state.device_id[sizeof(state.device_id) - 1] = '\0';
+        state.appliance_api_parsing = this->appliance_api_parsing_;
+        state.filter_config_topics = this->filter_config_topics_;
         pref.save(&state);
         global_preferences->sync();
         ESP_LOGD(TAG, "Stored discovery state hash=0x%08" PRIx32
-                 " device_id=%s", state.hash, state.device_id);
+                 " device_id=%s api_parsing=%d filter_topics=%d",
+                 state.hash, state.device_id,
+                 state.appliance_api_parsing, state.filter_config_topics);
       }
     }
   }

@@ -231,6 +231,7 @@ void GeappliancesBridge::setup() {
       this->mqtt_client_adapter_,
       &this->erd_cache_,
       this->generate_device_config_,
+      this->appliance_api_parsing_,
       this->filter_config_topics_,
       this->steady_state_reached_,
       this->mqtt_client_adapter_initialized_,

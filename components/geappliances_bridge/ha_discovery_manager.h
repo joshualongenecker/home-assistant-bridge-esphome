@@ -154,7 +154,6 @@ typedef struct {
   char domain_topic_prefix[128];
   char current_domain_prefix_buf[32]; // Tracks current domain for prefix caching
 
-
 } ha_discovery_manager_t;
 
 /*!
@@ -207,7 +206,6 @@ bool ha_discovery_manager_is_processing(ha_discovery_manager_t* self);
  * Returns the current state.
  */
 ha_discovery_state_t ha_discovery_manager_get_state(ha_discovery_manager_t* self);
-
 
 /* Test-only exports: exposed when HA_DISCOVERY_TEST_EXPORT is defined. */
 #ifdef HA_DISCOVERY_TEST_EXPORT
