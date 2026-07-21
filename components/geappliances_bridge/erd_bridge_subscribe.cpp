@@ -11,6 +11,7 @@
 #include "erd_bridge_subscribe.h"
 #include "erd_cache.h"
 #include "geappliances_bridge_log.h"
+#include "erd_registry.h"
 #include "esphome/core/log.h"
 
 GEA_TAG(TAG) = "erd_bridge_subscribe";
@@ -39,6 +40,13 @@ static tiny_hsm_result_t sub_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
         // New ERD registered — restart the quiet timer.
         // If we're in steady state, a new ERD means we're no longer quiet.
         tiny_hsm_transition(hsm, state_subscribed);
+      }
+      /* Skip ERDs not in the valid set (feature-bit + custom ERD filter).
+       * The filter is static (set once at bridge init), so filtered ERDs
+       * are never cached. This avoids wasting cache slots and publish cycles. */
+      auto* registry = static_cast<esphome::geappliances_bridge::ErdRegistry*>(self->erd_registry);
+      if (registry && !registry->is_valid(erd)) {
+        break;
       }
 
       erd_cache_update(self->erd_cache, erd,
@@ -307,4 +315,11 @@ void erd_bridge_subscribe_destroy(erd_bridge_subscribe_t* self)
 
   /* erd_set is a fixed array embedded in the struct — no heap cleanup needed. */
   self->current_state = subscription_state_none;
+}
+
+void erd_bridge_subscribe_set_erd_registry(
+  erd_bridge_subscribe_t* self,
+  void* erd_registry)
+{
+  self->erd_registry = erd_registry;
 }

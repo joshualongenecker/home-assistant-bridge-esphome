@@ -74,45 +74,37 @@ static void mqtt_publisher_task(void* arg)
      * publish_index and cache access. */
     erd_cache_entry_t* entry = erd_cache_get_next_updated(self->cache, &self->publish_index);
     if (entry) {
-      /* Skip ERDs not in the valid set (feature-bit + custom ERD filter).
-       * The filter is static (set once at bridge init), so filtered entries
-       * are never re-published. Don't restore update_required — let the
-       * iterator advance past them permanently to avoid wasting wake cycles. */
-      auto* registry = static_cast<esphome::geappliances_bridge::ErdRegistry*>(self->erd_registry);
-      if (registry && !registry->is_valid(entry->erd)) {
-      } else {
-        const uint8_t* data = erd_cache_entry_data(self->cache, entry);
+      const uint8_t* data = erd_cache_entry_data(self->cache, entry);
 
-        int topic_len = snprintf(self->task_topic, sizeof(self->task_topic),
-            "geappliances/%s/erd/0x%04x/value", self->device_id, entry->erd);
-        if (topic_len >= 0 && (unsigned)topic_len < sizeof(self->task_topic)) {
-          size_t data_len = entry->data_size;
-          for (size_t i = 0; i < data_len; i++) {
-            snprintf(self->task_hex + i * 2, 3, "%02x", data[i]);
-          }
-          self->task_hex[data_len * 2] = '\0';
-
-          uint32_t t_publish = self->get_time_ms();
-          bool sent = mqtt_client_publish_raw(self->mqtt_client, self->task_topic,
-              self->task_hex, data_len * 2, true);
-          uint32_t elapsed = self->get_time_ms() - t_publish;
-
-          if (elapsed >= 1000) {
-            ESP_LOGW(PUBLISHER_TAG, "Slow publish: %lums for ERD 0x%04x", (unsigned long)elapsed, entry->erd);
-          }
-
-          if (sent) {
-            erd_cache_mark_published(self->cache, entry);
-            self->total_published++;
-            self->publish_count_window++;
-          } else {
-            /* Publish dropped (queue full or not connected) — re-set
-             * update_required so the entry is picked up on the next wake. */
-            erd_cache_mark_unpublished(self->cache, entry);
-          }
-        } else if (topic_len >= (int)sizeof(self->task_topic)) {
-          ESP_LOGW(PUBLISHER_TAG, "MQTT topic truncated (device_id too long: %s)", self->device_id);
+      int topic_len = snprintf(self->task_topic, sizeof(self->task_topic),
+          "geappliances/%s/erd/0x%04x/value", self->device_id, entry->erd);
+      if (topic_len >= 0 && (unsigned)topic_len < sizeof(self->task_topic)) {
+        size_t data_len = entry->data_size;
+        for (size_t i = 0; i < data_len; i++) {
+          snprintf(self->task_hex + i * 2, 3, "%02x", data[i]);
         }
+        self->task_hex[data_len * 2] = '\0';
+
+        uint32_t t_publish = self->get_time_ms();
+        bool sent = mqtt_client_publish_raw(self->mqtt_client, self->task_topic,
+            self->task_hex, data_len * 2, true);
+        uint32_t elapsed = self->get_time_ms() - t_publish;
+
+        if (elapsed >= 1000) {
+          ESP_LOGW(PUBLISHER_TAG, "Slow publish: %lums for ERD 0x%04x", (unsigned long)elapsed, entry->erd);
+        }
+
+        if (sent) {
+          erd_cache_mark_published(self->cache, entry);
+          self->total_published++;
+          self->publish_count_window++;
+        } else {
+          /* Publish dropped (queue full or not connected) — re-set
+           * update_required so the entry is picked up on the next wake. */
+          erd_cache_mark_unpublished(self->cache, entry);
+        }
+      } else if (topic_len >= (int)sizeof(self->task_topic)) {
+        ESP_LOGW(PUBLISHER_TAG, "MQTT topic truncated (device_id too long: %s)", self->device_id);
       }
     } else if (!self->first_round_done) {
       /* Scanned full cache with no pending entries — first round is done. */
@@ -193,11 +185,6 @@ void erd_cache_mqtt_publisher_init(
   ESP_LOGI(PUBLISHER_TAG, "ERD cache MQTT publisher initialized with device ID: %s", self->device_id);
 }
 
-void erd_cache_mqtt_publisher_set_erd_registry(
-  erd_cache_mqtt_publisher_t* self, void* erd_registry)
-{
-  self->erd_registry = erd_registry;
-}
 
 void erd_cache_mqtt_publisher_destroy(erd_cache_mqtt_publisher_t* self)
 {
@@ -317,13 +304,6 @@ bool erd_cache_mqtt_publisher_loop(erd_cache_mqtt_publisher_t* self)
     return false;
   }
 
-  /* Skip ERDs not in the valid set (feature-bit + custom ERD filter).
-   * The filter is static (set once at bridge init), so filtered entries
-   * are never re-published. Don't restore update_required. */
-  auto* registry = static_cast<esphome::geappliances_bridge::ErdRegistry*>(self->erd_registry);
-  if (registry && !registry->is_valid(entry->erd)) {
-    return false;
-  }
 
   const uint8_t* data = erd_cache_entry_data(self->cache, entry);
 

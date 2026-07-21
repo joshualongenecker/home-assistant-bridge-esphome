@@ -212,11 +212,11 @@ void GeappliancesBridge::initialize_erd_bridge_()
     }
   }
 
-  // Wire the ErdRegistry to both publishers so they filter by valid ERDs.
-  // When appliance_api_parsing is disabled, the registry has no filter active
+  // Wire the ErdRegistry to the subscription bridge so it filters
+  // subscription publications before they enter the cache. When
+  // appliance_api_parsing is disabled, the registry has no filter active
   // (is_valid returns true for all ERDs), so this is a no-op.
-  erd_cache_mqtt_publisher_set_erd_registry(&this->erd_cache_publisher_, &this->erd_registry_);
-  ha_discovery_manager_set_erd_registry(&this->ha_discovery_manager_, &this->erd_registry_);
+  erd_bridge_subscribe_set_erd_registry(&this->erd_bridge_subscribe_, &this->erd_registry_);
 
   // Select operating mode.
   bool        use_polling = false;

@@ -16,7 +16,6 @@ extern "C" {
 }
 
 #include "esphome_mqtt_client_adapter.h"
-#include "erd_registry.h"
 #include "double/mqtt_test_double.hpp"
 #include "double/esphome_hal_double.hpp"
 
@@ -1071,72 +1070,5 @@ TEST(erd_cache_mqtt_publisher, cumulative_disconnect_duration_across_reconnect_a
   CHECK_EQUAL(15000u, erd_cache_mqtt_publisher_get_last_disconnect_duration_ms(&publisher));
 
   fake_time = 1000;
-}
-
-/* ------------------------------------------------------------------ */
-/* ERD validity filter                                                */
-/* ------------------------------------------------------------------ */
-
-TEST(erd_cache_mqtt_publisher, loop_skips_invalid_erd_when_filter_active)
-{
-  erd_cache_mqtt_publisher_init(
-    &publisher, &cache, &adapter.interface, "device");
-  erd_cache_mqtt_publisher_on_connected(&publisher);
-
-  // Set up registry with only 0x0001 as valid.
-  esphome::geappliances_bridge::ErdRegistry registry;
-  uint16_t valid_erds[] = {0x0001};
-  registry.set_valid_erds(valid_erds, 1);
-  erd_cache_mqtt_publisher_set_erd_registry(&publisher, &registry);
-
-  // Insert valid ERD (0x0001) and invalid ERD (0x0002).
-  uint8_t data1 = 0xAA;
-  uint8_t data2 = 0xBB;
-  erd_cache_update(&cache, 0x0001, &data1, sizeof(data1));
-  erd_cache_update(&cache, 0x0002, &data2, sizeof(data2));
-
-  // First call should publish the valid ERD (0x0001 at index 0).
-  bool published = erd_cache_mqtt_publisher_loop(&publisher);
-  CHECK_TRUE(published);
-  CHECK_EQUAL(1u, publisher.total_published);
-
-  // Second call should skip the invalid ERD (0x0002).
-  published = erd_cache_mqtt_publisher_loop(&publisher);
-  CHECK_FALSE(published);
-  CHECK_EQUAL(1u, publisher.total_published);  // still 1, not 2
-}
-
-TEST(erd_cache_mqtt_publisher, loop_publishes_all_when_filter_disabled)
-{
-  erd_cache_mqtt_publisher_init(
-    &publisher, &cache, &adapter.interface, "device");
-  erd_cache_mqtt_publisher_on_connected(&publisher);
-
-  // No registry set — filter is disabled.
-  uint8_t data1 = 0xAA;
-  uint8_t data2 = 0xBB;
-  erd_cache_update(&cache, 0x0001, &data1, sizeof(data1));
-  erd_cache_update(&cache, 0x0002, &data2, sizeof(data2));
-
-  // Both ERDs should be published.
-  CHECK_TRUE(erd_cache_mqtt_publisher_loop(&publisher));
-  CHECK_TRUE(erd_cache_mqtt_publisher_loop(&publisher));
-  CHECK_EQUAL(2u, publisher.total_published);
-}
-
-TEST(erd_cache_mqtt_publisher, loop_publishes_all_when_registry_null)
-{
-  erd_cache_mqtt_publisher_init(
-    &publisher, &cache, &adapter.interface, "device");
-  erd_cache_mqtt_publisher_on_connected(&publisher);
-
-  // Explicitly set registry to nullptr.
-  erd_cache_mqtt_publisher_set_erd_registry(&publisher, nullptr);
-
-  uint8_t data = 0xAA;
-  erd_cache_update(&cache, 0x0001, &data, sizeof(data));
-
-  CHECK_TRUE(erd_cache_mqtt_publisher_loop(&publisher));
-  CHECK_EQUAL(1u, publisher.total_published);
 }
 

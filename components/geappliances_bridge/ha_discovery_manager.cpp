@@ -9,7 +9,6 @@
 
 #include "ha_discovery_manager.h"
 #include "ha_discovery_data.h"
-#include "erd_registry.h"
 #include "geappliances_bridge_log.h"
 
 #include <cstdio>
@@ -159,17 +158,12 @@ static bool erd_is_registered_sorted(const ha_discovery_manager_t* self, uint16_
 /* Build sorted ERD array from cache for binary search. */
 static void build_sorted_erd_list(ha_discovery_manager_t* self)
 {
-    auto* registry = static_cast<esphome::geappliances_bridge::ErdRegistry*>(self->erd_registry);
     self->sorted_erds_count = 0;
     uint16_t iterator = 0;
     while (true) {
         erd_cache_entry_t* entry = erd_cache_get_next_entry(self->cache, &iterator);
         if (!entry) break;
         if (self->sorted_erds_count >= HA_DISCOVERY_MAX_ERDS) break;
-        /* Skip ERDs not in the valid set (feature-bit + custom ERD filter). */
-        if (registry && !registry->is_valid(entry->erd)) {
-            continue;
-        }
         /* Dedup */
         bool already = false;
         for (uint16_t k = 0; k < self->sorted_erds_count; k++) {
@@ -1079,9 +1073,4 @@ ha_discovery_state_t ha_discovery_manager_get_state(ha_discovery_manager_t* self
     return self->state;
 }
 
-void ha_discovery_manager_set_erd_registry(
-  ha_discovery_manager_t* self, void* erd_registry)
-{
-    self->erd_registry = erd_registry;
-}
 
