@@ -296,3 +296,26 @@ TEST(erd_registry, add_valid_erds_deduplicates_within_batch)
   CHECK_TRUE(registry.is_valid(0x0003));
   CHECK_TRUE(registry.is_valid(0x0004));
 }
+
+TEST(erd_registry, add_valid_erds_respects_capacity)
+{
+  // Fill registry to capacity with set_valid_erds.
+  uint16_t base[ERD_REGISTRY_MAX_VALID];
+  for (uint16_t i = 0; i < ERD_REGISTRY_MAX_VALID; i++) {
+    base[i] = i;
+  }
+  registry.set_valid_erds(base, ERD_REGISTRY_MAX_VALID);
+
+  CHECK_EQUAL(ERD_REGISTRY_MAX_VALID, registry.valid_erd_count());
+
+  // Try to add more ERDs — should be silently rejected.
+  uint16_t extra[] = {0xFFFF, 0xFFFE, 0xFFFD};
+  registry.add_valid_erds(extra, 3);
+
+  CHECK_EQUAL(ERD_REGISTRY_MAX_VALID, registry.valid_erd_count());
+  // Original entries still valid.
+  CHECK_TRUE(registry.is_valid(0x0000));
+  CHECK_TRUE(registry.is_valid(ERD_REGISTRY_MAX_VALID - 1));
+  // New entries not added.
+  CHECK_FALSE(registry.is_valid(0xFFFF));
+}
