@@ -852,6 +852,19 @@ static void cleanup_resources(ha_discovery_manager_t* self)
     ha_discovery_cleanup_destroy(&self->cleanup);
 }
 
+static uint16_t discovery_category_count(const ha_discovery_manager_t* self)
+{
+    return ha_discovery_category_count + (self->custom_data ? 1 : 0);
+}
+
+static ha_discovery_category_t discovery_category_at(const ha_discovery_manager_t* self, uint16_t index)
+{
+    if (index < ha_discovery_category_count) return ha_discovery_categories[index];
+    return { "custom", self->custom_data,
+      reinterpret_cast<const ha_discovery_chunk_t*>(self->custom_chunks),
+      self->custom_num_chunks, self->custom_max_decompressed_chunk };
+}
+
 /* ------------------------------------------------------------------ */
 /* run(): publish one entity per call                                 */
 /* ------------------------------------------------------------------ */
@@ -880,10 +893,11 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
     /* Discovering state: decompress chunks and publish one entity per call. */
     while (self->state == ha_discovery_state_discovering) {
         /* Find the next category to process. */
-        while (self->current_category < ha_discovery_category_count) {
-            const ha_discovery_category_t* cat = &ha_discovery_categories[self->current_category];
+        while (self->current_category < discovery_category_count(self)) {
+            ha_discovery_category_t category = discovery_category_at(self, self->current_category);
+            const ha_discovery_category_t* cat = &category;
 
-            if (!should_process_category(cat->name, self->appliance_type)) {
+            if (strcmp(cat->name, "custom") != 0 && !should_process_category(cat->name, self->appliance_type)) {
                 /* Skip unneeded category. Return to main loop; next run()
                  * will try the next category. */
                 self->current_category++;
@@ -990,7 +1004,7 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
         }
 
         /* Check if all categories are done. */
-        if (self->current_category >= ha_discovery_category_count) {
+        if (self->current_category >= discovery_category_count(self)) {
             self->state = ha_discovery_state_complete;
             break;
         }
@@ -1018,10 +1032,27 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
 
 void ha_discovery_manager_init(ha_discovery_manager_t* self)
 {
+    const uint8_t* custom_data = self->custom_data;
+    const void* custom_chunks = self->custom_chunks;
+    uint16_t custom_num_chunks = self->custom_num_chunks;
+    uint16_t custom_max_chunk = self->custom_max_decompressed_chunk;
     memset(self, 0, sizeof(*self));
+    self->custom_data = custom_data;
+    self->custom_chunks = custom_chunks;
+    self->custom_num_chunks = custom_num_chunks;
+    self->custom_max_decompressed_chunk = custom_max_chunk;
     self->state = ha_discovery_state_idle;
 
     ha_discovery_cleanup_init(&self->cleanup);
+}
+
+void ha_discovery_manager_set_custom_data(ha_discovery_manager_t* self,
+    const uint8_t* data, const void* chunks, uint16_t num_chunks, uint16_t max_chunk)
+{
+    self->custom_data = data;
+    self->custom_chunks = chunks;
+    self->custom_num_chunks = num_chunks;
+    self->custom_max_decompressed_chunk = max_chunk;
 }
 
 void ha_discovery_manager_configure(
@@ -1072,4 +1103,3 @@ ha_discovery_state_t ha_discovery_manager_get_state(ha_discovery_manager_t* self
 {
     return self->state;
 }
-

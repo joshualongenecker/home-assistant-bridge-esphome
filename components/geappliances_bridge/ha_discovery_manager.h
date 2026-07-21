@@ -146,6 +146,10 @@ typedef struct {
   uint16_t current_chunk;          // Index into current category's chunks
   uint32_t current_offset;         // Byte offset within decompressed chunk
   uint32_t current_decomp_size;    // Size of current decompressed chunk
+  const uint8_t* custom_data;      // Optional codegen-provided compressed discovery data
+  const void* custom_chunks;
+  uint16_t custom_num_chunks;
+  uint16_t custom_max_decompressed_chunk;
   /* Embedded cleanup module for removing old discovery topics. */
   ha_discovery_cleanup_t cleanup;
 
@@ -160,6 +164,8 @@ typedef struct {
  * Initialize the discovery manager. Call once before configure().
  */
 void ha_discovery_manager_init(ha_discovery_manager_t* self);
+void ha_discovery_manager_set_custom_data(ha_discovery_manager_t* self,
+  const uint8_t* data, const void* chunks, uint16_t num_chunks, uint16_t max_chunk);
 
 /*!
  * Configure the discovery manager with device info and dependencies.
