@@ -85,6 +85,7 @@ private:
   // NVS struct stored after each successful discovery publish.
   // Compared on next boot to detect changes requiring cleanup+republish.
   struct DiscoveryNVS {
+    uint32_t version;
     uint32_t hash;
     char device_id[92];
   };

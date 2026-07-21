@@ -113,12 +113,22 @@ void OtaCleanupManager::check_discovery_changes(const char* current_device_id) {
   }
 
   static const uint32_t DISCOVERY_NVS_KEY = 0x64697363u; // "disc"
+  static const uint32_t DISCOVERY_HASH_VERSION = 2;
   auto pref = global_preferences->make_preference<DiscoveryNVS>(DISCOVERY_NVS_KEY);
   DiscoveryNVS stored{};
 
   if (!pref.load(&stored)) {
     // No stored state — fresh install, trigger initial discovery.
     this->trigger_initial_discovery();
+    return;
+  }
+
+  // Version 1 stored only the built-in discovery hash. Treat it as having no
+  // compatible prior custom hash: remove retained topics once, republish all
+  // discovery data, then persist the version-2 combined hash below.
+  if (stored.version != DISCOVERY_HASH_VERSION) {
+    ESP_LOGI(TAG, "Discovery hash version changed; cleaning old topics");
+    this->trigger_ota_cleanup();
     return;
   }
 
@@ -273,6 +283,7 @@ void OtaCleanupManager::loop() {
         static const uint32_t DISCOVERY_NVS_KEY = 0x64697363u; // "disc"
         auto pref = global_preferences->make_preference<DiscoveryNVS>(DISCOVERY_NVS_KEY);
         DiscoveryNVS state{};
+        state.version = 2;
         state.hash = discovery_data_hash(this->ha_discovery_manager_);
         strncpy(state.device_id,
                 this->device_identity_manager_->get_device_id(),
