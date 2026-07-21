@@ -16,6 +16,7 @@ my_configs/
 configuration_files/
 tmp/
 packages/
+custom_json/
 
 # IDE
 .vscode/
