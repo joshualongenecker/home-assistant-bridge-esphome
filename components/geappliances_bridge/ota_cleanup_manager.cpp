@@ -21,6 +21,16 @@
 
 GEA_TAG(TAG) = "ota_cleanup_manager";
 
+static uint32_t discovery_data_hash(const ha_discovery_manager_t* manager)
+{
+  // Mix the optional custom-profile hash with the built-in discovery hash.
+  // A profile change therefore follows the same cleanup/republish path.
+  uint32_t custom = manager->custom_data_hash;
+  if (custom == 0) return HA_DISCOVERY_DATA_HASH;
+  return HA_DISCOVERY_DATA_HASH ^ (custom + 0x9e3779b9u +
+      (HA_DISCOVERY_DATA_HASH << 6) + (HA_DISCOVERY_DATA_HASH >> 2));
+}
+
 namespace esphome {
 namespace geappliances_bridge {
 
@@ -113,7 +123,7 @@ void OtaCleanupManager::check_discovery_changes(const char* current_device_id) {
   }
 
   // Compare hash and device ID.
-  bool hash_changed = (stored.hash != HA_DISCOVERY_DATA_HASH);
+  bool hash_changed = (stored.hash != discovery_data_hash(this->ha_discovery_manager_));
   bool device_id_changed = (stored.device_id[0] != '\0' &&
                             strcmp(stored.device_id, current_device_id) != 0);
 
@@ -263,7 +273,7 @@ void OtaCleanupManager::loop() {
         static const uint32_t DISCOVERY_NVS_KEY = 0x64697363u; // "disc"
         auto pref = global_preferences->make_preference<DiscoveryNVS>(DISCOVERY_NVS_KEY);
         DiscoveryNVS state{};
-        state.hash = HA_DISCOVERY_DATA_HASH;
+        state.hash = discovery_data_hash(this->ha_discovery_manager_);
         strncpy(state.device_id,
                 this->device_identity_manager_->get_device_id(),
                 sizeof(state.device_id) - 1);

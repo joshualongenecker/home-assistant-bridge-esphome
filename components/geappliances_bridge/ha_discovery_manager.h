@@ -150,6 +150,7 @@ typedef struct {
   const void* custom_chunks;
   uint16_t custom_num_chunks;
   uint16_t custom_max_decompressed_chunk;
+  uint32_t custom_data_hash;
   /* Embedded cleanup module for removing old discovery topics. */
   ha_discovery_cleanup_t cleanup;
 
@@ -165,7 +166,7 @@ typedef struct {
  */
 void ha_discovery_manager_init(ha_discovery_manager_t* self);
 void ha_discovery_manager_set_custom_data(ha_discovery_manager_t* self,
-  const uint8_t* data, const void* chunks, uint16_t num_chunks, uint16_t max_chunk);
+  const uint8_t* data, const void* chunks, uint16_t num_chunks, uint16_t max_chunk, uint32_t data_hash);
 
 /*!
  * Configure the discovery manager with device info and dependencies.

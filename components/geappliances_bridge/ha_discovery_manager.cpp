@@ -1036,23 +1036,26 @@ void ha_discovery_manager_init(ha_discovery_manager_t* self)
     const void* custom_chunks = self->custom_chunks;
     uint16_t custom_num_chunks = self->custom_num_chunks;
     uint16_t custom_max_chunk = self->custom_max_decompressed_chunk;
+    uint32_t custom_data_hash = self->custom_data_hash;
     memset(self, 0, sizeof(*self));
     self->custom_data = custom_data;
     self->custom_chunks = custom_chunks;
     self->custom_num_chunks = custom_num_chunks;
     self->custom_max_decompressed_chunk = custom_max_chunk;
+    self->custom_data_hash = custom_data_hash;
     self->state = ha_discovery_state_idle;
 
     ha_discovery_cleanup_init(&self->cleanup);
 }
 
 void ha_discovery_manager_set_custom_data(ha_discovery_manager_t* self,
-    const uint8_t* data, const void* chunks, uint16_t num_chunks, uint16_t max_chunk)
+    const uint8_t* data, const void* chunks, uint16_t num_chunks, uint16_t max_chunk, uint32_t data_hash)
 {
     self->custom_data = data;
     self->custom_chunks = chunks;
     self->custom_num_chunks = num_chunks;
     self->custom_max_decompressed_chunk = max_chunk;
+    self->custom_data_hash = data_hash;
 }
 
 void ha_discovery_manager_configure(
