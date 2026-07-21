@@ -283,3 +283,16 @@ TEST(erd_registry, add_valid_erds_with_null)
 
   CHECK_EQUAL(1, registry.valid_erd_count());
 }
+
+TEST(erd_registry, add_valid_erds_deduplicates_within_batch)
+{
+  uint16_t base[] = {0x0001, 0x0002};
+  registry.set_valid_erds(base, 2);
+
+  uint16_t extra[] = {0x0003, 0x0003, 0x0004, 0x0003};  // 0x0003 repeated
+  registry.add_valid_erds(extra, 4);
+
+  CHECK_EQUAL(4, registry.valid_erd_count());
+  CHECK_TRUE(registry.is_valid(0x0003));
+  CHECK_TRUE(registry.is_valid(0x0004));
+}

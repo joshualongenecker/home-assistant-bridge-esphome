@@ -29,10 +29,16 @@ void ErdRegistry::add_valid_erds(const tiny_erd_t* erds, uint16_t count)
     return;
   }
   for (uint16_t i = 0; i < count; i++) {
-    /* Deduplicate against existing entries. */
+    /* Deduplicate against existing sorted entries. */
     if (std::binary_search(valid_erds_, valid_erds_ + valid_erds_count_, erds[i])) {
       continue;
     }
+    /* Deduplicate within the input batch. */
+    bool dup = false;
+    for (uint16_t k = 0; k < i; k++) {
+      if (erds[k] == erds[i]) { dup = true; break; }
+    }
+    if (dup) continue;
     if (valid_erds_count_ >= ERD_REGISTRY_MAX_VALID) {
       break;
     }
