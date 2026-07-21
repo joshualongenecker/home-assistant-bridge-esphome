@@ -133,7 +133,7 @@ Key member variables:
 | `device_identity_manager_` | `DeviceIdentityManager` | Device ID generation |
 | `feature_bit_manager_` | `FeatureBitManager` | Feature bit reading |
 | `timer_group_` | `tiny_timer_group_t` | Shared timer group |
-| `custom_erds_[CUSTOM_ERDS_MAX]` | `tiny_erd_t[64]` | User-configured custom ERDs |
+| `custom_erds_[CUSTOM_ERDS_MAX]` | `tiny_erd_t[128]` | User-configured custom ERDs |
 | `poll_probe_list_[POLLING_LIST_MAX_SIZE]` | `uint16_t[649]` | Pre-built probe list |
 
 ---

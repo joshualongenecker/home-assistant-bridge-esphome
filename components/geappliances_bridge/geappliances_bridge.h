@@ -220,7 +220,7 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   // User-configured custom ERDs to poll in addition to the standard list.
   // Populated by add_custom_erd() calls generated from the YAML custom_erds option.
   // Fixed-capacity array to avoid heap allocation.
-  static constexpr uint16_t CUSTOM_ERDS_MAX = 64;
+  static constexpr uint16_t CUSTOM_ERDS_MAX = 128;
   tiny_erd_t custom_erds_[CUSTOM_ERDS_MAX];
   uint16_t custom_erds_count_{0};
 

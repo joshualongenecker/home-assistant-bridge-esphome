@@ -20,7 +20,7 @@ using namespace esphome::geappliances_bridge;
 
 // Custom ERD max is defined in the class as protected; duplicate the value here
 // to test capacity without accessing protected members.
-static const uint16_t TEST_CUSTOM_ERDS_MAX = 64;
+static const uint16_t TEST_CUSTOM_ERDS_MAX = 128;
 
 TEST_GROUP(geappliances_bridge)
 {

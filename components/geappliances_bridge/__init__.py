@@ -138,7 +138,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_GENERATE_DEVICE_CONFIG, default=True): cv.boolean,
         cv.Optional(CONF_CUSTOM_ERDS, default=[]): cv.All(cv.ensure_list(
             cv.int_range(min=0, max=0xFFFF)
-        ), cv.Length(max=64)),
+        ), cv.Length(max=128)),
         cv.Optional(CONF_THROTTLE_RATE_SECONDS, default=1): cv.int_range(min=0, max=255),
         cv.Optional(CONF_ERD_PUBLISH_RATE_SENSOR, default=True): cv.Any(
             cv.boolean,
