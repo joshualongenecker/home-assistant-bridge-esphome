@@ -47,6 +47,7 @@ class OtaCleanupManager {
   /// @param mqtt_client_adapter  Reference to MQTT client adapter for publish interface.
   /// @param erd_cache  Pointer to the shared ERD cache.
   /// @param generate_device_config  Whether device config generation is enabled.
+  /// @param appliance_api_parsing  Whether appliance API ERD filtering is enabled.
   /// @param filter_config_topics  Whether config topic filtering is enabled.
   /// @param steady_state_reached  Reference to the bridge's steady state flag.
   /// @param mqtt_initialized  Reference to the bridge's MQTT initialized flag.
@@ -57,6 +58,7 @@ class OtaCleanupManager {
       esphome_mqtt_client_adapter_t& mqtt_client_adapter,
       erd_cache_t* erd_cache,
       bool generate_device_config,
+      bool appliance_api_parsing,
       bool filter_config_topics,
       bool& steady_state_reached,
       bool& mqtt_initialized,
@@ -88,6 +90,8 @@ private:
     uint32_t version;
     uint32_t hash;
     char device_id[92];
+    bool appliance_api_parsing;
+    bool filter_config_topics;
   };
 
   enum CleanupTrigger { NONE, OTA, DISCOVERY_REFRESH, INITIAL };
@@ -110,6 +114,7 @@ private:
   esphome_mqtt_client_adapter_t* mqtt_client_adapter_{nullptr};
   erd_cache_t* erd_cache_{nullptr};
   bool generate_device_config_{false};
+  bool appliance_api_parsing_{false};
   bool filter_config_topics_{false};
   bool* steady_state_reached_{nullptr};
   bool* mqtt_initialized_{nullptr};

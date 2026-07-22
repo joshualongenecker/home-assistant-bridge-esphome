@@ -40,6 +40,7 @@ void OtaCleanupManager::init(
     esphome_mqtt_client_adapter_t& mqtt_client_adapter,
     erd_cache_t* erd_cache,
     bool generate_device_config,
+    bool appliance_api_parsing,
     bool filter_config_topics,
     bool& steady_state_reached,
     bool& mqtt_initialized,
@@ -50,6 +51,7 @@ void OtaCleanupManager::init(
   this->mqtt_client_adapter_ = &mqtt_client_adapter;
   this->erd_cache_ = erd_cache;
   this->generate_device_config_ = generate_device_config;
+  this->appliance_api_parsing_ = appliance_api_parsing;
   this->filter_config_topics_ = filter_config_topics;
   this->steady_state_reached_ = &steady_state_reached;
   this->mqtt_initialized_ = &mqtt_initialized;
@@ -113,7 +115,9 @@ void OtaCleanupManager::check_discovery_changes(const char* current_device_id) {
   }
 
   static const uint32_t DISCOVERY_NVS_KEY = 0x64697363u; // "disc"
-  static const uint32_t DISCOVERY_HASH_VERSION = 2;
+  // Version 3 adds persisted discovery-affecting config flags. Older records
+  // (including version 2 custom-header hashes) are republished once.
+  static const uint32_t DISCOVERY_HASH_VERSION = 3;
   auto pref = global_preferences->make_preference<DiscoveryNVS>(DISCOVERY_NVS_KEY);
   DiscoveryNVS stored{};
 
@@ -123,24 +127,26 @@ void OtaCleanupManager::check_discovery_changes(const char* current_device_id) {
     return;
   }
 
-  // Version 1 stored only the built-in discovery hash. Treat it as having no
-  // compatible prior custom hash: remove retained topics once, republish all
-  // discovery data, then persist the version-2 combined hash below.
+  // Older records have no compatible combined custom hash/config state.
   if (stored.version != DISCOVERY_HASH_VERSION) {
     ESP_LOGI(TAG, "Discovery hash version changed; cleaning old topics");
     this->trigger_ota_cleanup();
     return;
   }
 
-  // Compare hash and device ID.
+  // Compare the combined discovery hash, device ID, and config flags.
   bool hash_changed = (stored.hash != discovery_data_hash(this->ha_discovery_manager_));
   bool device_id_changed = (stored.device_id[0] != '\0' &&
                             strcmp(stored.device_id, current_device_id) != 0);
+  bool api_parsing_changed = (stored.appliance_api_parsing != this->appliance_api_parsing_);
+  bool filter_topics_changed = (stored.filter_config_topics != this->filter_config_topics_);
 
-  if (hash_changed || device_id_changed) {
-    ESP_LOGI(TAG, "Discovery state changed (hash=%s, device_id=%s), cleaning old topics",
+  if (hash_changed || device_id_changed || api_parsing_changed || filter_topics_changed) {
+    ESP_LOGI(TAG, "Discovery state changed (hash=%s, device_id=%s, api_parsing=%s, filter_topics=%s), cleaning old topics",
              hash_changed ? "changed" : "same",
-             device_id_changed ? "changed" : "same");
+             device_id_changed ? "changed" : "same",
+             api_parsing_changed ? "changed" : "same",
+             filter_topics_changed ? "changed" : "same");
     this->trigger_ota_cleanup();
     return;
   }
@@ -283,16 +289,20 @@ void OtaCleanupManager::loop() {
         static const uint32_t DISCOVERY_NVS_KEY = 0x64697363u; // "disc"
         auto pref = global_preferences->make_preference<DiscoveryNVS>(DISCOVERY_NVS_KEY);
         DiscoveryNVS state{};
-        state.version = 2;
+        state.version = 3;
         state.hash = discovery_data_hash(this->ha_discovery_manager_);
         strncpy(state.device_id,
                 this->device_identity_manager_->get_device_id(),
                 sizeof(state.device_id) - 1);
         state.device_id[sizeof(state.device_id) - 1] = '\0';
+        state.appliance_api_parsing = this->appliance_api_parsing_;
+        state.filter_config_topics = this->filter_config_topics_;
         pref.save(&state);
         global_preferences->sync();
         ESP_LOGD(TAG, "Stored discovery state hash=0x%08" PRIx32
-                 " device_id=%s", state.hash, state.device_id);
+                 " device_id=%s api_parsing=%d filter_topics=%d",
+                 state.hash, state.device_id,
+                 state.appliance_api_parsing, state.filter_config_topics);
       }
     }
   }

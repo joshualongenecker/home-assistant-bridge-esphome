@@ -11,6 +11,7 @@
 #include "erd_bridge_subscribe.h"
 #include "erd_cache.h"
 #include "geappliances_bridge_log.h"
+#include "erd_registry.h"
 #include "esphome/core/log.h"
 
 GEA_TAG(TAG) = "erd_bridge_subscribe";
@@ -32,6 +33,17 @@ static tiny_hsm_result_t sub_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
     case signal_subscription_publication_received: {
       auto args = reinterpret_cast<const tiny_gea3_erd_client_on_activity_args_t*>(data);
       auto erd = args->subscription_publication_received.erd;
+
+      /* Skip ERDs not in the valid set (feature-bit + custom ERD filter).
+       * The filter is static (set once at bridge init), so filtered ERDs
+       * are never cached and never affect HSM state. This check runs before
+       * erd_set insertion so that filtered ERDs don't count toward the
+       * quiet-period decision — if only invalid ERDs are published, the
+       * bridge correctly falls through to state_failed. */
+      auto* registry = static_cast<esphome::geappliances_bridge::ErdRegistry*>(self->erd_registry);
+      if (registry && !registry->is_valid(erd)) {
+        break;
+      }
 
       bool is_new = !erd_set_contains(&self->erd_set, erd);
       if (is_new) {
@@ -244,6 +256,7 @@ void erd_bridge_subscribe_init(
   self->erd_client = erd_client;
   self->erd_host_address = address;
   self->erd_cache = cache;
+  self->erd_registry = nullptr;
   self->current_state = subscription_state_none;
   self->subscribe_failure_count = 0;
   erd_set_init(&self->erd_set);
@@ -307,4 +320,11 @@ void erd_bridge_subscribe_destroy(erd_bridge_subscribe_t* self)
 
   /* erd_set is a fixed array embedded in the struct — no heap cleanup needed. */
   self->current_state = subscription_state_none;
+}
+
+void erd_bridge_subscribe_set_erd_registry(
+  erd_bridge_subscribe_t* self,
+  void* erd_registry)
+{
+  self->erd_registry = erd_registry;
 }

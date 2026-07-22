@@ -22,6 +22,35 @@ void ErdRegistry::set_valid_erds(const tiny_erd_t* erds, uint16_t count)
   valid_erds_ready_ = true;
 }
 
+void ErdRegistry::add_valid_erds(const tiny_erd_t* erds, uint16_t count)
+{
+  /* If the valid set hasn't been initialized, nothing to append to. */
+  if (!valid_erds_ready_ || !erds || count == 0) {
+    return;
+  }
+  /* Save the original sorted count. New entries are appended unsorted;
+   * binary_search must only search the pre-existing sorted prefix. */
+  uint16_t base_count = valid_erds_count_;
+  for (uint16_t i = 0; i < count; i++) {
+    /* Deduplicate against existing sorted entries (only the base prefix). */
+    if (std::binary_search(valid_erds_, valid_erds_ + base_count, erds[i])) {
+      continue;
+    }
+    /* Deduplicate within the input batch. */
+    bool dup = false;
+    for (uint16_t k = 0; k < i; k++) {
+      if (erds[k] == erds[i]) { dup = true; break; }
+    }
+    if (dup) continue;
+    if (valid_erds_count_ >= ERD_REGISTRY_MAX_VALID) {
+      break;
+    }
+    valid_erds_[valid_erds_count_++] = erds[i];
+  }
+  /* Re-sort to maintain binary search correctness. */
+  std::sort(valid_erds_, valid_erds_ + valid_erds_count_);
+}
+
 void ErdRegistry::clear_registered_erds()
 {
   registered_erds_count_ = 0;

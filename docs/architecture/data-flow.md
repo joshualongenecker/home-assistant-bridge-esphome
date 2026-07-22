@@ -110,8 +110,9 @@ boots skip discovery entirely. Discovery runs in four scenarios:
 ### Discovery Change Detection
 
 At steady state, the bridge compares the current `HA_DISCOVERY_DATA_HASH` (computed
-by the build-time pipeline) and the current device ID against the stored
-`DiscoveryNVS {hash, device_id}` struct in NVS. If either differs, it triggers
+by the build-time pipeline), the current device ID, and the current
+`appliance_api_parsing` and `filter_config_topics` flags against the stored
+`DiscoveryNVS {hash, device_id, appliance_api_parsing, filter_config_topics}` struct in NVS. If any field differs, it triggers
 cleanup → publish → reboot. The stored state is updated after each successful
 publish so subsequent boots detect no change.
 

@@ -4,6 +4,7 @@
  */
 
 #include "erd_bridge_subscribe.h"
+#include "erd_registry.h"
 
 #include "CppUTest/TestHarness.h"
 #include "CppUTestExt/MockSupport.h"
@@ -528,4 +529,101 @@ TEST(erd_bridge_subscribe, transitions_to_failed_after_three_consecutive_subscri
   when_a_subscribe_failure_is_received_for(0xC0);
 
   CHECK(self.current_state == subscription_state_failed);
+}
+
+/* ------------------------------------------------------------------ */
+/* ERD validity filter                                                */
+/* ------------------------------------------------------------------ */
+
+TEST(erd_bridge_subscribe, filter_active_blocks_invalid_erd_from_cache)
+{
+  esphome::geappliances_bridge::ErdRegistry registry;
+  uint16_t valid_erds[] = { 0x0001 };
+  registry.set_valid_erds(valid_erds, 1);
+
+  mock().disable();
+  erd_bridge_subscribe_init(
+    &self, &timer_group.timer_group, &erd_client.interface, 0xC0, &test_cache);
+  erd_bridge_subscribe_set_erd_registry(&self, &registry);
+  mock().enable();
+
+  // Send publication for ERD 0x0002 (not in valid set).
+  uint8_t data = 0xBB;
+  mock().ignoreOtherCalls();
+  when_an_erd_publication_is_received(0xC0, 0x0002, data);
+
+  // Cache should be empty — invalid ERD was filtered.
+  CHECK_EQUAL(0u, erd_cache_get_count(&test_cache));
+}
+
+TEST(erd_bridge_subscribe, filter_active_allows_valid_erd_into_cache)
+{
+  esphome::geappliances_bridge::ErdRegistry registry;
+  uint16_t valid_erds[] = { 0x0001 };
+  registry.set_valid_erds(valid_erds, 1);
+
+  mock().disable();
+  erd_bridge_subscribe_init(
+    &self, &timer_group.timer_group, &erd_client.interface, 0xC0, &test_cache);
+  erd_bridge_subscribe_set_erd_registry(&self, &registry);
+  mock().enable();
+
+  // Send publication for ERD 0x0001 (in valid set).
+  uint8_t data = 0xAA;
+  mock().ignoreOtherCalls();
+  when_an_erd_publication_is_received(0xC0, 0x0001, data);
+
+  // Cache should have the valid ERD.
+  CHECK_EQUAL(1u, erd_cache_get_count(&test_cache));
+  uint16_t iter = 0;
+  erd_cache_entry_t* entry = erd_cache_get_next_entry(&test_cache, &iter);
+  CHECK(entry != nullptr);
+  CHECK_EQUAL(0x0001u, entry->erd);
+}
+
+TEST(erd_bridge_subscribe, null_registry_allows_all_erds)
+{
+  mock().disable();
+  erd_bridge_subscribe_init(
+    &self, &timer_group.timer_group, &erd_client.interface, 0xC0, &test_cache);
+  erd_bridge_subscribe_set_erd_registry(&self, nullptr);
+  mock().enable();
+
+  uint8_t data = 0xAA;
+  mock().ignoreOtherCalls();
+  when_an_erd_publication_is_received(0xC0, 0x0001, data);
+
+  CHECK_EQUAL(1u, erd_cache_get_count(&test_cache));
+}
+
+TEST(erd_bridge_subscribe, filtered_erd_does_not_affect_hsm_state)
+{
+  esphome::geappliances_bridge::ErdRegistry registry;
+  uint16_t valid_erds[] = { 0x0001 };
+  registry.set_valid_erds(valid_erds, 1);
+
+  mock().disable();
+  erd_bridge_subscribe_init(
+    &self, &timer_group.timer_group, &erd_client.interface, 0xC0, &test_cache);
+  erd_bridge_subscribe_set_erd_registry(&self, &registry);
+  mock().enable();
+
+  // Trigger subscription added so the bridge enters subscribed state.
+  mock().disable();
+  after_a_subscription_is_added_or_retained_for(0xC0);
+  mock().enable();
+
+  // Send only invalid ERD publications.
+  uint8_t data = 0xBB;
+  mock().ignoreOtherCalls();
+  when_an_erd_publication_is_received(0xC0, 0x0002, data);
+  when_an_erd_publication_is_received(0xC0, 0x0003, data);
+
+  // Wait for the quiet period to expire.
+  after(subscription_quiet_period + 1);
+
+  // Bridge should transition to failed (no valid ERDs published).
+  CHECK(self.current_state == subscription_state_failed);
+  // Cache should be empty.
+  CHECK_EQUAL(0u, erd_cache_get_count(&test_cache));
 }

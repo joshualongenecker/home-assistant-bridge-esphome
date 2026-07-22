@@ -212,3 +212,110 @@ TEST(erd_registry, registered_erd_order_preserved)
   CHECK_EQUAL(0x0050, registry.registered_erd(1));
   CHECK_EQUAL(0x0200, registry.registered_erd(2));
 }
+
+/* ------------------------------------------------------------------ */
+/* add_valid_erds                                                     */
+/* ------------------------------------------------------------------ */
+
+TEST(erd_registry, add_valid_erds_appends_to_existing_set)
+{
+  uint16_t base[] = {0x0001, 0x0003, 0x0005};
+  registry.set_valid_erds(base, 3);
+
+  uint16_t extra[] = {0x0002, 0x0004};
+  registry.add_valid_erds(extra, 2);
+
+  CHECK_EQUAL(5, registry.valid_erd_count());
+  CHECK_TRUE(registry.is_valid(0x0001));
+  CHECK_TRUE(registry.is_valid(0x0002));
+  CHECK_TRUE(registry.is_valid(0x0003));
+  CHECK_TRUE(registry.is_valid(0x0004));
+  CHECK_TRUE(registry.is_valid(0x0005));
+  CHECK_FALSE(registry.is_valid(0x0006));
+}
+
+TEST(erd_registry, add_valid_erds_deduplicates)
+{
+  uint16_t base[] = {0x0001, 0x0002, 0x0003};
+  registry.set_valid_erds(base, 3);
+
+  uint16_t extra[] = {0x0002, 0x0004};  // 0x0002 already in base
+  registry.add_valid_erds(extra, 2);
+
+  CHECK_EQUAL(4, registry.valid_erd_count());
+  CHECK_TRUE(registry.is_valid(0x0002));
+  CHECK_TRUE(registry.is_valid(0x0004));
+}
+
+TEST(erd_registry, add_valid_erds_no_op_without_set_valid_erds)
+{
+  uint16_t extra[] = {0x0001, 0x0002};
+  registry.add_valid_erds(extra, 2);
+
+  // Filter should still be inactive
+  CHECK_FALSE(registry.has_valid_erds_filter());
+  CHECK_EQUAL(0, registry.valid_erd_count());
+}
+
+TEST(erd_registry, add_valid_erds_remains_sorted)
+{
+  uint16_t base[] = {0x0005, 0x0001, 0x0003};
+  registry.set_valid_erds(base, 3);
+
+  uint16_t extra[] = {0x0002, 0x0006, 0x0004};
+  registry.add_valid_erds(extra, 3);
+
+  // Verify sorted order
+  CHECK_EQUAL(0x0001, registry.valid_erd(0));
+  CHECK_EQUAL(0x0002, registry.valid_erd(1));
+  CHECK_EQUAL(0x0003, registry.valid_erd(2));
+  CHECK_EQUAL(0x0004, registry.valid_erd(3));
+  CHECK_EQUAL(0x0005, registry.valid_erd(4));
+  CHECK_EQUAL(0x0006, registry.valid_erd(5));
+}
+
+TEST(erd_registry, add_valid_erds_with_null)
+{
+  uint16_t base[] = {0x0001};
+  registry.set_valid_erds(base, 1);
+
+  registry.add_valid_erds(nullptr, 0);
+
+  CHECK_EQUAL(1, registry.valid_erd_count());
+}
+
+TEST(erd_registry, add_valid_erds_deduplicates_within_batch)
+{
+  uint16_t base[] = {0x0001, 0x0002};
+  registry.set_valid_erds(base, 2);
+
+  uint16_t extra[] = {0x0003, 0x0003, 0x0004, 0x0003};  // 0x0003 repeated
+  registry.add_valid_erds(extra, 4);
+
+  CHECK_EQUAL(4, registry.valid_erd_count());
+  CHECK_TRUE(registry.is_valid(0x0003));
+  CHECK_TRUE(registry.is_valid(0x0004));
+}
+
+TEST(erd_registry, add_valid_erds_respects_capacity)
+{
+  // Fill registry to capacity with set_valid_erds.
+  uint16_t base[ERD_REGISTRY_MAX_VALID];
+  for (uint16_t i = 0; i < ERD_REGISTRY_MAX_VALID; i++) {
+    base[i] = i;
+  }
+  registry.set_valid_erds(base, ERD_REGISTRY_MAX_VALID);
+
+  CHECK_EQUAL(ERD_REGISTRY_MAX_VALID, registry.valid_erd_count());
+
+  // Try to add more ERDs — should be silently rejected.
+  uint16_t extra[] = {0xFFFF, 0xFFFE, 0xFFFD};
+  registry.add_valid_erds(extra, 3);
+
+  CHECK_EQUAL(ERD_REGISTRY_MAX_VALID, registry.valid_erd_count());
+  // Original entries still valid.
+  CHECK_TRUE(registry.is_valid(0x0000));
+  CHECK_TRUE(registry.is_valid(ERD_REGISTRY_MAX_VALID - 1));
+  // New entries not added.
+  CHECK_FALSE(registry.is_valid(0xFFFF));
+}

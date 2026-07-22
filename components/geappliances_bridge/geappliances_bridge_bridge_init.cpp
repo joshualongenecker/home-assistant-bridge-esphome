@@ -211,7 +211,17 @@ void GeappliancesBridge::initialize_erd_bridge_()
       this->feature_bit_manager_.get_valid_erd_count() > 0) {
     this->erd_registry_.set_valid_erds(this->feature_bit_manager_.get_valid_erds(),
                                        this->feature_bit_manager_.get_valid_erd_count());
+    // Merge custom ERDs so they always pass the filter.
+    if (this->custom_erds_count_ > 0) {
+      this->erd_registry_.add_valid_erds(this->custom_erds_, this->custom_erds_count_);
+    }
   }
+
+  // Wire the ErdRegistry to the subscription bridge so it filters
+  // subscription publications before they enter the cache. When
+  // appliance_api_parsing is disabled, the registry has no filter active
+  // (is_valid returns true for all ERDs), so this is a no-op.
+  erd_bridge_subscribe_set_erd_registry(&this->erd_bridge_subscribe_, &this->erd_registry_);
 
   // Select operating mode.
   bool        use_polling = false;
