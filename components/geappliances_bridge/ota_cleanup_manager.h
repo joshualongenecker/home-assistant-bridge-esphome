@@ -102,7 +102,7 @@ private:
   bool ota_cleanup_in_progress_{false};
   bool ota_discovery_publishing_{false};
   bool ota_reboot_pending_{false};
-  uint32_t ota_reboot_start_ms_{0};
+  [[maybe_unused]] uint32_t ota_reboot_start_ms_{0};
   bool discovery_refresh_in_progress_{false};
   bool initial_discovery_needed_{false};
   bool initial_discovery_done_{false};

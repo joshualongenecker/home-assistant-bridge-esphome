@@ -21,6 +21,7 @@
 
 GEA_TAG(TAG) = "ota_cleanup_manager";
 
+#if defined(USE_ESP_IDF) && !defined(USE_ESP_IDF_STUBS)
 static uint32_t discovery_data_hash(const ha_discovery_manager_t* manager)
 {
   // Mix the optional custom-profile hash with the built-in discovery hash.
@@ -30,6 +31,7 @@ static uint32_t discovery_data_hash(const ha_discovery_manager_t* manager)
   return HA_DISCOVERY_DATA_HASH ^ (custom + 0x9e3779b9u +
       (HA_DISCOVERY_DATA_HASH << 6) + (HA_DISCOVERY_DATA_HASH >> 2));
 }
+#endif
 
 namespace esphome {
 namespace geappliances_bridge {
