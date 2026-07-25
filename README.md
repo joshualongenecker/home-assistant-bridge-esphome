@@ -11,9 +11,6 @@ ESPHome external component bridging GE Appliances (GEA2/GEA3 serial protocols) t
 | **License** | BSD 3-Clause |
 
 
-![3D Printed Case](docs/HomeAssistantCase.png)
-
-
 ## Prerequisites
 
 The following must be configured on your Home Assistant installation before setting up the bridge:
@@ -211,6 +208,9 @@ Navigate to Settings -> Devices & Services -> Devices, and then search for your 
 ---
 
 ## 3D Printable Case
+
+![3D Printed Case](docs/HomeAssistantCase.png)
+
 
 A 3D printable enclosure is available for the adapter in the [`case/`](./case/) directory:
 
