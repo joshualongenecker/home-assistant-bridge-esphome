@@ -25,8 +25,8 @@
 #else
 #include "esp_log.h"
 #include "esp_heap_caps.h"
-#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/portable.h"
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -61,6 +61,11 @@
 
 GEA_TAG(TAG) = "ha_cleanup";
 
+/* Critical section mux for protecting shared state between the MQTT task
+ * callback and the main loop. ESP-IDF 5.5.5 requires a portMUX_TYPE* on
+ * the Xtensa port; passing it on RISC-V is harmless. */
+static portMUX_TYPE cleanup_mux = portMUX_INITIALIZER_UNLOCKED;
+
 /* Flush queued cleanup topics: publish empty retained payloads to remove them.
  * Called from cleanup_run() during idle periods, not from the MQTT callback,
  * to avoid blocking the ESP-IDF framework MQTT task. Returns the number of topics
@@ -78,9 +83,9 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
     uint16_t consumed;
     uint16_t remaining;
 
-    vPortEnterCritical();
+    taskENTER_CRITICAL(&cleanup_mux);
     if (self->queue_count == 0) {
-        vPortExitCritical();
+        taskEXIT_CRITICAL(&cleanup_mux);
         return 0;
     }
 
@@ -103,7 +108,7 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
         self->queue_write_pos -= consumed;
         self->queue_count--;
         remaining = self->queue_count;
-        vPortExitCritical();
+        taskEXIT_CRITICAL(&cleanup_mux);
         return remaining;
     }
     consumed = (uint16_t)(strlen(self->topic_buf) + 1);
@@ -122,7 +127,7 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
 
     /* Read remaining count while still in critical section (fixes C3). */
     remaining = self->queue_count;
-    vPortExitCritical();
+    taskEXIT_CRITICAL(&cleanup_mux);
 
     /* Republish with empty payload to clear the retained message. */
     mqtt_client_publish_raw(self->mqtt_client, topic, "", 0, true);
@@ -140,7 +145,7 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
  *
  * THREAD SAFETY: This callback runs in the ESP-IDF framework MQTT task context (a separate
  * FreeRTOS task). Shared state (topic_buf, queue_write_pos, queue_count) is
- * protected by vPortEnterCritical()/vPortExitCritical(). This is safe on
+ * protected by taskENTER_CRITICAL()/taskEXIT_CRITICAL(). This is safe on
  * single-core ESP32-C3 where critical sections disable interrupts. On dual-core
  * ESP32, a mutex would be needed instead. The code assumes single-core. */
 CLEANUP_FN void cleanup_topic_callback(const char* topic, const char* payload, size_t payload_len, void* arg)
@@ -167,7 +172,7 @@ CLEANUP_FN void cleanup_topic_callback(const char* topic, const char* payload, s
     }
     uint16_t needed = (uint16_t)(topic_len + 1);
 
-    vPortEnterCritical();
+    taskENTER_CRITICAL(&cleanup_mux);
     /* Diagnostic: count all callbacks received (inside critical section to avoid race). */
     self->pass_received_count++;
 
@@ -184,7 +189,7 @@ CLEANUP_FN void cleanup_topic_callback(const char* topic, const char* payload, s
 
     self->pass_found_topics = true;
     self->last_activity_ms = self->get_time_ms();
-    vPortExitCritical();
+    taskEXIT_CRITICAL(&cleanup_mux);
 }
 
 CLEANUP_FN void cleanup_start(ha_discovery_cleanup_t* self)

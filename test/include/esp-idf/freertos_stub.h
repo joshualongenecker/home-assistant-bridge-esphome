@@ -83,8 +83,10 @@ static inline BaseType_t xSemaphoreGive(SemaphoreHandle_t sem) {
 static inline void vSemaphoreDelete(SemaphoreHandle_t) { }
 
 /* ---------- Critical section ---------- */
-static inline void vPortEnterCritical(void) { }
-static inline void vPortExitCritical(void) { }
+typedef void* portMUX_TYPE;
+#define portMUX_INITIALIZER_UNLOCKED (NULL)
+#define taskENTER_CRITICAL(x) do { (void)(x); } while (0)
+#define taskEXIT_CRITICAL(x) do { (void)(x); } while (0)
 
 /* ---------- Task state ---------- */
 typedef enum {
