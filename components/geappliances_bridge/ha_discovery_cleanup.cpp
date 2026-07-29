@@ -119,26 +119,25 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
         consumed = self->queue_write_pos;
     }
 
-    /* Compact: shift remaining data to front. */
+    /* Compact: shift remaining data to front. Save pre-compact state
+     * so we can undo if the publish fails. */
+    uint16_t saved_write_pos = self->queue_write_pos;
+    uint16_t saved_count = self->queue_count;
     memmove(self->topic_buf, self->topic_buf + consumed,
             self->queue_write_pos - consumed);
     self->queue_write_pos -= consumed;
     self->queue_count--;
     self->pass_removed_count++;
-
-    /* Exit critical section before publishing — don't hold the mutex
-     * across an outbound MQTT call. If the publish fails, the topic
-     * stays in the queue and is retried on the next flush call. */
     taskEXIT_CRITICAL(&cleanup_mux);
 
     if (!mqtt_client_publish_raw(self->mqtt_client, topic, "", 0, true)) {
-        /* Publish dropped (queue full) — leave the topic in the queue
-         * for retry. Undo the compact so the topic is still at the front. */
+        /* Publish dropped (queue full) — undo the compact using saved
+         * state. The saved values were captured inside the critical
+         * section so they are consistent even if the callback fires
+         * during the publish attempt. */
         taskENTER_CRITICAL(&cleanup_mux);
-        memmove(self->topic_buf + consumed, self->topic_buf,
-                self->queue_write_pos - consumed);
-        self->queue_write_pos += consumed;
-        self->queue_count++;
+        self->queue_write_pos = saved_write_pos;
+        self->queue_count = saved_count;
         self->pass_removed_count--;
         remaining = self->queue_count;
         taskEXIT_CRITICAL(&cleanup_mux);
