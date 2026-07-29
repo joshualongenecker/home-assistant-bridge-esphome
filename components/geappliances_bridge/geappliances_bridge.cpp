@@ -54,7 +54,11 @@ static const char* bridge_mode_name(esphome::geappliances_bridge::BridgeMode mod
 
 void GeappliancesBridge::add_custom_erd(tiny_erd_t erd)
 {
-  if (this->custom_erds_count_ >= CUSTOM_ERDS_MAX) return;
+  if (this->custom_erds_count_ >= CUSTOM_ERDS_MAX) {
+    ESP_LOGW(TAG, "Custom ERD 0x%04x dropped: capacity limit (%u) reached",
+             (unsigned)erd, (unsigned)CUSTOM_ERDS_MAX);
+    return;
+  }
   this->custom_erds_[this->custom_erds_count_++] = erd;
 }
 
