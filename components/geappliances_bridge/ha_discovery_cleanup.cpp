@@ -126,15 +126,32 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
     self->queue_count--;
     self->pass_removed_count++;
 
-    /* Read remaining count while still in critical section (fixes C3). */
-    remaining = self->queue_count;
+    /* Exit critical section before publishing — don't hold the mutex
+     * across an outbound MQTT call. If the publish fails, the topic
+     * stays in the queue and is retried on the next flush call. */
     taskEXIT_CRITICAL(&cleanup_mux);
 
-    /* Republish with empty payload to clear the retained message. */
-    mqtt_client_publish_raw(self->mqtt_client, topic, "", 0, true);
+    if (!mqtt_client_publish_raw(self->mqtt_client, topic, "", 0, true)) {
+        /* Publish dropped (queue full) — leave the topic in the queue
+         * for retry. Undo the compact so the topic is still at the front. */
+        taskENTER_CRITICAL(&cleanup_mux);
+        memmove(self->topic_buf + consumed, self->topic_buf,
+                self->queue_write_pos - consumed);
+        self->queue_write_pos += consumed;
+        self->queue_count++;
+        self->pass_removed_count--;
+        remaining = self->queue_count;
+        taskEXIT_CRITICAL(&cleanup_mux);
+        ESP_LOGW(TAG, "Cleanup publish dropped, will retry: %s", topic);
+        return remaining;
+    }
+
     ESP_LOGD(TAG, "Removed old topic: %s", topic);
 
-    /* No vTaskDelay — flush one topic per call to keep main loop responsive (fixes C4). */
+    /* Read remaining count after successful publish. */
+    taskENTER_CRITICAL(&cleanup_mux);
+    remaining = self->queue_count;
+    taskEXIT_CRITICAL(&cleanup_mux);
 
     return remaining;
 }

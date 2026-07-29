@@ -13,7 +13,7 @@ from esphome.core import CORE, EnumValue, ID
 _LOGGER = logging.getLogger(__name__)
 
 CODEOWNERS = ["@joshualongenecker"]
-DEPENDENCIES = ["uart"]
+DEPENDENCIES = ["uart", "mqtt"]
 AUTO_LOAD = ["sensor", "button"]
 
 # UART configuration keys
