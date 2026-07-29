@@ -10,7 +10,6 @@ ESPHome external component bridging GE Appliances (GEA2/GEA3 serial protocols) t
 | **Platform** | ESP32-C3 / ESP32-C6, ESP-IDF framework |
 | **License** | BSD 3-Clause |
 
----
 
 ## Prerequisites
 
@@ -207,6 +206,20 @@ Navigate to Settings -> Devices & Services -> Devices, and then search for your 
 | [Contributing](./CONTRIBUTING.md) | Development workflow |
 
 ---
+
+## 3D Printable Case
+
+![3D Printed Case](docs/HomeAssistantCase.png)
+
+
+A 3D printable enclosure is available for the adapter in the [`case/`](./case/) directory:
+
+| File | Description |
+|---|---|
+| [Case\_Upper.stl](./case/Case_Upper.stl) | Upper half of the case |
+| [Case\_Lower.stl](./case/Case_Lower.stl) | Lower half of the case |
+| [Case.step](./case/Case.step) | Combined STEP model (CAD) |
+
 
 ## License
 
