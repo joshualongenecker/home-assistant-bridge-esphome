@@ -26,8 +26,7 @@ Scans the shared ERD cache and publishes updated ERDs to MQTT topics with `retai
 
 ### ESP-IDF: Background Task
 
-On ESP-IDF, the publisher runs as a FreeRTOS task (`erd_mqtt_pub`) with:
-- **Stack**: 2048 bytes (static allocation via `xTaskCreateStatic`)
+- **Stack**: 2048 bytes (static allocation via `xTaskCreateStaticPinnedToCore` on dual-core ESP32, `xTaskCreateStatic` on single-core)
 - **Priority**: 2
 - **Scheduling**: Blocks on `work_semaphore` with `portMAX_DELAY` (no timeout). The main loop controls pacing via `erd_cache_mqtt_publisher_signal_work()`.
 

@@ -12,7 +12,7 @@
  * the background MQTT publisher task. On dual-core ESP32 the publisher
  * is pinned to Core 1 (same core as ESPHome's main loop task) via
  * xTaskCreateStaticPinnedToCore, so both access paths run on the same
- * core and cannot execute concurrently. No mutex is needed. */
+ * core and cannot execute in parallel. No mutex is needed. */
 
 #ifndef erd_cache_h
 #define erd_cache_h
@@ -103,7 +103,7 @@ static inline void erd_cache_mark_unpublished(erd_cache_t* self, erd_cache_entry
  *
  * Thread safety: see erd_cache_mark_published() above.  On dual-core ESP32 both the
  * publisher task and the main loop run on Core 1 (task is pinned), so they cannot
- * execute concurrently. tick_cooldowns touches entries with update_required=true;
+ * execute in parallel. tick_cooldowns touches entries with update_required=true;
  * mark_published touches entries whose update_required was just cleared — disjoint sets. */
 static inline void erd_cache_tick_cooldowns(erd_cache_t* self) {
   if (self->max_cooldown == 0) return;

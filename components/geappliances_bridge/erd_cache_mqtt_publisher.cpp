@@ -40,7 +40,10 @@ static void mqtt_publisher_task(void* arg)
 
     // Acquire mutex to safely read shared state (mqtt_connected, cache pointers,
     // publish_index) and protect the entire drain loop. These fields can be
-    // modified by the main loop during context switches.
+    // modified by the main loop during preemptive context switches. The mutex
+    // protects against interleaving on the same core — cross-core parallelism
+    // is prevented by pinning both tasks to Core 1 (dual-core) or by
+    // single-core hardware (C3, C6).
     bool connected = false;
     bool has_deps = false;
     bool paused = false;

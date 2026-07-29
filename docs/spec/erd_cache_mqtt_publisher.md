@@ -77,7 +77,7 @@ On ESP-IDF:
 - Guard against already-running task (`task_handle != NULL`)
 - Guard against failed semaphore creation (`work_semaphore == NULL`)
 - Set `task_running = true`
-- Create the static task via `xTaskCreateStatic()` with 2048-byte stack, priority 2, name `"erd_mqtt_pub"`
+- Create the static task via `xTaskCreateStaticPinnedToCore()` (Core 1, dual-core) or `xTaskCreateStatic()` (single-core) with 2048-byte stack, priority 2, name `"erd_mqtt_pub"`
 - On task creation failure: log error, set `task_running = false`
 
 On non-ESP-IDF: no-op.
@@ -117,7 +117,7 @@ On non-ESP-IDF: no-op.
 
 On ESP-IDF, the publisher runs as a FreeRTOS task (`mqtt_publisher_task`) with:
 
-- **Stack**: 2048 bytes, statically allocated via `xTaskCreateStatic` (no heap allocation)
+- **Stack**: 2048 bytes, statically allocated via `xTaskCreateStaticPinnedToCore` on dual-core or `xTaskCreateStatic` on single-core (no heap allocation)
 - **Priority**: 2
 - **Name**: `"erd_mqtt_pub"`
 - **Scheduling**: Blocks on `work_semaphore` with `portMAX_DELAY` (no timeout). The main loop controls pacing by calling `erd_cache_mqtt_publisher_signal_work()` when cache entries are updated.
