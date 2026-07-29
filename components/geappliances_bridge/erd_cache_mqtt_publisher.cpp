@@ -221,6 +221,15 @@ void erd_cache_mqtt_publisher_start(erd_cache_mqtt_publisher_t* self)
   if (self->task_handle != NULL) return; // already running
   if (self->work_semaphore == NULL) return; // semaphore creation failed in init
   self->task_running = true;
+  /* Pin the publisher task to the same core as ESPHome's main loop.
+   * ESPHome pins its loop task to Core 1 on dual-core ESP32
+   * (esphome/components/esp32/core.cpp: xTaskCreateStaticPinnedToCore(..., 1)).
+   * On dual-core ESP32-S3 the erd_cache_t is accessed from both the
+   * main loop and this task.  The cache has no mutex — thread safety
+   * relies on single-core ordering (tick → signal_work → drain).
+   * Running on the same core as the main loop restores that guarantee.
+   * On single-core chips (C3, C6) the coreID is ignored. */
+#if CONFIG_FREERTOS_UNICORE
   self->task_handle = xTaskCreateStatic(
       mqtt_publisher_task,
       "erd_mqtt_pub",
@@ -229,6 +238,17 @@ void erd_cache_mqtt_publisher_start(erd_cache_mqtt_publisher_t* self)
       2,
       self->task_stack,
       &self->task_tcb);
+#else
+  self->task_handle = xTaskCreateStaticPinnedToCore(
+      mqtt_publisher_task,
+      "erd_mqtt_pub",
+      2048 / sizeof(StackType_t),  /* words, matching task_stack[] size */
+      self,
+      2,
+      self->task_stack,
+      &self->task_tcb,
+      1);  /* Core 1 — same core as ESPHome's main loop task */
+#endif
   if (self->task_handle == NULL) {
     ESP_LOGE(PUBLISHER_TAG, "Failed to create MQTT publisher task");
     self->task_running = false;

@@ -7,7 +7,12 @@
  * (GEA3 max payload) are rejected. ERD size is invariant after registration —
  * updates are in-place memcpy with no allocation or deallocation. Change
  * detection is done at insert/update time, eliminating per-read memcmp overhead.
- */
+ *
+ * Thread safety: The cache is accessed from both the main loop and
+ * the background MQTT publisher task. On dual-core ESP32 the publisher
+ * is pinned to Core 1 (same core as ESPHome's main loop task) via
+ * xTaskCreateStaticPinnedToCore, so both access paths run on the same
+ * core and cannot execute concurrently. No mutex is needed. */
 
 #ifndef erd_cache_h
 #define erd_cache_h
@@ -70,9 +75,11 @@ void erd_cache_set_throttle_rate_seconds(erd_cache_t* self, uint8_t rate);
  * Static inline — zero overhead when max_cooldown is 0 (early return).
  *
  * Thread safety: with the ESP-IDF framework this is called from the background MQTT publisher
- * task while tick_cooldowns() runs from the main loop.  On single-core ESP32
- * uint8_t access is atomic and the tick→signal_work ordering in loop() ensures
- * the tick always runs before the task drains, so no additional locking is needed. */
+ * task while tick_cooldowns() runs from the main loop.  On dual-core ESP32 the publisher
+ * is pinned to Core 1 (same core as ESPHome's main loop) via
+ * xTaskCreateStaticPinnedToCore, so both access paths run on the same core.
+ * The tick→signal_work ordering in loop() ensures the tick always runs before
+ * the task drains. No additional locking is needed. */
 static inline void erd_cache_mark_published(erd_cache_t* self, erd_cache_entry_t* entry) {
   if (self->max_cooldown == 0 || entry == NULL) return;
   entry->publish_cooldown = self->max_cooldown;
@@ -94,9 +101,10 @@ static inline void erd_cache_mark_unpublished(erd_cache_t* self, erd_cache_entry
 /* Decrement publish_cooldown for all entries with update_required=true.
  * Call once per second. Static inline — zero overhead when max_cooldown is 0.
  *
- * Thread safety: see erd_cache_mark_published() above.  This only touches
- * entries with update_required=true; mark_published() only touches entries
- * whose update_required was just cleared, so they operate on disjoint sets. */
+ * Thread safety: see erd_cache_mark_published() above.  On dual-core ESP32 both the
+ * publisher task and the main loop run on Core 1 (task is pinned), so they cannot
+ * execute concurrently. tick_cooldowns touches entries with update_required=true;
+ * mark_published touches entries whose update_required was just cleared — disjoint sets. */
 static inline void erd_cache_tick_cooldowns(erd_cache_t* self) {
   if (self->max_cooldown == 0) return;
   for (uint16_t i = 0; i < ERD_CACHE_CAPACITY; i++) {
