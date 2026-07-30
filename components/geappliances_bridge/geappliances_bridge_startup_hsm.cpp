@@ -84,8 +84,8 @@ tiny_hsm_result_t startup_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, c
 // ============================================================================
 // Phase 1.5: Startup Delay — wait for appliance board to stabilize
 //
-// Waits AUTODISCOVERY_STARTUP_DELAY_MS (5 seconds) before transitioning to
-// autodiscovery.  This gives the appliance board time to boot and be ready
+// Waits for the configured startup delay before transitioning to
+// autodiscovery. This gives the appliance board time to boot and be ready
 // to respond to broadcast requests.
 // ============================================================================
 
@@ -97,8 +97,7 @@ tiny_hsm_result_t startup_state_startup_delay(tiny_hsm_t* hsm, tiny_hsm_signal_t
   switch (signal) {
     case tiny_hsm_signal_entry:
       svc->record_startup_delay_start();
-      ESP_LOGI(TAG, "Startup: %u second stabilization delay",
-               static_cast<unsigned>(AUTODISCOVERY_STARTUP_DELAY_MS / 1000));
+      ESP_LOGI(TAG, "Startup: stabilization delay");
       break;
 
     case signal_run_loop:

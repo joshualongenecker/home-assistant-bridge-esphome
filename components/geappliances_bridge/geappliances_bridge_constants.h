@@ -45,8 +45,8 @@ static constexpr tiny_erd_t ERD_APPLIANCE_FEATURE_API_9 = 0x010D;
 // GEA bus broadcast address (all nodes respond)
 static constexpr uint8_t GEA_BROADCAST_ADDRESS = 0xFF;
 
-// Autodiscovery startup delay (bridge waits before starting broadcast discovery).
-static constexpr uint32_t AUTODISCOVERY_STARTUP_DELAY_MS = 10000;
+// Default boot stabilization delay before MQTT and appliance traffic starts.
+static constexpr uint32_t AUTODISCOVERY_STARTUP_DELAY_MS = 5000;
 
 // Each appliance feature API ERD has the layout [2B type][2B version][4B bitmap]
 static constexpr uint8_t APPLIANCE_FEATURE_ERD_SIZE = 8;

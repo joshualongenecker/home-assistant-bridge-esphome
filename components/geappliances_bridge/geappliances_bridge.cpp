@@ -113,7 +113,7 @@ void GeappliancesBridge::setup() {
   this->gea2_last_ms_ = 0;
   ESP_LOGCONFIG(TAG, "Setting up GE Appliances Bridge...");
 
-  this->setup_mqtt_connection_gate_();
+  this->setup_mqtt_startup_delay_();
 
   // Initialize timer group
   tiny_timer_group_init(&this->timer_group_, esphome_time_source_init());
@@ -233,8 +233,8 @@ void GeappliancesBridge::setup() {
   // device_id_state_ stays IDLE until autodiscovery completes
 
   // The startup HSM handles the boot stabilization delay before autodiscovery.
-  ESP_LOGI(TAG, "Waiting %lu seconds before starting autodiscovery...",
-           (unsigned long)(AUTODISCOVERY_STARTUP_DELAY_MS / 1000));
+  ESP_LOGI(TAG, "Waiting %lu ms before starting MQTT and appliance discovery...",
+           (unsigned long)this->startup_delay_ms_);
 
   // Initialize OTA cleanup manager with references to needed bridge state.
   this->ota_cleanup_manager_.init(
@@ -266,12 +266,6 @@ void GeappliancesBridge::setup() {
 }
 
 void GeappliancesBridge::loop() {
-
-  // Process the gate from loop(), after ESPHome has completed setup of the
-  // MQTT client.  Calling MQTTClientComponent::enable() from a sensor's setup
-  // callback could otherwise start DNS lookup before MQTT has initialized its
-  // backend callbacks.
-  this->update_mqtt_connection_gate_();
 
   // Drive the GEA2/GEA3 protocol stack FIRST so that UART bytes are
   // processed before any MQTT work.  The tight loop must run before
@@ -317,6 +311,10 @@ void GeappliancesBridge::loop() {
   esp_task_wdt_reset();
 #endif
 
+  // Enable MQTT only after the startup HSM has completed its stabilization
+  // phase. Running this after the HSM lets ESPHome finish MQTT setup first.
+  this->update_mqtt_startup_delay_();
+
   this->update_publisher_state_();
 
 
@@ -327,40 +325,28 @@ void GeappliancesBridge::loop() {
   this->diagnostic_sensor_publisher_.loop();
 }
 
-void GeappliancesBridge::setup_mqtt_connection_gate_()
+void GeappliancesBridge::setup_mqtt_startup_delay_()
 {
-  if (this->mqtt_enable_when_ == nullptr) {
-    return;
-  }
-
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
   if (mqtt_client == nullptr) {
-    ESP_LOGE(TAG, "MQTT connection gate configured, but no MQTT client is available");
+    ESP_LOGE(TAG, "MQTT startup delay configured, but no MQTT client is available");
     return;
   }
 
   // This bridge has DATA setup priority, which runs before ESPHome's MQTT
-  // setup.  Suppressing enable_on_boot here prevents a Wi-Fi-route MQTT
-  // connection from being opened before a VPN/network gate is ready.
+  // setup. Suppressing enable_on_boot here prevents a connection attempt
+  // before the boot stabilization delay has elapsed.
   mqtt_client->set_enable_on_boot(false);
   mqtt_client->disable();
 
-  this->mqtt_enable_when_->add_on_state_callback([this](bool state) {
-    this->mqtt_connection_gate_enabled_ = state;
-    this->mqtt_connection_gate_state_known_ = true;
-  });
-
-  if (this->mqtt_enable_when_->has_state()) {
-    this->mqtt_connection_gate_enabled_ = this->mqtt_enable_when_->state;
-    this->mqtt_connection_gate_state_known_ = true;
-  }
-
-  ESP_LOGCONFIG(TAG, "  MQTT Connection Gate: configured");
+  ESP_LOGCONFIG(TAG, "  MQTT Startup Delay: %lu ms", (unsigned long)this->startup_delay_ms_);
 }
 
-void GeappliancesBridge::update_mqtt_connection_gate_()
+void GeappliancesBridge::update_mqtt_startup_delay_()
 {
-  if (this->mqtt_enable_when_ == nullptr || !this->mqtt_connection_gate_state_known_) {
+  if (this->mqtt_startup_delay_released_ ||
+      this->startup_hsm_wrapper_.hsm.current == nullptr ||
+      !this->is_startup_delay_elapsed()) {
     return;
   }
 
@@ -369,21 +355,9 @@ void GeappliancesBridge::update_mqtt_connection_gate_()
     return;
   }
 
-  if (this->mqtt_connection_gate_applied_ &&
-      this->mqtt_connection_gate_last_applied_state_ == this->mqtt_connection_gate_enabled_) {
-    return;
-  }
-
-  if (this->mqtt_connection_gate_enabled_) {
-    ESP_LOGD(TAG, "MQTT connection gate open; enabling MQTT");
-    mqtt_client->enable();
-  } else {
-    ESP_LOGD(TAG, "MQTT connection gate closed; disabling MQTT");
-    mqtt_client->disable();
-  }
-
-  this->mqtt_connection_gate_last_applied_state_ = this->mqtt_connection_gate_enabled_;
-  this->mqtt_connection_gate_applied_ = true;
+  ESP_LOGI(TAG, "Startup delay elapsed; enabling MQTT");
+  mqtt_client->enable();
+  this->mqtt_startup_delay_released_ = true;
 }
 // ---------------------------------------------------------------------------
 // Publisher pause/resume + steady-state detection
@@ -815,7 +789,7 @@ void GeappliancesBridge::record_startup_delay_start()
 
 bool GeappliancesBridge::is_startup_delay_elapsed() const
 {
-  return millis() - startup_delay_start_ms_ >= AUTODISCOVERY_STARTUP_DELAY_MS;
+  return millis() - startup_delay_start_ms_ >= startup_delay_ms_;
 }
 
 // -- Bridge initialization ----------------------------------------------------

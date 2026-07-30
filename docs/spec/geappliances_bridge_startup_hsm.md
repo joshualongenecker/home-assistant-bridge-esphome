@@ -84,7 +84,7 @@ Handles `entry` and `exit` signals with no action. All other signals return `tin
 
 #### `startup_state_startup_delay`
 
-Waits for the appliance board to stabilize before starting autodiscovery. Duration is `AUTODISCOVERY_STARTUP_DELAY_MS` (10 seconds).
+Waits for the appliance board to stabilize before starting autodiscovery. Duration is the configured `startup_delay` (5 seconds by default).
 
 - **On entry:** Calls `svc->record_startup_delay_start()` to record the start time.
 - **On `signal_run_loop`:** Checks `svc->is_startup_delay_elapsed()`. If elapsed, transitions to `startup_state_autodiscovery`.
@@ -254,7 +254,7 @@ Each state function receives `tiny_hsm_t* hsm`, `tiny_hsm_signal_t signal`, and 
 | `tiny_hsm` | Hierarchical state machine framework (state transitions, signal dispatch, parent hierarchy) |
 | `IBridgeServices` | Abstract contract implemented by `GeappliancesBridge`; the HSM invokes bridge operations through this interface without compile-time dependency on the concrete class |
 | ESPHome `mqtt::global_mqtt_client` | MQTT connection state check (used by `IBridgeServices` implementations in feature_bits / bridge_init states) |
-| `geappliances_bridge_constants.h` | Timing constants (`AUTODISCOVERY_STARTUP_DELAY_MS`) and bridge mode enum (`BRIDGE_MODE_AUTO`) |
+| `geappliances_bridge_constants.h` | Default startup-delay constant and bridge mode enum (`BRIDGE_MODE_AUTO`) |
 
 ---
 

@@ -56,7 +56,7 @@ ERD `0x0092` reports common-feature flags; ERDs `0x0093`–`0x0097` and `0x0109`
 | Constant | Value | Description |
 |----------|-------|-------------|
 | `GEA_BROADCAST_ADDRESS` | `0xFF` | GEA bus broadcast address; all nodes respond. Used during autodiscovery. |
-| `AUTODISCOVERY_STARTUP_DELAY_MS` | `10000` | Delay (ms) before the bridge starts broadcast discovery after initialization. |
+| `AUTODISCOVERY_STARTUP_DELAY_MS` | `5000` | Default delay (ms) before the bridge starts MQTT and appliance discovery after initialization. |
 | `APPLIANCE_FEATURE_ERD_SIZE` | `8` | Byte size of each appliance feature API ERD value (`[2B type][2B version][4B bitmap]`). |
 
 ### 2.4 Inline Helper Functions

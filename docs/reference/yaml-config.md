@@ -61,23 +61,23 @@ Complete reference for the `geappliances_bridge` ESPHome component configuration
 | **Range** | 0–255 |
 | **Description** | Minimum interval in seconds between MQTT publishes for any individual ERD. Set to `0` to disable throttling (publish on every update). Useful for reducing MQTT traffic when the appliance generates frequent updates. |
 
-### `mqtt_enable_when`
+### `startup_delay`
 
 | Property | Value |
 |---|---|
-| **Type** | binary sensor `id` |
-| **Default** | None (MQTT uses normal ESPHome behavior) |
-| **Description** | Gates the global ESPHome MQTT client on a connectivity binary sensor. MQTT remains disabled until the sensor is `on`, is disabled immediately when it becomes `off`, and reconnects when it returns to `on`. This is useful when the broker is reachable only through a VPN. |
+| **Type** | time period |
+| **Default** | `5s` |
+| **Description** | Defers appliance discovery/communication and the ESPHome MQTT client's first connection attempt after boot. This prevents simultaneous Wi-Fi, MQTT, and GEA traffic during boot. |
 
-For example, with the `esphome-tailscale` package:
+For example, to wait 30 seconds before starting bridge and MQTT activity:
 
 ```yaml
 geappliances_bridge:
   gea3_uart_id: gea3_uart
-  mqtt_enable_when: tailscale_connected
+  startup_delay: 30s
 ```
 
-The bridge automatically suppresses MQTT's normal `enable_on_boot` behavior while this option is configured. No Tailscale-specific dependency is added; any ESPHome binary sensor can be used.
+The bridge suppresses MQTT's normal `enable_on_boot` behavior while it is present, then enables MQTT once the delay elapses.
 
 ### `generate_device_config`
 

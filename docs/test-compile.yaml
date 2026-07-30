@@ -44,12 +44,6 @@ mqtt:
   discovery: true
   discovery_prefix: homeassistant
 
-# Stand-in connectivity gate used to compile-test mqtt_enable_when. Production
-# configurations can point this at a VPN connection sensor instead.
-binary_sensor:
-  - platform: template
-    id: mqtt_connection_gate
-
 # UART configuration for GEA3 communication
 uart:
   # UART configuration for GEA3 communication
@@ -69,7 +63,7 @@ uart:
 geappliances_bridge:
   gea3_uart_id: gea3_uart
   gea2_uart_id: gea2_uart
-  mqtt_enable_when: mqtt_connection_gate
+  startup_delay: 30s
   # device_id: "YourDeviceId"   # Optional: Uncomment to use a custom device ID
   # mode: auto                  # Default: auto   Options: auto, subscribe, poll
   # polling_interval: 10000     # Default: 10000 ms (10 seconds), used when in polling mode

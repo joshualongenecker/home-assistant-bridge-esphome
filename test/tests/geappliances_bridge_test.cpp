@@ -23,10 +23,14 @@ using namespace esphome::geappliances_bridge;
 // to test capacity without accessing protected members.
 static const uint16_t TEST_CUSTOM_ERDS_MAX = 128;
 
-class MqttGateBridge : public GeappliancesBridge {
+class MqttDelayBridge : public GeappliancesBridge {
  public:
-  void setup_mqtt_gate_for_test() { this->setup_mqtt_connection_gate_(); }
-  void update_mqtt_gate_for_test() { this->update_mqtt_connection_gate_(); }
+  void setup_mqtt_delay_for_test() { this->setup_mqtt_startup_delay_(); }
+  void update_mqtt_delay_for_test() { this->update_mqtt_startup_delay_(); }
+  void begin_startup_delay_for_test() {
+    this->record_startup_delay_start();
+    this->startup_hsm_wrapper_.hsm.current = startup_state_startup_delay;
+  }
 };
 
 TEST_GROUP(geappliances_bridge)
@@ -109,34 +113,32 @@ TEST(geappliances_bridge, set_generate_device_config)
   bridge.set_generate_device_config(false);
 }
 
-TEST(geappliances_bridge, mqtt_connection_gate_enables_and_disables_mqtt)
+TEST(geappliances_bridge, mqtt_startup_delay_enables_mqtt_once_elapsed)
 {
-  MqttGateBridge gated_bridge;
+  MqttDelayBridge delayed_bridge;
   esphome::mqtt::MqttTestDouble mqtt_client;
-  esphome::binary_sensor::BinarySensor gate;
   esphome::mqtt::global_mqtt_client = &mqtt_client;
 
-  gated_bridge.set_mqtt_enable_when(&gate);
-  gated_bridge.setup_mqtt_gate_for_test();
+  esphome_hal_double_set_millis(0);
+  delayed_bridge.set_startup_delay(5000);
+  delayed_bridge.setup_mqtt_delay_for_test();
 
   CHECK_FALSE(mqtt_client.enable_on_boot_);
   CHECK_FALSE(mqtt_client.enabled_);
   CHECK_EQUAL(1, mqtt_client.disable_calls_);
 
-  gate.publish_state(true);
-  gated_bridge.update_mqtt_gate_for_test();
+  delayed_bridge.begin_startup_delay_for_test();
+  delayed_bridge.update_mqtt_delay_for_test();
+  CHECK_EQUAL(0, mqtt_client.enable_calls_);
+
+  esphome_hal_double_set_millis(5000);
+  delayed_bridge.update_mqtt_delay_for_test();
   CHECK_TRUE(mqtt_client.enabled_);
   CHECK_EQUAL(1, mqtt_client.enable_calls_);
 
-  // Re-running the bridge loop without a gate transition must not repeatedly
-  // re-enable MQTT or restart its connection attempt.
-  gated_bridge.update_mqtt_gate_for_test();
+  // Re-running without a new boot must not restart the MQTT connection.
+  delayed_bridge.update_mqtt_delay_for_test();
   CHECK_EQUAL(1, mqtt_client.enable_calls_);
-
-  gate.publish_state(false);
-  gated_bridge.update_mqtt_gate_for_test();
-  CHECK_FALSE(mqtt_client.enabled_);
-  CHECK_EQUAL(2, mqtt_client.disable_calls_);
 
   esphome::mqtt::global_mqtt_client = nullptr;
 }
