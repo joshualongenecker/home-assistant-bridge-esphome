@@ -66,7 +66,7 @@ Complete reference for the `geappliances_bridge` ESPHome component configuration
 | Property | Value |
 |---|---|
 | **Type** | time period |
-| **Default** | `5s` |
+| **Default** | `10s` |
 | **Description** | Defers appliance discovery/communication and the ESPHome MQTT client's first connection attempt after boot. This prevents simultaneous Wi-Fi, MQTT, and GEA traffic during boot. |
 
 For example, to wait 30 seconds before starting bridge and MQTT activity:

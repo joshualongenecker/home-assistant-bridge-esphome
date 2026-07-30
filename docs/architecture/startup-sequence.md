@@ -57,7 +57,7 @@ sequenceDiagram
 
 ### Phase 1: Startup Delay
 
-Waits for the configured `startup_delay` (5 seconds by default) for the appliance board
+Waits for the configured `startup_delay` (10 seconds by default) for the appliance board
 to stabilize before beginning broadcast discovery. UART and protocol
 initialization occur earlier in `setup()`. The HSM polls
 `is_startup_delay_elapsed()` on each `signal_run_loop` iteration.
@@ -65,7 +65,7 @@ initialization occur earlier in `setup()`. The HSM polls
 | Detail | Value |
 |---|---|
 | **Source** | `geappliances_bridge_startup_hsm.cpp` `startup_state_startup_delay` |
-| **Duration** | 5 seconds by default (`startup_delay`) |
+| **Duration** | 10 seconds by default (`startup_delay`) |
 | **Failure behavior** | None (unconditional delay) |
 | **Transition** | `autodiscovery` |
 

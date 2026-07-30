@@ -143,7 +143,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_GEA2_UART_ID): cv.use_id(uart.UARTComponent),
         cv.Optional(CONF_ADAPTER_ADDRESS, default=0xE4): cv.int_range(min=0x00, max=0xFF),
         cv.Optional(CONF_BOARD_ADDRESS): cv.int_range(min=0x00, max=0xFF),
-        cv.Optional(CONF_STARTUP_DELAY, default="5s"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_STARTUP_DELAY, default="10s"): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_DEVICE_ID): cv.All(cv.string, cv.Length(max=91)),
         cv.Optional(CONF_MODE, default=MODE_AUTO): cv.enum(
             {

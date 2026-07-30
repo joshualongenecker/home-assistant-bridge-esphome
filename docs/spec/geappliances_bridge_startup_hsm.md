@@ -84,7 +84,7 @@ Handles `entry` and `exit` signals with no action. All other signals return `tin
 
 #### `startup_state_startup_delay`
 
-Waits for the appliance board to stabilize before starting autodiscovery. Duration is the configured `startup_delay` (5 seconds by default).
+Waits for the appliance board to stabilize before starting autodiscovery. Duration is the configured `startup_delay` (10 seconds by default).
 
 - **On entry:** Calls `svc->record_startup_delay_start()` to record the start time.
 - **On `signal_run_loop`:** Checks `svc->is_startup_delay_elapsed()`. If elapsed, transitions to `startup_state_autodiscovery`.
