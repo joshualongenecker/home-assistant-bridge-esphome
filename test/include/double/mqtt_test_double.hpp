@@ -26,6 +26,10 @@ class MqttTestDouble : public MQTTClientComponent {
  public:
   bool connected_{false};
   bool publish_should_fail_{false};
+  bool enable_on_boot_{true};
+  bool enabled_{false};
+  unsigned enable_calls_{0};
+  unsigned disable_calls_{0};
 
   std::function<void(const std::string&, const std::string&)> subscribe_callback_;
   std::function<void(bool)> on_connect_callback_;
@@ -52,6 +56,18 @@ class MqttTestDouble : public MQTTClientComponent {
 
   void set_on_disconnect(std::function<on_disconnect_callback_t>&& callback) override {
     on_disconnect_callback_ = std::move(callback);
+  }
+
+  void set_enable_on_boot(bool enable_on_boot) override { enable_on_boot_ = enable_on_boot; }
+
+  void enable() override {
+    enabled_ = true;
+    enable_calls_++;
+  }
+
+  void disable() override {
+    enabled_ = false;
+    disable_calls_++;
   }
 
   void simulate_message(const std::string& topic, const std::string& payload) {

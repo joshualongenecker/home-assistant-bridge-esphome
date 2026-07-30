@@ -14,6 +14,7 @@
 #include "geappliances_bridge.h"
 #include "bridge_mode.h"
 #include "i_bridge_services.h"
+#include "double/mqtt_test_double.hpp"
 #include "CppUTest/TestHarness.h"
 
 using namespace esphome::geappliances_bridge;
@@ -21,6 +22,12 @@ using namespace esphome::geappliances_bridge;
 // Custom ERD max is defined in the class as protected; duplicate the value here
 // to test capacity without accessing protected members.
 static const uint16_t TEST_CUSTOM_ERDS_MAX = 128;
+
+class MqttGateBridge : public GeappliancesBridge {
+ public:
+  void setup_mqtt_gate_for_test() { this->setup_mqtt_connection_gate_(); }
+  void update_mqtt_gate_for_test() { this->update_mqtt_connection_gate_(); }
+};
 
 TEST_GROUP(geappliances_bridge)
 {
@@ -100,6 +107,38 @@ TEST(geappliances_bridge, set_generate_device_config)
 {
   bridge.set_generate_device_config(true);
   bridge.set_generate_device_config(false);
+}
+
+TEST(geappliances_bridge, mqtt_connection_gate_enables_and_disables_mqtt)
+{
+  MqttGateBridge gated_bridge;
+  esphome::mqtt::MqttTestDouble mqtt_client;
+  esphome::binary_sensor::BinarySensor gate;
+  esphome::mqtt::global_mqtt_client = &mqtt_client;
+
+  gated_bridge.set_mqtt_enable_when(&gate);
+  gated_bridge.setup_mqtt_gate_for_test();
+
+  CHECK_FALSE(mqtt_client.enable_on_boot_);
+  CHECK_FALSE(mqtt_client.enabled_);
+  CHECK_EQUAL(1, mqtt_client.disable_calls_);
+
+  gate.publish_state(true);
+  gated_bridge.update_mqtt_gate_for_test();
+  CHECK_TRUE(mqtt_client.enabled_);
+  CHECK_EQUAL(1, mqtt_client.enable_calls_);
+
+  // Re-running the bridge loop without a gate transition must not repeatedly
+  // re-enable MQTT or restart its connection attempt.
+  gated_bridge.update_mqtt_gate_for_test();
+  CHECK_EQUAL(1, mqtt_client.enable_calls_);
+
+  gate.publish_state(false);
+  gated_bridge.update_mqtt_gate_for_test();
+  CHECK_FALSE(mqtt_client.enabled_);
+  CHECK_EQUAL(2, mqtt_client.disable_calls_);
+
+  esphome::mqtt::global_mqtt_client = nullptr;
 }
 
 TEST(geappliances_bridge, add_custom_erd_increments_count)

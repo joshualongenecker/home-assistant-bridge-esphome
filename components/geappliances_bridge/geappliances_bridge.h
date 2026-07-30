@@ -36,6 +36,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/sensor/sensor.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/button/button.h"
 #include "esphome/core/application.h"
@@ -121,6 +122,10 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   void set_mqtt_disconnect_count_sensor(sensor::Sensor* sensor) { this->mqtt_disconnect_count_sensor_ = sensor; this->diagnostic_sensor_publisher_.set_mqtt_disconnect_count_sensor(sensor); }
   void set_mqtt_disconnect_duration_sensor(sensor::Sensor* sensor) { this->mqtt_disconnect_duration_sensor_ = sensor; this->diagnostic_sensor_publisher_.set_mqtt_disconnect_duration_sensor(sensor); }
   void set_throttle_rate_seconds(uint8_t rate) { this->throttle_rate_seconds_ = rate; }
+  /// Gate the ESPHome MQTT client's connection lifecycle on a binary sensor.
+  /// When configured, MQTT stays disabled until the sensor publishes ON and
+  /// is disabled again as soon as the sensor publishes OFF.
+  void set_mqtt_enable_when(binary_sensor::BinarySensor *sensor) { this->mqtt_enable_when_ = sensor; }
   void set_custom_ha_discovery_data(const uint8_t* data, const void* chunks, uint16_t count, uint16_t max_chunk, uint32_t hash) {
     ha_discovery_manager_set_custom_data(&this->ha_discovery_manager_, data, chunks, count, max_chunk, hash);
   }
@@ -166,6 +171,8 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   void initialize_erd_bridge_();
   void start_custom_erd_polling_();
   void maybe_start_custom_erd_polling_();
+  void setup_mqtt_connection_gate_();
+  void update_mqtt_connection_gate_();
   // Protocol stack iteration helpers (extracted from run_protocol_stack_)
   void run_gea2_iteration_();
   void run_gea3_iteration_();
@@ -222,6 +229,14 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   bool erd_bridge_initialized_{false};
   BridgeMode mode_{BRIDGE_MODE_AUTO};
   uint32_t polling_interval_ms_{10000};
+  // Optional connectivity gate for the global ESPHome MQTT client.  The
+  // bridge does not depend on any particular VPN implementation: any
+  // binary_sensor can be used here.
+  binary_sensor::BinarySensor *mqtt_enable_when_{nullptr};
+  bool mqtt_connection_gate_state_known_{false};
+  bool mqtt_connection_gate_enabled_{false};
+  bool mqtt_connection_gate_applied_{false};
+  bool mqtt_connection_gate_last_applied_state_{false};
   bool appliance_api_parsing_{true};
   bool generate_device_config_{true};
   bool filter_config_topics_{true};

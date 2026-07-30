@@ -9,7 +9,7 @@ from pathlib import Path
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import button, sensor, uart
+from esphome.components import binary_sensor, button, sensor, uart
 from esphome.const import CONF_ID, CONF_STATE_CLASS
 from esphome.core import CORE, EnumValue, ID
 
@@ -43,6 +43,7 @@ CONF_FILTER_CONFIG_TOPICS = "filter_config_topics"
 CONF_DISCOVERY_REFRESH_BUTTON = "discovery_refresh_button"
 CONF_CUSTOM_HA_DISCOVERY_FILE = "custom_ha_discovery_file"
 CONF_BOARD_ADDRESS = "board_address"
+CONF_MQTT_ENABLE_WHEN = "mqtt_enable_when"
 
 
 
@@ -142,6 +143,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_GEA2_UART_ID): cv.use_id(uart.UARTComponent),
         cv.Optional(CONF_ADAPTER_ADDRESS, default=0xE4): cv.int_range(min=0x00, max=0xFF),
         cv.Optional(CONF_BOARD_ADDRESS): cv.int_range(min=0x00, max=0xFF),
+        cv.Optional(CONF_MQTT_ENABLE_WHEN): cv.use_id(binary_sensor.BinarySensor),
         cv.Optional(CONF_DEVICE_ID): cv.All(cv.string, cv.Length(max=91)),
         cv.Optional(CONF_MODE, default=MODE_AUTO): cv.enum(
             {
@@ -262,6 +264,15 @@ async def to_code(config: dict[str, Any]) -> None:
     # Set board address if provided (probes specific address instead of broadcast)
     if CONF_BOARD_ADDRESS in config:
         cg.add(var.set_board_address(config[CONF_BOARD_ADDRESS]))
+
+    # When configured, the bridge takes ownership of the global ESPHome MQTT
+    # client's lifecycle and only enables it while this binary sensor is on.
+    # This is deliberately generic so a Tailscale connection sensor is only
+    # one possible gate; users can also use WireGuard, Ethernet, or cellular
+    # connectivity sensors.
+    if CONF_MQTT_ENABLE_WHEN in config:
+        mqtt_enable_when = await cg.get_variable(config[CONF_MQTT_ENABLE_WHEN])
+        cg.add(var.set_mqtt_enable_when(mqtt_enable_when))
 
     # Set bridge mode configuration (config[CONF_MODE] is now an integer from cv.enum)
     cg.add(var.set_mode(config[CONF_MODE]))

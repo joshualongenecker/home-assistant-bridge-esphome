@@ -40,6 +40,10 @@ class MQTTClientComponent {
   virtual void set_on_connect(std::function<on_connect_callback_t> &&callback) = 0;
   virtual void set_on_disconnect(std::function<on_disconnect_callback_t> &&callback) = 0;
 
+  virtual void set_enable_on_boot(bool /*enable_on_boot*/) {}
+  virtual void enable() {}
+  virtual void disable() {}
+
   static MQTTClientComponent* global_mqtt_client;
 };
 
