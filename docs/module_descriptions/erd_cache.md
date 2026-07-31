@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Fixed-size ERD cache with static arena storage. Stores the latest data for up to `ERD_CACHE_CAPACITY` (200) ERDs. All ERD data is stored in a contiguous static arena (bump allocator). ERDs exceeding 248 bytes (GEA3 max payload) are rejected. ERD size is invariant after registration — updates are in-place `memcpy` with no alloc or free. Change detection is done at insert/update time, eliminating per-read `memcmp` overhead.
+Fixed-size ERD cache with static arena storage. Stores the latest data for up to `ERD_CACHE_CAPACITY` (300) ERDs. All ERD data is stored in a contiguous static arena (bump allocator). ERDs exceeding 248 bytes (GEA3 max payload) are rejected. ERD size is invariant after registration — updates are in-place `memcpy` with no alloc or free. Change detection is done at insert/update time, eliminating per-read `memcmp` overhead.
 
 ## Public API
 
@@ -83,7 +83,7 @@ typedef struct {
 
 ```c
 typedef struct erd_cache_t {
-  erd_cache_entry_t entries[ERD_CACHE_CAPACITY];  // 200 entries
+  erd_cache_entry_t entries[ERD_CACHE_CAPACITY];  // 300 entries
   uint8_t arena[ERD_CACHE_ARENA_SIZE];            // 4096-byte static arena
   uint16_t arena_offset;                          // next free byte in arena
   uint32_t update_count;              // total cache updates since init

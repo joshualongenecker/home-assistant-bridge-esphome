@@ -115,7 +115,7 @@ delay response processing past the appliance's timeout window.
 ### No dynamic collections
 
 The codebase avoids `std::set`, `std::vector`, and other heap-allocating containers.
-Fixed-capacity arrays replace them: the ERD cache holds 200 entries in a static
+Fixed-capacity arrays replace them: the ERD cache holds 300 entries in a static
 array; ERD sets use sorted arrays with binary search; the custom ERD list caps at
 64 entries; the polling list uses a fixed buffer. This eliminates heap fragmentation
 risk and makes memory usage predictable.

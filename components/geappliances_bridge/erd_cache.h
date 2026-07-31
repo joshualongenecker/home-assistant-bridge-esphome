@@ -22,7 +22,7 @@
 
 #include "tiny_gea3_erd_client.h"
 
-#define ERD_CACHE_CAPACITY 200
+#define ERD_CACHE_CAPACITY 300
 #define ERD_CACHE_MAX_DATA_SIZE 248    /* GEA3 max payload: 255 - 7 byte overhead */
 #define ERD_CACHE_ARENA_SIZE 4096      /* Static arena for all ERD data */
 
@@ -60,7 +60,7 @@ void erd_cache_destroy(erd_cache_t* self);
  * Returns true if update_required was set (or entry was new).
  * Returns false if:
  *   - data_size > ERD_CACHE_MAX_DATA_SIZE (248 bytes, GEA3 limit)
- *   - cache is full (200 entries)
+ *   - cache is full (300 entries)
  *   - arena is full (4096 bytes)
  *   - data is unchanged
  *   - ERD size changed (appliance lost) */

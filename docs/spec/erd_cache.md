@@ -4,7 +4,7 @@
 
 ### 1.1 Purpose
 
-The ERD cache is a fixed-size store for the latest data of up to `ERD_CACHE_CAPACITY` (200) ERDs. All ERD data is stored in a contiguous static arena (bump allocator). ERDs exceeding 248 bytes (GEA3 max payload) are rejected. ERD data size is invariant after registration — updates are in-place `memcpy` with no allocation or deallocation. Change detection is performed at insert/update time, eliminating per-read `memcmp` overhead in the publisher loop.
+The ERD cache is a fixed-size store for the latest data of up to `ERD_CACHE_CAPACITY` (300) ERDs. All ERD data is stored in a contiguous static arena (bump allocator). ERDs exceeding 248 bytes (GEA3 max payload) are rejected. ERD data size is invariant after registration — updates are in-place `memcpy` with no allocation or deallocation. Change detection is performed at insert/update time, eliminating per-read `memcmp` overhead in the publisher loop.
 
 ### 1.2 Responsibilities
 
@@ -162,7 +162,7 @@ typedef struct {
 ### 6.2 Cache
 ```c
 typedef struct erd_cache_t {
-  erd_cache_entry_t entries[ERD_CACHE_CAPACITY];  // 200 entries
+  erd_cache_entry_t entries[ERD_CACHE_CAPACITY];  // 300 entries
   uint8_t arena[ERD_CACHE_ARENA_SIZE];            // 4096-byte static arena
   uint16_t arena_offset;                          // next free byte in arena
   uint32_t update_count;              // total cache updates since init
@@ -176,7 +176,7 @@ typedef struct erd_cache_t {
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `entries` | `erd_cache_entry_t[200]` | Fixed array of cache entries |
+| `entries` | `erd_cache_entry_t[300]` | Fixed array of cache entries |
 | `arena` | `uint8_t[4096]` | Static arena for all ERD data |
 | `arena_offset` | `uint16_t` | Bump pointer — next free byte in arena |
 | `update_count` | `uint32_t` | Total updates since init (cumulative) |
@@ -267,13 +267,13 @@ The window is determined by the call interval of the consumer (e.g., ~60 s if ca
 
 ## 10. Known Limitations
 
-1. **Fixed capacity with no eviction:** The cache holds at most 200 entries. If the cache is full and a new ERD arrives that isn't already cached, the update is silently dropped. This is acceptable because the ERD set is bounded by the appliance's supported ERDs, which is typically well under 200.
+1. **Fixed capacity with no eviction:** The cache holds at most 300 entries. If the cache is full and a new ERD arrives that isn't already cached, the update is silently dropped.
 
-2. **Fixed arena with no eviction:** The arena holds at most 4096 bytes of ERD data. If the arena is full and a new ERD arrives, the update is silently dropped. This is acceptable because typical appliance ERD sets use well under 4 KB of data.
+2. **Fixed arena with no eviction:** The arena holds at most 4096 bytes of ERD data. If the arena is full and a new ERD arrives, the update is silently dropped.
 
 3. **Max ERD size limit:** ERDs exceeding 248 bytes (GEA3 max payload) are rejected. This is a protocol limitation, not a cache limitation.
 
-4. **Linear scan for lookup:** `erd_cache_find()` scans entries sequentially. With 200 entries this is bounded and fast, but a hash map would be O(1).
+4. **Linear scan for lookup:** `erd_cache_find()` scans entries sequentially. With 300 entries this is bounded and fast, but a hash map would be O(1).
 
 5. **Linear scan for free slot:** New entry insertion scans for the first invalid slot, which is O(n) in the worst case.
 

@@ -698,22 +698,24 @@ TEST(erd_cache, insert_accepted_at_248_bytes)
 /* New test: Arena full rejects new ERD */
 TEST(erd_cache, arena_full_rejects_new_erd)
 {
-  /* Fill arena with 16 entries of 248 bytes each = 3968 bytes */
-  for (int i = 0; i < 16; i++) {
+  constexpr uint8_t entry_size = 248;
+  const uint16_t entries_to_fill = ERD_CACHE_ARENA_SIZE / entry_size;
+  /* Fill every complete 248-byte slot in the configured arena. */
+  for (uint16_t i = 0; i < entries_to_fill; i++) {
     uint8_t data[248];
     memset(data, (uint8_t)i, sizeof(data));
     tiny_erd_t erd = (tiny_erd_t)(0x0001 + i);
-    bool result = erd_cache_update(&cache, erd, data, 248);
+    bool result = erd_cache_update(&cache, erd, data, entry_size);
     CHECK_TRUE(result);
   }
-  CHECK_EQUAL(16, erd_cache_get_count(&cache));
+  CHECK_EQUAL(entries_to_fill, erd_cache_get_count(&cache));
 
-  /* Next 248-byte ERD should fail (arena_offset would be 3968 + 248 = 4216 > 4096) */
+  /* One more full-size ERD exceeds the configured arena. */
   uint8_t data[248];
   memset(data, 0xFF, sizeof(data));
-  bool result = erd_cache_update(&cache, 0xFFFF, data, 248);
+  bool result = erd_cache_update(&cache, 0xFFFF, data, entry_size);
   CHECK_FALSE(result);
-  CHECK_EQUAL(16, erd_cache_get_count(&cache));
+  CHECK_EQUAL(entries_to_fill, erd_cache_get_count(&cache));
 }
 
 /* New test: Arena usage tracking */
@@ -728,7 +730,7 @@ TEST(erd_cache, arena_usage_tracking)
   erd_cache_update(&cache, 0x0001, data, 100);
 
   CHECK_EQUAL(100, erd_cache_get_arena_usage(&cache));
-  CHECK_EQUAL(2, erd_cache_get_arena_usage_percent(&cache)); /* 100/4096 = 2.4% */
+  CHECK_EQUAL((100 * 100) / ERD_CACHE_ARENA_SIZE, erd_cache_get_arena_usage_percent(&cache));
 
   /* Add another 50 bytes */
   uint8_t data2[50];
@@ -736,5 +738,5 @@ TEST(erd_cache, arena_usage_tracking)
   erd_cache_update(&cache, 0x0002, data2, 50);
 
   CHECK_EQUAL(150, erd_cache_get_arena_usage(&cache));
-  CHECK_EQUAL(3, erd_cache_get_arena_usage_percent(&cache)); /* 150/4096 = 3.6% */
+  CHECK_EQUAL((150 * 100) / ERD_CACHE_ARENA_SIZE, erd_cache_get_arena_usage_percent(&cache));
 }
