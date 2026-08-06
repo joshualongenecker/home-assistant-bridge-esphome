@@ -40,6 +40,14 @@
   #include "freertos/queue.h"
 #endif
 
+/*
+ * mqtt_publisher_task() calls through ESPHome's MQTT client, which may add a
+ * substantial IDF call stack while the broker queue is congested.  Keep this
+ * separate from its embedded buffers: those buffers live in the bridge object
+ * and do not consume the task stack.
+ */
+enum { ERD_MQTT_PUBLISHER_TASK_STACK_BYTES = 4096 };
+
 typedef struct {
   erd_cache_t* cache;              // Shared cache (owned by GeappliancesBridge)
   i_mqtt_client_t* mqtt_client;    // MQTT publish interface
@@ -60,7 +68,7 @@ typedef struct {
   uint32_t last_disconnect_duration_ms;  // Duration of last disconnect (ms)
   TaskHandle_t    task_handle;
   StaticTask_t    task_tcb;
-  StackType_t     task_stack[2048 / sizeof(StackType_t)];
+  StackType_t     task_stack[ERD_MQTT_PUBLISHER_TASK_STACK_BYTES / sizeof(StackType_t)];
   SemaphoreHandle_t work_semaphore;
   SemaphoreHandle_t state_mutex;  // Protects shared state from torn reads during context switches
   SemaphoreHandle_t done_semaphore; // Task gives this before exiting (clean shutdown handshake)

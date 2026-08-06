@@ -77,7 +77,7 @@ On ESP-IDF:
 - Guard against already-running task (`task_handle != NULL`)
 - Guard against failed semaphore creation (`work_semaphore == NULL`)
 - Set `task_running = true`
-- Create the static task via `xTaskCreateStaticPinnedToCore()` (Core 1, dual-core) or `xTaskCreateStatic()` (single-core) with 2048-byte stack, priority 2, name `"erd_mqtt_pub"`
+- Create the static task via `xTaskCreateStaticPinnedToCore()` (Core 1, dual-core) or `xTaskCreateStatic()` (single-core) with a 4096-byte stack, priority 2, name `"erd_mqtt_pub"`. The larger stack accommodates the ESPHome/IDF MQTT publish call chain under queue pressure.
 - On task creation failure: log error, set `task_running = false`
 
 On non-ESP-IDF: no-op.
@@ -347,4 +347,3 @@ The primary use case for pause/resume is to avoid MQTT config storms during Home
 4. Optionally poll `erd_cache_mqtt_publisher_first_round_done()` to confirm the publisher has drained all accumulated cache updates before proceeding
 
 This prevents the background task from competing for MQTT queue space with discovery messages, reducing the risk of queue overflow or dropped messages during the transition.
-
