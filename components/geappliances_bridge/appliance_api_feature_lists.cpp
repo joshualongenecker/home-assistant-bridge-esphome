@@ -1111,6 +1111,12 @@ const tiny_erd_t appliance_api_clothes_washer_v4_remote_wash2x_option_erds[] = {
   0x205b,
 };
 
+const tiny_erd_t appliance_api_clothes_washer_v4_self_clean_reminder_v2_erds[] = {
+  0x2349,
+  0x234a,
+  0x234b,
+};
+
 const tiny_erd_t appliance_api_refrigeration_v1_foundation_erds[] = {
   0x1004,
   0x1005,
@@ -1456,6 +1462,12 @@ const tiny_erd_t appliance_api_refrigeration_v5_secondary_feature_pan_filtered_t
 const tiny_erd_t appliance_api_refrigeration_v5_system_power_setting_erds[] = {
   0x14c6,
   0x14c7,
+};
+
+const tiny_erd_t appliance_api_refrigeration_v5_fresh_food_evaporator_fan_erds[] = {
+  0x142e,
+  0x142f,
+  0x1430,
 };
 
 const tiny_erd_t appliance_api_microwave_v1_foundation_erds[] = {
@@ -4949,6 +4961,16 @@ const tiny_erd_t appliance_api_fpa_dishdrawer_v1_tub_1_cycle_modifiers_erds[] = 
   0x3253,
 };
 
+const tiny_erd_t appliance_api_fpa_dishdrawer_v2_tub_0_control_lock_erds[] = {
+  0x3089,
+  0x308a,
+};
+
+const tiny_erd_t appliance_api_fpa_dishdrawer_v2_tub_1_control_lock_erds[] = {
+  0x3489,
+  0x348a,
+};
+
 const tiny_erd_t appliance_api_fpa_range_v1_foundation_erds[] = {
   0x0005,
   0x0006,
@@ -5804,6 +5826,7 @@ const appliance_feature_api_descriptor_t appliance_feature_api_descriptors[] = {
   {0x0002, 4, 0x00000020, "Clothes Washer / Commercial Free Mode", appliance_api_clothes_washer_v4_commercial_free_mode_erds, 2},
   {0x0002, 4, 0x00000200, "Clothes Washer / Remote Pet Hair Removal Option", appliance_api_clothes_washer_v4_remote_pet_hair_removal_option_erds, 3},
   {0x0002, 4, 0x00000800, "Clothes Washer / Remote Wash2x Option", appliance_api_clothes_washer_v4_remote_wash2x_option_erds, 2},
+  {0x0002, 4, 0x00001000, "Clothes Washer / Self Clean Reminder v2", appliance_api_clothes_washer_v4_self_clean_reminder_v2_erds, 3},
   {0x0003, 1, 0x00000001, "Refrigeration / Foundation", appliance_api_refrigeration_v1_foundation_erds, 31},
   {0x0003, 1, 0x00000002, "Refrigeration / Hot Water", appliance_api_refrigeration_v1_hot_water_erds, 4},
   {0x0003, 1, 0x00000004, "Refrigeration / Single Serve", appliance_api_refrigeration_v1_single_serve_erds, 1},
@@ -5861,6 +5884,7 @@ const appliance_feature_api_descriptor_t appliance_feature_api_descriptors[] = {
   {0x0003, 5, 0x00002000, "Refrigeration / Dimmable Light 0 Warmth Percentage", appliance_api_refrigeration_v5_dimmable_light_0_warmth_percentage_erds, 2},
   {0x0003, 5, 0x00004000, "Refrigeration / Secondary Feature Pan Filtered Temperature", appliance_api_refrigeration_v5_secondary_feature_pan_filtered_temperature_erds, 1},
   {0x0003, 5, 0x00008000, "Refrigeration / System Power Setting", appliance_api_refrigeration_v5_system_power_setting_erds, 2},
+  {0x0003, 5, 0x00010000, "Refrigeration / Fresh Food Evaporator Fan", appliance_api_refrigeration_v5_fresh_food_evaporator_fan_erds, 3},
   {0x0004, 1, 0x00000001, "Microwave / Foundation", appliance_api_microwave_v1_foundation_erds, 45},
   {0x0004, 1, 0x00000002, "Microwave / Vent and Light", appliance_api_microwave_v1_vent_and_light_erds, 4},
   {0x0004, 1, 0x00000004, "Microwave / Convection", appliance_api_microwave_v1_convection_erds, 13},
@@ -6422,6 +6446,8 @@ const appliance_feature_api_descriptor_t appliance_feature_api_descriptors[] = {
   {0x0106, 1, 0x10000000, "FPA DishDrawer / Custom Cycle", appliance_api_fpa_dishdrawer_v1_custom_cycle_erds, 2},
   {0x0106, 1, 0x20000000, "FPA DishDrawer / Tub 0 Cycle Modifiers", appliance_api_fpa_dishdrawer_v1_tub_0_cycle_modifiers_erds, 2},
   {0x0106, 1, 0x40000000, "FPA DishDrawer / Tub 1 Cycle Modifiers", appliance_api_fpa_dishdrawer_v1_tub_1_cycle_modifiers_erds, 2},
+  {0x0106, 2, 0x00000001, "FPA DishDrawer / Tub 0 Control Lock", appliance_api_fpa_dishdrawer_v2_tub_0_control_lock_erds, 2},
+  {0x0106, 2, 0x00000002, "FPA DishDrawer / Tub 1 Control Lock", appliance_api_fpa_dishdrawer_v2_tub_1_control_lock_erds, 2},
   {0x0107, 1, 0x00000001, "FPA Range / Foundation", appliance_api_fpa_range_v1_foundation_erds, 33},
   {0x0107, 1, 0x00000002, "FPA Range / Upper Automatic Door Open", appliance_api_fpa_range_v1_upper_automatic_door_open_erds, 3},
   {0x0107, 1, 0x00000004, "FPA Range / Lower Automatic Door Open", appliance_api_fpa_range_v1_lower_automatic_door_open_erds, 3},

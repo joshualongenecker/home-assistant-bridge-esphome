@@ -214,6 +214,7 @@ extern const tiny_erd_t appliance_api_clothes_washer_v4_mabe_washer_diagnostics_
 extern const tiny_erd_t appliance_api_clothes_washer_v4_commercial_free_mode_erds[];
 extern const tiny_erd_t appliance_api_clothes_washer_v4_remote_pet_hair_removal_option_erds[];
 extern const tiny_erd_t appliance_api_clothes_washer_v4_remote_wash2x_option_erds[];
+extern const tiny_erd_t appliance_api_clothes_washer_v4_self_clean_reminder_v2_erds[];
 extern const tiny_erd_t appliance_api_refrigeration_v1_foundation_erds[];
 extern const tiny_erd_t appliance_api_refrigeration_v1_hot_water_erds[];
 extern const tiny_erd_t appliance_api_refrigeration_v1_single_serve_erds[];
@@ -271,6 +272,7 @@ extern const tiny_erd_t appliance_api_refrigeration_v5_scanned_barcode_result_er
 extern const tiny_erd_t appliance_api_refrigeration_v5_dimmable_light_0_warmth_percentage_erds[];
 extern const tiny_erd_t appliance_api_refrigeration_v5_secondary_feature_pan_filtered_temperature_erds[];
 extern const tiny_erd_t appliance_api_refrigeration_v5_system_power_setting_erds[];
+extern const tiny_erd_t appliance_api_refrigeration_v5_fresh_food_evaporator_fan_erds[];
 extern const tiny_erd_t appliance_api_microwave_v1_foundation_erds[];
 extern const tiny_erd_t appliance_api_microwave_v1_vent_and_light_erds[];
 extern const tiny_erd_t appliance_api_microwave_v1_convection_erds[];
@@ -832,6 +834,8 @@ extern const tiny_erd_t appliance_api_fpa_dishdrawer_v1_default_to_eco_cycle_set
 extern const tiny_erd_t appliance_api_fpa_dishdrawer_v1_custom_cycle_erds[];
 extern const tiny_erd_t appliance_api_fpa_dishdrawer_v1_tub_0_cycle_modifiers_erds[];
 extern const tiny_erd_t appliance_api_fpa_dishdrawer_v1_tub_1_cycle_modifiers_erds[];
+extern const tiny_erd_t appliance_api_fpa_dishdrawer_v2_tub_0_control_lock_erds[];
+extern const tiny_erd_t appliance_api_fpa_dishdrawer_v2_tub_1_control_lock_erds[];
 extern const tiny_erd_t appliance_api_fpa_range_v1_foundation_erds[];
 extern const tiny_erd_t appliance_api_fpa_range_v1_upper_automatic_door_open_erds[];
 extern const tiny_erd_t appliance_api_fpa_range_v1_lower_automatic_door_open_erds[];
