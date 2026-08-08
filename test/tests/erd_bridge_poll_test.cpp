@@ -121,6 +121,35 @@ TEST(erd_bridge_poll, should_preserve_cache_data_on_reprobe_after_appliance_lost
   CHECK_EQUAL(sizeof(new_value), entry->data_size);
 }
 
+TEST(erd_bridge_poll, keeps_same_erd_from_different_board_addresses_separate)
+{
+  mock().disable();
+  const probe_entry_t probe_list[] = {
+    {polled_erd, 0xC0},
+    {polled_erd, 0xA2},
+  };
+  when_the_bridge_is_initialized_with_probe_list(probe_list, 2);
+
+  uint8_t primary_value = 0x11;
+  uint8_t inverter_value = 0x22;
+  trigger_read_completed(0xC0, polled_erd, &primary_value, sizeof(primary_value));
+  trigger_read_completed(0xA2, polled_erd, &inverter_value, sizeof(inverter_value));
+  mock().enable();
+
+  CHECK_EQUAL(2u, erd_cache_get_count(&test_cache));
+  erd_cache_entry_t* primary = nullptr;
+  erd_cache_entry_t* inverter = nullptr;
+  uint16_t iterator = 0;
+  while (erd_cache_entry_t* entry = erd_cache_get_next_entry(&test_cache, &iterator)) {
+    if (entry->erd == polled_erd && entry->board_address == 0xC0) primary = entry;
+    if (entry->erd == polled_erd && entry->board_address == 0xA2) inverter = entry;
+  }
+  CHECK(primary != nullptr);
+  CHECK(inverter != nullptr);
+  CHECK_EQUAL(0x11, *erd_cache_entry_data(&test_cache, primary));
+  CHECK_EQUAL(0x22, *erd_cache_entry_data(&test_cache, inverter));
+}
+
 TEST(erd_bridge_poll, should_publish_mqtt_on_first_poll)
 {
   given_that_the_bridge_has_entered_polling_state();

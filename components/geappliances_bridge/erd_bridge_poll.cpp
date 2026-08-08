@@ -256,14 +256,10 @@ static tiny_hsm_result_t handle_discovery_list_signals(tiny_hsm_t* hsm, tiny_hsm
   switch (signal) {
     case signal_read_completed: {
       tiny_erd_t erd = args->read_completed.erd;
-      uint8_t addr = self->erd_host_address;
-      for (uint16_t i = 0; i < self->probe_list_count; i++) {
-        if (self->probe_list[i].erd == erd) {
-          addr = self->probe_list[i].board_address;
-          if (addr == PROBE_ENTRY_DEFAULT_ADDRESS) addr = self->erd_host_address;
-          break;
-        }
-      }
+      // The client includes the source board address in every completion.
+      // Do not infer it from the ERD list: an ERD ID can exist on more than
+      // one board, in which case a list lookup would select the first match.
+      uint8_t addr = args->address;
       add_erd_to_polling_list(self, erd, addr);
       erd_cache_update(self->erd_cache, erd, addr,
               reinterpret_cast<const uint8_t*>(args->read_completed.data),
@@ -426,14 +422,9 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       const uint8_t*  erd_data  = reinterpret_cast<const uint8_t*>(args->read_completed.data);
       uint8_t         data_size = args->read_completed.data_size;
 
-      uint8_t addr = self->erd_host_address;
-      for (uint16_t i = 0; i < self->polling_list_count; i++) {
-        if (self->erd_polling_list[i] == erd) {
-          addr = self->erd_polling_addresses[i];
-          if (addr == PROBE_ENTRY_DEFAULT_ADDRESS) addr = self->erd_host_address;
-          break;
-        }
-      }
+      // Preserve the address reported by the client. Matching only on ERD ID
+      // mixes data when the same ID was successfully polled on two boards.
+      uint8_t addr = args->address;
 
       if (erd_set_contains(&self->erd_set, erd)) {
         // ERD already known — just update cache.

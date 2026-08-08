@@ -162,8 +162,8 @@ bool erd_cache_update(erd_cache_t* self, tiny_erd_t erd, uint8_t board_address, 
   slot->valid = true;
   slot->update_required = true;
 
-  ESP_LOGD(TAG, "ERD 0x%04X added to cache (%u bytes, arena offset %u)",
-           erd, data_size, slot->data_offset);
+  ESP_LOGD(TAG, "ERD 0x%04X at address 0x%02X added to cache (%u bytes, arena offset %u)",
+           erd, board_address, data_size, slot->data_offset);
 
   return true;
 }
