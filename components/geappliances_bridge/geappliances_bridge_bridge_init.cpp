@@ -54,7 +54,7 @@ void GeappliancesBridge::on_poll_discovery_complete_()
 // ---------------------------------------------------------------------------
 
 ErdPollListResult build_poll_list_(GeappliancesBridge* bridge,
-                                   const uint16_t* custom_erds,
+                                   const probe_entry_t* custom_erds,
                                    uint16_t custom_erds_count)
 {
   ErdPollListConfig config;
@@ -67,23 +67,16 @@ ErdPollListResult build_poll_list_(GeappliancesBridge* bridge,
   config.feature_bit_valid_erds = bridge->feature_bit_manager_.get_valid_erds();
   config.feature_bit_valid_erds_count = bridge->feature_bit_manager_.get_valid_erd_count();
   config.custom_erds = custom_erds ? custom_erds :
-      (bridge->custom_erds_count_ > 0 ? bridge->custom_erds_ : nullptr);
+      (bridge->custom_erds_count_ > 0 ? reinterpret_cast<const probe_entry_t*>(bridge->custom_erds_) : nullptr);
   config.custom_erds_count = custom_erds ? custom_erds_count : bridge->custom_erds_count_;
   config.appliance_type = bridge->device_identity_manager_.get_appliance_type();
   return build_erd_poll_list(config);
 }
 
-// ---------------------------------------------------------------------------
-// Shared polling bridge initialization (used by all three init paths)
-// ---------------------------------------------------------------------------
-
 void GeappliancesBridge::init_polling_bridge_(bool log_as_info,
-                                              const uint16_t* custom_erds,
+                                              const probe_entry_t* custom_erds,
                                               uint16_t custom_erds_count)
 {
-  // Wire the discovery-complete callback BEFORE initializing the bridge,
-  // so the HSM cannot fire the callback before it's set (race condition
-  // when discovery completes synchronously on first entry).
   this->erd_bridge_poll_.on_discovery_complete = +[](void* ctx) {
     reinterpret_cast<GeappliancesBridge*>(ctx)->on_poll_discovery_complete_();
   };
@@ -91,7 +84,7 @@ void GeappliancesBridge::init_polling_bridge_(bool log_as_info,
 
   auto result = build_poll_list_(this, custom_erds, custom_erds_count);
   this->poll_probe_list_count_ = result.erds_count;
-  std::memcpy(this->poll_probe_list_, result.erds, result.erds_count * sizeof(uint16_t));
+  std::memcpy(this->poll_probe_list_, result.erds, result.erds_count * sizeof(probe_entry_t));
 
   if (log_as_info) {
     ESP_LOGI(TAG, "Poll list: %s (%u ERDs)", result.description, result.erds_count);
@@ -213,7 +206,11 @@ void GeappliancesBridge::initialize_erd_bridge_()
                                        this->feature_bit_manager_.get_valid_erd_count());
     // Merge custom ERDs so they always pass the filter.
     if (this->custom_erds_count_ > 0) {
-      this->erd_registry_.add_valid_erds(this->custom_erds_, this->custom_erds_count_);
+      std::vector<tiny_erd_t> erd_ids(this->custom_erds_count_);
+      for (uint16_t i = 0; i < this->custom_erds_count_; i++) {
+        erd_ids[i] = this->custom_erds_[i].erd;
+      }
+      this->erd_registry_.add_valid_erds(erd_ids.data(), this->custom_erds_count_);
     }
   }
 
@@ -303,7 +300,7 @@ void GeappliancesBridge::start_custom_erd_polling_()
   }
   this->subscription_unseen_custom_erds_count_ = 0;
   for (uint16_t i = 0; i < this->custom_erds_count_; i++) {
-    tiny_erd_t erd = this->custom_erds_[i];
+    tiny_erd_t erd = this->custom_erds_[i].erd;
     if (!erd_set_contains(&this->custom_erd_subscription_seen_erds_, erd)) {
       this->subscription_unseen_custom_erds_[this->subscription_unseen_custom_erds_count_++] = erd;
     }
@@ -317,14 +314,12 @@ void GeappliancesBridge::start_custom_erd_polling_()
   ESP_LOGI(TAG, "Custom polling: %u subscribed ERDs skipped, %u ERDs remaining",
            this->custom_erds_count_ - this->subscription_unseen_custom_erds_count_,
            this->subscription_unseen_custom_erds_count_);
-  // Do NOT destroy the subscription bridge - it continues to handle all
-  // standard ERD publications. The polling bridge runs alongside it, only
-  // polling the custom ERDs that may not be covered by subscription.
-  // Both bridges subscribe to the same ERD client activity event, but they
-  // handle different event types (subscription vs read_completed).
 
-  this->init_polling_bridge_(true, this->subscription_unseen_custom_erds_,
-                             this->subscription_unseen_custom_erds_count_);
+  probe_entry_t probe_buf[CUSTOM_ERDS_MAX];
+  for (uint16_t i = 0; i < this->subscription_unseen_custom_erds_count_; i++) {
+    probe_buf[i] = {this->subscription_unseen_custom_erds_[i], PROBE_ENTRY_DEFAULT_ADDRESS};
+  }
+  this->init_polling_bridge_(true, probe_buf, this->subscription_unseen_custom_erds_count_);
   this->custom_erd_polling_started_ = true;
 }
 

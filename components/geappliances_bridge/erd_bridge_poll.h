@@ -69,7 +69,8 @@ extern "C" {
 #include "erd_bridge_common.h"
 
 typedef struct {
-  tiny_erd_t erd_polling_list[POLLING_LIST_MAX_SIZE];  /* Fixed-capacity, no heap */
+  tiny_erd_t erd_polling_list[POLLING_LIST_MAX_SIZE];
+  uint8_t erd_polling_addresses[POLLING_LIST_MAX_SIZE];
   uint16_t polling_list_count;
   uint32_t polling_interval_ms;
   tiny_timer_group_t* timer_group;
@@ -82,7 +83,7 @@ typedef struct {
   erd_cache_t* erd_cache;
   tiny_gea3_erd_client_request_id_t request_id;
   uint8_t erd_host_address;
-  const tiny_erd_t* appliance_erd_list;
+  const probe_entry_t* appliance_erd_list;
   uint16_t appliance_erd_list_count;
   uint16_t erd_index;
   /* Number of ERDs in the current polling cycle that have completed (success
@@ -109,7 +110,7 @@ typedef struct {
   /* Pre-built list of ERDs to probe during discovery.
    * Set by the caller before erd_bridge_poll_init(); the bridge copies
    * successfully-probed ERDs into erd_polling_list during the probe phase. */
-  const tiny_erd_t* probe_list;
+  const probe_entry_t* probe_list;
   uint16_t probe_list_count;
   /* Stores the pre-known appliance address so that on appliance loss
    * the bridge can re-probe at the correct address. */
@@ -152,7 +153,7 @@ void erd_bridge_poll_init(
   i_tiny_gea3_erd_client_t* erd_client,
   uint32_t polling_interval_ms,
   uint8_t host_address,
-  const tiny_erd_t* probe_list,
+  const probe_entry_t* probe_list,
   uint16_t probe_list_count,
   erd_cache_t* cache);
 

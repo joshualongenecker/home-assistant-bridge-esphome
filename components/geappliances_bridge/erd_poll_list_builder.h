@@ -35,6 +35,7 @@
 #include "tiny_erd.h"
 #include "erd_lists.h"
 #include "bridge_mode.h"
+#include "erd_bridge_common.h"
 
 namespace esphome {
 namespace geappliances_bridge {
@@ -60,10 +61,9 @@ struct ErdPollListConfig {
   /// Raw pointer into the manager's fixed array; NULL if not available.
   const tiny_erd_t* feature_bit_valid_erds;
   uint16_t feature_bit_valid_erds_count;
-
-  /// User-configured custom ERDs to always poll.
-  /// Raw pointer and count into a fixed array; NULL/0 if none.
-  const uint16_t* custom_erds;
+  /// User-configured custom ERDs with optional per-ERD board addresses.
+  /// board_address == PROBE_ENTRY_DEFAULT_ADDRESS means "use primary host address".
+  const probe_entry_t* custom_erds;
   uint16_t custom_erds_count;
 
   /// The discovered appliance type (0-255).
@@ -76,9 +76,8 @@ struct ErdPollListConfig {
  * Uses a fixed-capacity array to avoid heap allocation.
  */
 struct ErdPollListResult {
-  /// The list of ERDs to probe (fixed capacity).
-  uint16_t erds[ERD_POLL_LIST_MAX_SIZE];
-  /// Number of ERDs in the list.
+  /// The list of ERDs to probe with per-ERD board addresses.
+  probe_entry_t erds[ERD_POLL_LIST_MAX_SIZE];
   uint16_t erds_count;
 
   /// Human-readable description of how the list was built (for logging).

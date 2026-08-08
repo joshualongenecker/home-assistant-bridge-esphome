@@ -52,6 +52,16 @@ enum {
   subscription_quiet_period = 2 * 1000,
   appliance_lost_timeout = 60000
 };
+// ============================================================================
+// Probe entry type — ERD with optional per-ERD board address
+// ============================================================================
+
+#define PROBE_ENTRY_DEFAULT_ADDRESS 0xFF
+
+typedef struct {
+  tiny_erd_t erd;
+  uint8_t board_address;
+} probe_entry_t;
 
 // ============================================================================
 // Subscription state machine states

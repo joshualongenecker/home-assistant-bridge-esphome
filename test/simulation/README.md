@@ -116,7 +116,8 @@ TEST(configuration_based_tests, subscription_mode_dishwasher)
     .withParameter("erd", ERD_CYCLE_STATE);
   
   // Verify the ERD was cached (bridges write to erd_cache directly)
-  POINTERS_TRUE(erd_cache_find(&cache, ERD_CYCLE_STATE) != nullptr);
+  uint16_t iter = 0;
+  POINTERS_TRUE(erd_cache_get_next_entry(&cache, &iter) != nullptr);
   
   simulate_erd_publication(ERD_CYCLE_STATE, cycle_state, sizeof(cycle_state));
   

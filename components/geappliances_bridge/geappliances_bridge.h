@@ -90,7 +90,7 @@ namespace geappliances_bridge {
 
 class GeappliancesBridge : public Component, public IBridgeServices {
   friend ErdPollListResult build_poll_list_(GeappliancesBridge* bridge,
-                                            const uint16_t* custom_erds,
+                                            const probe_entry_t* custom_erds,
                                             uint16_t custom_erds_count);
   friend tiny_time_source_ticks_t gea2_tick_ticks(i_tiny_time_source_t*);
 
@@ -125,6 +125,7 @@ class GeappliancesBridge : public Component, public IBridgeServices {
     ha_discovery_manager_set_custom_data(&this->ha_discovery_manager_, data, chunks, count, max_chunk, hash);
   }
   void add_custom_erds(const uint16_t* erds, uint16_t count);
+  void add_custom_erds_with_addresses(const uint16_t* erds, const uint8_t* addresses, uint16_t count);
   void add_custom_erd(tiny_erd_t erd);
   void trigger_discovery_refresh();
 
@@ -200,7 +201,7 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   void update_publisher_state_();       // Publisher pause/resume + steady-state detection
   void start_feature_bit_reading_();
   void init_erd_cache_publisher_();
-  void init_polling_bridge_(bool log_as_info, const uint16_t* custom_erds = nullptr,
+  void init_polling_bridge_(bool log_as_info, const probe_entry_t* custom_erds = nullptr,
                             uint16_t custom_erds_count = 0);
   void on_poll_discovery_complete_();
   bool should_route_to_feature_bits_(tiny_erd_t erd);
@@ -231,16 +232,17 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   // Populated by add_custom_erd() calls generated from the YAML custom_erds option.
   // Fixed-capacity array to avoid heap allocation.
   static constexpr uint16_t CUSTOM_ERDS_MAX = 128;
-  tiny_erd_t custom_erds_[CUSTOM_ERDS_MAX];
+  struct custom_erd_entry_t {
+    tiny_erd_t erd;
+    uint8_t board_address;
+  };
+  custom_erd_entry_t custom_erds_[CUSTOM_ERDS_MAX];
   uint16_t custom_erds_count_{0};
   uint16_t subscription_unseen_custom_erds_[CUSTOM_ERDS_MAX];
   uint16_t subscription_unseen_custom_erds_count_{0};
 
-  // Fixed-capacity set for tracking seen subscription ERDs (replaces std::set).
   erd_set_t custom_erd_subscription_seen_erds_;
-  // Pre-built ERD probe list for the polling bridge.
-  // Fixed-capacity array to avoid heap allocation.
-  uint16_t poll_probe_list_[POLLING_LIST_MAX_SIZE];
+  probe_entry_t poll_probe_list_[POLLING_LIST_MAX_SIZE];
   uint16_t poll_probe_list_count_{0};
   bool custom_erd_polling_started_{false};  // Guard to prevent re-initialization
 
