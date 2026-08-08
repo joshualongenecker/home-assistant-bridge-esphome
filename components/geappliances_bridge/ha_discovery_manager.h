@@ -119,6 +119,7 @@ typedef struct {
   char erd_id_hex_buf[8];
   char domain_buf[32];
   char field_id_buf[HA_DISCOVERY_FIELD_ID_BUF_SIZE];
+  char board_address_buf[4];       /* optional two-digit JSONL board address */
   char paired_erd_buf[8];
   char role_buf[16];
   char unit_buf[32];
@@ -219,6 +220,9 @@ ha_discovery_state_t ha_discovery_manager_get_state(ha_discovery_manager_t* self
 void cleanup_topic_callback(const char* topic, const char* payload, size_t payload_len, void* arg);
 void cleanup_start(ha_discovery_cleanup_t* self);
 uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self);
+void ha_discovery_test_format_erd_topic(char* destination, size_t destination_size,
+                                        const char* device_id, const char* erd_id,
+                                        const char* board_address, const char* operation);
 #endif
 
 #ifdef __cplusplus

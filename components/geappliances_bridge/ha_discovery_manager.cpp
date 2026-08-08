@@ -398,6 +398,31 @@ static bool should_filter_config_topic(const char* name) {
     return false;
 }
 
+/* Primary-board entries retain the legacy topic. Entries generated from a
+ * board namespace use the address-qualified topic published by the bridge. */
+static void format_erd_topic(char* destination, size_t destination_size,
+                             const char* device_id, const char* erd_id,
+                             const char* board_address, const char* operation)
+{
+    if (board_address[0]) {
+        snprintf(destination, destination_size,
+                 "geappliances/%s/erd/0x%s/address/0x%s/%s",
+                 device_id, erd_id, board_address, operation);
+    } else {
+        snprintf(destination, destination_size,
+                 "geappliances/%s/erd/0x%s/%s", device_id, erd_id, operation);
+    }
+}
+
+#ifdef HA_DISCOVERY_TEST_EXPORT
+void ha_discovery_test_format_erd_topic(char* destination, size_t destination_size,
+                                        const char* device_id, const char* erd_id,
+                                        const char* board_address, const char* operation)
+{
+    format_erd_topic(destination, destination_size, device_id, erd_id, board_address, operation);
+}
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Process a single JSONL line: build topic/payload in shared buffers */
 /* ------------------------------------------------------------------ */
@@ -429,6 +454,7 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
 
     /* Optional fields — use struct buffers to avoid stack overflow. */
     self->field_id_buf[0] = '\0';
+    self->board_address_buf[0] = '\0';
     self->paired_erd_buf[0] = '\0';
     self->role_buf[0] = '\0';
     self->unit_buf[0] = '\0';
@@ -446,6 +472,7 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
     self->step_buf[0] = '\0';
 
     if (json_get_str(line, "fi", &val, &len)) json_unescape(val, len, self->field_id_buf, sizeof(self->field_id_buf));
+    if (json_get_str(line, "a", &val, &len)) json_unescape(val, len, self->board_address_buf, sizeof(self->board_address_buf));
     if (json_get_str(line, "p", &val, &len)) json_unescape(val, len, self->paired_erd_buf, sizeof(self->paired_erd_buf));
     if (json_get_str(line, "r", &val, &len)) json_unescape(val, len, self->role_buf, sizeof(self->role_buf));
     if (json_get_str(line, "u", &val, &len)) json_unescape(val, len, self->unit_buf, sizeof(self->unit_buf));
@@ -462,6 +489,16 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
     if (json_get_str(line, "mn", &val, &len)) json_unescape(val, len, self->min_buf, sizeof(self->min_buf));
     if (json_get_str(line, "mx", &val, &len)) json_unescape(val, len, self->max_buf, sizeof(self->max_buf));
     if (json_get_str(line, "st", &val, &len)) json_unescape(val, len, self->step_buf, sizeof(self->step_buf));
+
+    /* Board addresses are emitted as two hexadecimal digits by the custom
+     * profile generator. Reject malformed optional data before it reaches a
+     * discovery topic or entity identifier. */
+    if (self->board_address_buf[0] &&
+        (strlen(self->board_address_buf) != 2 ||
+         strspn(self->board_address_buf, "0123456789abcdefABCDEF") != 2)) {
+        self->total_filtered++;
+        return false;
+    }
 
     uint16_t erd_id = (uint16_t)strtoul(erd_id_hex, NULL, 16);
 
@@ -480,27 +517,38 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
         }
     }
 
-    /* Build unique_id.
-     * unique_id_buf is 160 bytes. Worst case: device_id[64] + "_erd_"(5) +
-     * erd_id_hex(4) + "_"(1) + field_id_buf[72] = 146 bytes. Fits. */
-    if (self->field_id_buf[0]) {
+    /* Build unique_id. Address-aware entries include the two-digit board
+     * address, keeping overlapping ERD IDs on separate boards distinct. */
+    if (self->field_id_buf[0] && self->board_address_buf[0]) {
+        snprintf(self->unique_id_buf, sizeof(self->unique_id_buf), "%s_erd_%s_address_%s_%s",
+                 self->device_id, erd_id_hex, self->board_address_buf, self->field_id_buf);
+    } else if (self->field_id_buf[0]) {
         snprintf(self->unique_id_buf, sizeof(self->unique_id_buf), "%s_erd_%s_%s", self->device_id, erd_id_hex, self->field_id_buf);
+    } else if (self->board_address_buf[0]) {
+        snprintf(self->unique_id_buf, sizeof(self->unique_id_buf), "%s_erd_%s_address_%s",
+                 self->device_id, erd_id_hex, self->board_address_buf);
     } else {
         snprintf(self->unique_id_buf, sizeof(self->unique_id_buf), "%s_erd_%s", self->device_id, erd_id_hex);
     }
 
     /* Build state_topic and command_topic */
-    snprintf(self->state_topic_buf, sizeof(self->state_topic_buf), "geappliances/%s/erd/0x%s/value", self->device_id, erd_id_hex);
-    snprintf(self->command_topic_buf, sizeof(self->command_topic_buf), "geappliances/%s/erd/0x%s/write", self->device_id, erd_id_hex);
+    format_erd_topic(self->state_topic_buf, sizeof(self->state_topic_buf), self->device_id,
+                     erd_id_hex, self->board_address_buf, "value");
+    format_erd_topic(self->command_topic_buf, sizeof(self->command_topic_buf), self->device_id,
+                     erd_id_hex, self->board_address_buf, "write");
 
     /* For paired entities, swap state/command topics */
     if (self->paired_erd_buf[0]) {
         if (self->role_buf[0] && strcmp(self->role_buf, "request") == 0) {
-            snprintf(self->actual_command_topic_buf, sizeof(self->actual_command_topic_buf), "geappliances/%s/erd/0x%s/write", self->device_id, erd_id_hex);
-            snprintf(self->actual_state_topic_buf, sizeof(self->actual_state_topic_buf), "geappliances/%s/erd/0x%s/value", self->device_id, self->paired_erd_buf);
+            format_erd_topic(self->actual_command_topic_buf, sizeof(self->actual_command_topic_buf),
+                             self->device_id, erd_id_hex, self->board_address_buf, "write");
+            format_erd_topic(self->actual_state_topic_buf, sizeof(self->actual_state_topic_buf),
+                             self->device_id, self->paired_erd_buf, self->board_address_buf, "value");
         } else {
-            snprintf(self->actual_state_topic_buf, sizeof(self->actual_state_topic_buf), "geappliances/%s/erd/0x%s/value", self->device_id, erd_id_hex);
-            snprintf(self->actual_command_topic_buf, sizeof(self->actual_command_topic_buf), "geappliances/%s/erd/0x%s/write", self->device_id, self->paired_erd_buf);
+            format_erd_topic(self->actual_state_topic_buf, sizeof(self->actual_state_topic_buf),
+                             self->device_id, erd_id_hex, self->board_address_buf, "value");
+            format_erd_topic(self->actual_command_topic_buf, sizeof(self->actual_command_topic_buf),
+                             self->device_id, self->paired_erd_buf, self->board_address_buf, "write");
         }
     } else {
         snprintf(self->actual_state_topic_buf, sizeof(self->actual_state_topic_buf), "%s", self->state_topic_buf);
@@ -510,8 +558,8 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
     /* Build topic using pre-computed domain prefix if available.
      * domain_topic_prefix is 128 bytes. Worst case: "homeassistant/"(14) +
      * domain_buf[32] + "/"(1) + device_id[64] + "/"(1) = 112 bytes.
-     * topic_buf is 192 bytes. Suffix is at most ~86 bytes (erd_id[4] + "_" + field_id[72] + "/config[7]").
-     * Total worst case: 112 + 86 = 198, slightly over 192. Truncation is detected below. */
+     * Address-aware custom entries add "_address_xx" to the suffix. Truncation
+     * is detected below so oversized configuration topics are safely skipped. */
     if (self->domain_topic_prefix[0] == '\0' || strcmp(self->domain_buf, self->current_domain_prefix_buf) != 0) {
         /* Domain changed or first use — rebuild prefix. */
         snprintf(self->domain_topic_prefix, sizeof(self->domain_topic_prefix),
@@ -534,8 +582,14 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
         /* Copy prefix first so strlen() below reads initialized memory. */
         memcpy(self->topic_buf, self->domain_topic_prefix, prefix_len);
         size_t remaining = sizeof(self->topic_buf) - prefix_len - 1; /* -1 for null */
-        if (self->field_id_buf[0]) {
+        if (self->field_id_buf[0] && self->board_address_buf[0]) {
+            snprintf(self->topic_buf + prefix_len, remaining, "%s_address_%s_%s/config",
+                     erd_id_hex, self->board_address_buf, self->field_id_buf);
+        } else if (self->field_id_buf[0]) {
             snprintf(self->topic_buf + prefix_len, remaining, "%s_%s/config", erd_id_hex, self->field_id_buf);
+        } else if (self->board_address_buf[0]) {
+            snprintf(self->topic_buf + prefix_len, remaining, "%s_address_%s/config",
+                     erd_id_hex, self->board_address_buf);
         } else {
             snprintf(self->topic_buf + prefix_len, remaining, "%s/config", erd_id_hex);
         }
