@@ -115,6 +115,11 @@ def _is_signed_type(type_str: str) -> bool:
     """Return True if the type string represents a signed integer (e.g. 'i8', 'i16', 'i32')."""
     return bool(re.match(r'^i\d+$', type_str))
 
+
+def _is_float32_type(type_str: str) -> bool:
+    """Return True for a four-byte IEEE-754 single-precision value."""
+    return type_str == 'float32'
+
 def _compute_number_range(data_type: str, scaling_factor: int) -> Tuple[float, float, float]:
     """Return (min, max, step) for a number entity based on data type and scale factor.
 
@@ -418,6 +423,10 @@ def _byte_subfield_value_template(field: Dict, erd_scaling: int) -> str:
         return _string_subfield_value_template(field)
     elif field_type == 'bool':
         return f"{{{{ '01' if value[{hex_start}:{hex_end}] != '00' else '00' }}}}"
+    elif _is_float32_type(field_type):
+        # ERD MQTT state payloads are hexadecimal bytes. Home Assistant's
+        # from_hex/unpack filters decode the GEA big-endian IEEE-754 payload.
+        return f"{{{{ value[{hex_start}:{hex_end}] | from_hex | unpack('>f') }}}}"
     else:
         # Numeric types: u8, u16, u32, i8, i16, i32, etc.
         if _is_signed_type(field_type):
@@ -530,13 +539,18 @@ def _unit_to_ha(unit: str) -> str:
     return {'degF': '\u00b0F', 'degC': '\u00b0C'}.get(unit, unit)
 
 
-def _compute_sensor_value_template(scaling_factor: int, data_size: int, signed: bool = False) -> str:
+def _compute_sensor_value_template(scaling_factor: int, data_size: int, signed: bool = False,
+                                   float32: bool = False) -> str:
     """Return the Jinja2 value_template for a numeric sensor ERD.
 
     When ``signed`` is True the template applies two's-complement sign extension
     so that negative values (e.g. an int16 encoded as 0xFFFF) are reported as
     negative numbers rather than large positive values.
     """
+    if float32:
+        # GEA multi-byte ERDs are sent most-significant byte first. The
+        # Home Assistant template functions have been available since 2023.4.
+        return "{{ value | from_hex | unpack('>f') }}"
     if signed:
         max_val = 2 ** (data_size * 8)
         half_val = max_val // 2
@@ -849,8 +863,11 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
             # pair to plain ASCII, stripping trailing '_' padding.
             vt = _string_value_template(data_size)
         elif data_size <= 4:
-            signed = _is_signed_type(_get_primary_data_type(erd_data))
-            vt = _compute_sensor_value_template(scaling_factor, data_size, signed)
+            primary_type = _get_primary_data_type(erd_data)
+            signed = _is_signed_type(primary_type)
+            vt = _compute_sensor_value_template(
+                scaling_factor, data_size, signed, _is_float32_type(primary_type)
+            )
     elif ha_domain == 'switch':
         # For paired switches, read state from the status ERD's primary field.
         pf = _get_primary_field(erd_by_id, paired_erd_str)

@@ -934,5 +934,26 @@ class TestBitfieldDeviceClassWiring(unittest.TestCase):
         self.assertEqual(humid['device_class'], 'humidity')
 
 
+class TestFloat32Templates(unittest.TestCase):
+    def test_single_float32_sensor_uses_ieee754_decoding(self):
+        erds = [{
+            'id': '0xF410',
+            'name': 'Float ERD',
+            'ha_domain': 'sensor',
+            'data': [{'name': 'Float ERD', 'type': 'float32', 'offset': 0, 'size': 4}],
+        }]
+
+        entries = gen._collect_ha_discovery_entries(erds)
+        self.assertEqual(1, len(entries))
+        self.assertEqual("{{ value | from_hex | unpack('>f') }}", entries[0]['value_template'])
+
+    def test_float32_subfield_uses_its_byte_range(self):
+        field = {'name': 'Float', 'type': 'float32', 'offset': 2, 'size': 4}
+        self.assertEqual(
+            "{{ value[4:12] | from_hex | unpack('>f') }}",
+            gen._byte_subfield_value_template(field, 1),
+        )
+
+
 if __name__ == '__main__':
     unittest.main()
