@@ -426,7 +426,7 @@ def _byte_subfield_value_template(field: Dict, erd_scaling: int) -> str:
     elif _is_float32_type(field_type):
         # ERD MQTT state payloads are hexadecimal bytes. Home Assistant's
         # from_hex/unpack filters decode the GEA big-endian IEEE-754 payload.
-        return f"{{{{ value[{hex_start}:{hex_end}] | from_hex | unpack('>f') }}}}"
+        return f"{{{{ value[{hex_start}:{hex_end}] | from_hex | unpack('>f') | round(3) }}}}"
     else:
         # Numeric types: u8, u16, u32, i8, i16, i32, etc.
         if _is_signed_type(field_type):
@@ -550,7 +550,7 @@ def _compute_sensor_value_template(scaling_factor: int, data_size: int, signed: 
     if float32:
         # GEA multi-byte ERDs are sent most-significant byte first. The
         # Home Assistant template functions have been available since 2023.4.
-        return "{{ value | from_hex | unpack('>f') }}"
+        return "{{ value | from_hex | unpack('>f') | round(3) }}"
     if signed:
         max_val = 2 ** (data_size * 8)
         half_val = max_val // 2

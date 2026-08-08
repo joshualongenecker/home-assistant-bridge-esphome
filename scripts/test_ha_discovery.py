@@ -945,12 +945,12 @@ class TestFloat32Templates(unittest.TestCase):
 
         entries = gen._collect_ha_discovery_entries(erds)
         self.assertEqual(1, len(entries))
-        self.assertEqual("{{ value | from_hex | unpack('>f') }}", entries[0]['value_template'])
+        self.assertEqual("{{ value | from_hex | unpack('>f') | round(3) }}", entries[0]['value_template'])
 
     def test_float32_subfield_uses_its_byte_range(self):
         field = {'name': 'Float', 'type': 'float32', 'offset': 2, 'size': 4}
         self.assertEqual(
-            "{{ value[4:12] | from_hex | unpack('>f') }}",
+            "{{ value[4:12] | from_hex | unpack('>f') | round(3) }}",
             gen._byte_subfield_value_template(field, 1),
         )
 
