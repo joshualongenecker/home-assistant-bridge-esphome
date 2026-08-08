@@ -141,7 +141,7 @@ TEST(erd_bridge_poll, keeps_same_erd_from_different_board_addresses_separate)
   erd_cache_entry_t* inverter = nullptr;
   uint16_t iterator = 0;
   while (erd_cache_entry_t* entry = erd_cache_get_next_entry(&test_cache, &iterator)) {
-    if (entry->erd == polled_erd && entry->board_address == 0xC0) primary = entry;
+    if (entry->erd == polled_erd && entry->board_address == PROBE_ENTRY_DEFAULT_ADDRESS) primary = entry;
     if (entry->erd == polled_erd && entry->board_address == 0xA2) inverter = entry;
   }
   CHECK(primary != nullptr);
