@@ -597,6 +597,14 @@ void GeappliancesBridge::dump_config() {
   }
   if (this->custom_erds_count_ > 0) {
     ESP_LOGCONFIG(TAG, "  Custom ERDs: %u configured", this->custom_erds_count_);
+    for (uint16_t i = 0; i < this->custom_erds_count_; i++) {
+      const custom_erd_entry_t &entry = this->custom_erds_[i];
+      if (entry.board_address == PROBE_ENTRY_DEFAULT_ADDRESS) {
+        ESP_LOGCONFIG(TAG, "    ERD 0x%04X: primary board", entry.erd);
+      } else {
+        ESP_LOGCONFIG(TAG, "    ERD 0x%04X: address 0x%02X", entry.erd, entry.board_address);
+      }
+    }
   }
 
   // Display current startup state for debugging
