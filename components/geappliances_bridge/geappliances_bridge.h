@@ -238,7 +238,10 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   };
   custom_erd_entry_t custom_erds_[CUSTOM_ERDS_MAX];
   uint16_t custom_erds_count_{0};
-  uint16_t subscription_unseen_custom_erds_[CUSTOM_ERDS_MAX];
+  // Retain the address with the ERD when subscription mode falls back to
+  // polling. A bare ERD ID would silently route every fallback read to the
+  // primary board.
+  probe_entry_t subscription_unseen_custom_erds_[CUSTOM_ERDS_MAX];
   uint16_t subscription_unseen_custom_erds_count_{0};
 
   erd_set_t custom_erd_subscription_seen_erds_;

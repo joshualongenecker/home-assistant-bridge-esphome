@@ -300,9 +300,14 @@ void GeappliancesBridge::start_custom_erd_polling_()
   }
   this->subscription_unseen_custom_erds_count_ = 0;
   for (uint16_t i = 0; i < this->custom_erds_count_; i++) {
-    tiny_erd_t erd = this->custom_erds_[i].erd;
-    if (!erd_set_contains(&this->custom_erd_subscription_seen_erds_, erd)) {
-      this->subscription_unseen_custom_erds_[this->subscription_unseen_custom_erds_count_++] = erd;
+    const auto &entry = this->custom_erds_[i];
+    // Subscription publications originate only from the primary host. A
+    // matching ERD ID observed there does not cover the same ERD on another
+    // board, so every explicit non-primary address must be polled.
+    if (entry.board_address != PROBE_ENTRY_DEFAULT_ADDRESS ||
+        !erd_set_contains(&this->custom_erd_subscription_seen_erds_, entry.erd)) {
+      this->subscription_unseen_custom_erds_[this->subscription_unseen_custom_erds_count_++] = {
+          entry.erd, entry.board_address};
     }
   }
   if (this->subscription_unseen_custom_erds_count_ == 0) {
@@ -315,11 +320,8 @@ void GeappliancesBridge::start_custom_erd_polling_()
            this->custom_erds_count_ - this->subscription_unseen_custom_erds_count_,
            this->subscription_unseen_custom_erds_count_);
 
-  probe_entry_t probe_buf[CUSTOM_ERDS_MAX];
-  for (uint16_t i = 0; i < this->subscription_unseen_custom_erds_count_; i++) {
-    probe_buf[i] = {this->subscription_unseen_custom_erds_[i], PROBE_ENTRY_DEFAULT_ADDRESS};
-  }
-  this->init_polling_bridge_(true, probe_buf, this->subscription_unseen_custom_erds_count_);
+  this->init_polling_bridge_(true, this->subscription_unseen_custom_erds_,
+                             this->subscription_unseen_custom_erds_count_);
   this->custom_erd_polling_started_ = true;
 }
 
