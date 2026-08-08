@@ -1089,6 +1089,7 @@ TEST(erd_cache_mqtt_publisher, default_address_publishes_without_crashing)
 
   bool published = erd_cache_mqtt_publisher_loop(&publisher);
   CHECK_TRUE(published);
+  STRCMP_EQUAL("geappliances/my_device/erd/0x0008/value", mqtt_double.last_published_topic_.c_str());
 }
 
 TEST(erd_cache_mqtt_publisher, non_default_address_publishes_without_crashing)
@@ -1105,5 +1106,5 @@ TEST(erd_cache_mqtt_publisher, non_default_address_publishes_without_crashing)
 
   bool published = erd_cache_mqtt_publisher_loop(&publisher);
   CHECK_TRUE(published);
+  STRCMP_EQUAL("geappliances/my_device/erd/0x10_0x0008/value", mqtt_double.last_published_topic_.c_str());
 }
-

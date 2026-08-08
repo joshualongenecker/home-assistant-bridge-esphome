@@ -26,17 +26,27 @@ class MqttTestDouble : public MQTTClientComponent {
  public:
   bool connected_{false};
   bool publish_should_fail_{false};
+  std::string last_published_topic_;
+  std::string last_published_payload_;
 
   std::function<void(const std::string&, const std::string&)> subscribe_callback_;
   std::function<void(bool)> on_connect_callback_;
   std::function<void(MQTTClientDisconnectReason)> on_disconnect_callback_;
 
   bool is_connected() override { return connected_; }
-  bool publish(const std::string& /*topic*/, const std::string& /*payload*/,
-               uint8_t /*qos*/, bool /*retain*/) override { return !publish_should_fail_; }
+  bool publish(const std::string& topic, const std::string& payload,
+               uint8_t /*qos*/, bool /*retain*/) override {
+    last_published_topic_ = topic;
+    last_published_payload_ = payload;
+    return !publish_should_fail_;
+  }
 
-  bool publish(const char* /*topic*/, const char* /*payload*/, size_t /*payload_length*/,
-               uint8_t /*qos*/, bool /*retain*/) override { return !publish_should_fail_; }
+  bool publish(const char* topic, const char* payload, size_t payload_length,
+               uint8_t /*qos*/, bool /*retain*/) override {
+    last_published_topic_ = topic;
+    last_published_payload_.assign(payload, payload_length);
+    return !publish_should_fail_;
+  }
 
   void subscribe(const std::string& /*topic*/,
                  std::function<void(const std::string&, const std::string&)> callback,

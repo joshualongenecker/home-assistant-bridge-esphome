@@ -398,16 +398,16 @@ static bool should_filter_config_topic(const char* name) {
     return false;
 }
 
-/* Primary-board entries retain the legacy topic. Entries generated from a
- * board namespace use the address-qualified topic published by the bridge. */
+/* Primary-board entries retain the legacy topic. Non-primary entries combine
+ * the board address and ERD ID in one MQTT topic segment. */
 static void format_erd_topic(char* destination, size_t destination_size,
                              const char* device_id, const char* erd_id,
                              const char* board_address, const char* operation)
 {
     if (board_address[0]) {
         snprintf(destination, destination_size,
-                 "geappliances/%s/erd/0x%s/address/0x%s/%s",
-                 device_id, erd_id, board_address, operation);
+                 "geappliances/%s/erd/0x%s_0x%s/%s",
+                 device_id, board_address, erd_id, operation);
     } else {
         snprintf(destination, destination_size,
                  "geappliances/%s/erd/0x%s/%s", device_id, erd_id, operation);

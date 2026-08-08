@@ -83,7 +83,7 @@ static void mqtt_publisher_task(void* arg)
       if (entry->board_address == PROBE_ENTRY_DEFAULT_ADDRESS) {
         topic_len = snprintf(self->task_topic, sizeof(self->task_topic), "geappliances/%s/erd/0x%04x/value", self->device_id, entry->erd);
       } else {
-        topic_len = snprintf(self->task_topic, sizeof(self->task_topic), "geappliances/%s/erd/0x%04x/address/0x%02x/value", self->device_id, entry->erd, entry->board_address);
+        topic_len = snprintf(self->task_topic, sizeof(self->task_topic), "geappliances/%s/erd/0x%02x_0x%04x/value", self->device_id, entry->board_address, entry->erd);
       }
       if (topic_len >= 0 && (unsigned)topic_len < sizeof(self->task_topic)) {
         size_t data_len = entry->data_size;
@@ -337,7 +337,7 @@ bool erd_cache_mqtt_publisher_loop(erd_cache_mqtt_publisher_t* self)
   if (entry->board_address == PROBE_ENTRY_DEFAULT_ADDRESS) {
     topic_len = snprintf(topic, sizeof(topic), "geappliances/%s/erd/0x%04x/value", self->device_id, entry->erd);
   } else {
-    topic_len = snprintf(topic, sizeof(topic), "geappliances/%s/erd/0x%04x/address/0x%02x/value", self->device_id, entry->erd, entry->board_address);
+    topic_len = snprintf(topic, sizeof(topic), "geappliances/%s/erd/0x%02x_0x%04x/value", self->device_id, entry->board_address, entry->erd);
   }
   if (topic_len < 0 || (unsigned)topic_len >= sizeof(topic)) {
     ESP_LOGW(PUBLISHER_TAG, "MQTT topic truncated (device_id too long: %s)", self->device_id);
