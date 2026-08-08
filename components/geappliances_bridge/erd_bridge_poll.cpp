@@ -60,17 +60,19 @@ static void reset_lost_appliance_timer(erd_bridge_poll_t* self)
     });
 }
 
-/* Fixed-capacity polling list — no dynamic reallocation.
- * POLLING_LIST_MAX_SIZE is defined in erd_lists.h (included via erd_bridge_common.h). */
-static void add_erd_to_polling_list(erd_bridge_poll_t* self, tiny_erd_t erd)
+/* Fixed-capacity polling list — deduplicates on (erd, address) pairs. */
+static void add_erd_to_polling_list(erd_bridge_poll_t* self, tiny_erd_t erd, uint8_t address)
 {
-  if (erd_set_contains(&self->erd_set, erd)) {
-    return;
+  for (uint16_t i = 0; i < self->polling_list_count; i++) {
+    if (self->erd_polling_list[i] == erd && self->erd_polling_addresses[i] == address) {
+      return;
+    }
   }
-  erd_set_insert(&self->erd_set, erd);
   if (self->polling_list_count < POLLING_LIST_MAX_SIZE) {
     self->erd_polling_list[self->polling_list_count] = erd;
+    self->erd_polling_addresses[self->polling_list_count] = address;
     self->polling_list_count++;
+    erd_set_insert(&self->erd_set, erd);
   }
 }
 
@@ -138,7 +140,10 @@ static bool send_next_read_request(erd_bridge_poll_t* self)
   bool more_erds_to_try = (self->erd_index < self->appliance_erd_list_count);
   if (more_erds_to_try) {
     self->request_id++;
-    tiny_gea3_erd_client_read(self->erd_client, &self->request_id, self->erd_host_address, self->appliance_erd_list[self->erd_index]);
+    probe_entry_t entry = self->appliance_erd_list[self->erd_index];
+    uint8_t addr = (entry.board_address == PROBE_ENTRY_DEFAULT_ADDRESS)
+                  ? self->erd_host_address : entry.board_address;
+    tiny_gea3_erd_client_read(self->erd_client, &self->request_id, addr, entry.erd);
     self->erd_index++;
   }
   return more_erds_to_try;
@@ -148,8 +153,10 @@ static void send_next_poll_read_request(erd_bridge_poll_t* self)
 {
   if (self->erd_index < self->polling_list_count) {
     self->request_id++;
+    uint8_t addr = self->erd_polling_addresses[self->erd_index];
+    if (addr == PROBE_ENTRY_DEFAULT_ADDRESS) addr = self->erd_host_address;
     uint32_t t0 = esphome::millis();
-    bool queued = tiny_gea3_erd_client_read(self->erd_client, &self->request_id, self->erd_host_address, self->erd_polling_list[self->erd_index]);
+    bool queued = tiny_gea3_erd_client_read(self->erd_client, &self->request_id, addr, self->erd_polling_list[self->erd_index]);
     uint32_t elapsed = esphome::millis() - t0;
     self->erd_index++;
     if (!queued) {
@@ -247,15 +254,25 @@ static tiny_hsm_result_t handle_discovery_list_signals(tiny_hsm_t* hsm, tiny_hsm
   auto args = reinterpret_cast<const tiny_gea3_erd_client_on_activity_args_t*>(data);
 
   switch (signal) {
-    case signal_read_completed:
-      add_erd_to_polling_list(self, args->read_completed.erd);
-      erd_cache_update(self->erd_cache, args->read_completed.erd,
+    case signal_read_completed: {
+      tiny_erd_t erd = args->read_completed.erd;
+      uint8_t addr = self->erd_host_address;
+      for (uint16_t i = 0; i < self->probe_list_count; i++) {
+        if (self->probe_list[i].erd == erd) {
+          addr = self->probe_list[i].board_address;
+          if (addr == PROBE_ENTRY_DEFAULT_ADDRESS) addr = self->erd_host_address;
+          break;
+        }
+      }
+      add_erd_to_polling_list(self, erd, addr);
+      erd_cache_update(self->erd_cache, erd, addr,
               reinterpret_cast<const uint8_t*>(args->read_completed.data),
               args->read_completed.data_size);
       if (!send_next_read_request(self)) {
         tiny_hsm_transition(hsm, state_polling);
       }
       break;
+    }
 
     case signal_read_failed:
       // Both not_supported and retries_exhausted are definitive — the GEA client
@@ -409,13 +426,22 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       const uint8_t*  erd_data  = reinterpret_cast<const uint8_t*>(args->read_completed.data);
       uint8_t         data_size = args->read_completed.data_size;
 
+      uint8_t addr = self->erd_host_address;
+      for (uint16_t i = 0; i < self->polling_list_count; i++) {
+        if (self->erd_polling_list[i] == erd) {
+          addr = self->erd_polling_addresses[i];
+          if (addr == PROBE_ENTRY_DEFAULT_ADDRESS) addr = self->erd_host_address;
+          break;
+        }
+      }
+
       if (erd_set_contains(&self->erd_set, erd)) {
         // ERD already known — just update cache.
       } else {
-        add_erd_to_polling_list(self, erd);
+        add_erd_to_polling_list(self, erd, addr);
       }
 
-      erd_cache_update(self->erd_cache, erd, erd_data, data_size);
+      erd_cache_update(self->erd_cache, erd, addr, erd_data, data_size);
       self->cycle_completed_count++;
       if (self->cycle_completed_count >= self->polling_list_count) {
         on_polling_cycle_complete(self, self->restart_pending || !self->polling_timer_armed);
@@ -502,7 +528,7 @@ static void erd_bridge_poll_init_impl(
   i_tiny_gea3_erd_client_t* erd_client,
   uint32_t                  polling_interval_ms,
   uint8_t                   initial_host_address,
-  const tiny_erd_t*         probe_list,
+  const probe_entry_t*      probe_list,
   uint16_t                  probe_list_count,
   erd_cache_t*              cache)
 {
@@ -561,7 +587,7 @@ void erd_bridge_poll_init(
   i_tiny_gea3_erd_client_t* erd_client,
   uint32_t                  polling_interval_ms,
   uint8_t                   host_address,
-  const tiny_erd_t*         probe_list,
+  const probe_entry_t*      probe_list,
   uint16_t                  probe_list_count,
   erd_cache_t*              cache)
 {

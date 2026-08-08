@@ -5,6 +5,7 @@
 
 #include "erd_cache_mqtt_publisher.h"
 #include "erd_cache.h"
+#include "erd_bridge_common.h"
 #include "geappliances_bridge_log.h"
 #include "i_mqtt_client.h"
 #include "esphome/core/log.h"
@@ -78,8 +79,12 @@ static void mqtt_publisher_task(void* arg)
     if (entry) {
       const uint8_t* data = erd_cache_entry_data(self->cache, entry);
 
-      int topic_len = snprintf(self->task_topic, sizeof(self->task_topic),
-          "geappliances/%s/erd/0x%04x/value", self->device_id, entry->erd);
+      int topic_len;
+      if (entry->board_address == PROBE_ENTRY_DEFAULT_ADDRESS) {
+        topic_len = snprintf(self->task_topic, sizeof(self->task_topic), "geappliances/%s/erd/0x%04x/value", self->device_id, entry->erd);
+      } else {
+        topic_len = snprintf(self->task_topic, sizeof(self->task_topic), "geappliances/%s/erd/0x%04x/address/0x%02x/value", self->device_id, entry->erd, entry->board_address);
+      }
       if (topic_len >= 0 && (unsigned)topic_len < sizeof(self->task_topic)) {
         size_t data_len = entry->data_size;
         for (size_t i = 0; i < data_len; i++) {
@@ -93,7 +98,7 @@ static void mqtt_publisher_task(void* arg)
         uint32_t elapsed = self->get_time_ms() - t_publish;
 
         if (elapsed >= 1000) {
-          ESP_LOGW(PUBLISHER_TAG, "Slow publish: %lums for ERD 0x%04x", (unsigned long)elapsed, entry->erd);
+          ESP_LOGW(PUBLISHER_TAG, "Slow publish: %lums for ERD 0x%04x addr 0x%02x", (unsigned long)elapsed, entry->erd, entry->board_address);
         }
 
         if (sent) {
@@ -328,8 +333,12 @@ bool erd_cache_mqtt_publisher_loop(erd_cache_mqtt_publisher_t* self)
   const uint8_t* data = erd_cache_entry_data(self->cache, entry);
 
   char topic[128];
-  int topic_len = snprintf(topic, sizeof(topic),
-      "geappliances/%s/erd/0x%04x/value", self->device_id, entry->erd);
+  int topic_len;
+  if (entry->board_address == PROBE_ENTRY_DEFAULT_ADDRESS) {
+    topic_len = snprintf(topic, sizeof(topic), "geappliances/%s/erd/0x%04x/value", self->device_id, entry->erd);
+  } else {
+    topic_len = snprintf(topic, sizeof(topic), "geappliances/%s/erd/0x%04x/address/0x%02x/value", self->device_id, entry->erd, entry->board_address);
+  }
   if (topic_len < 0 || (unsigned)topic_len >= sizeof(topic)) {
     ESP_LOGW(PUBLISHER_TAG, "MQTT topic truncated (device_id too long: %s)", self->device_id);
     return false;
@@ -347,7 +356,7 @@ bool erd_cache_mqtt_publisher_loop(erd_cache_mqtt_publisher_t* self)
   uint32_t elapsed = self->get_time_ms() - t_publish;
 
   if (elapsed >= 1000) {
-    ESP_LOGW(PUBLISHER_TAG, "Slow publish: %lums for ERD 0x%04x", (unsigned long)elapsed, entry->erd);
+    ESP_LOGW(PUBLISHER_TAG, "Slow publish: %lums for ERD 0x%04x addr 0x%02x", (unsigned long)elapsed, entry->erd, entry->board_address);
   }
 
   if (sent) {

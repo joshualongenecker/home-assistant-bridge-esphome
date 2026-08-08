@@ -8,6 +8,7 @@
  */
 
 #include "erd_bridge_poll.h"
+#include "erd_bridge_common.h"
 
 #include "erd_lists.h"
 
@@ -37,7 +38,7 @@ TEST_GROUP_BASE(erd_bridge_poll, simulation_test_base)
     mock().enable();
   }
 
-  void when_the_bridge_is_initialized_with_probe_list(const tiny_erd_t* list, uint16_t count)
+  void when_the_bridge_is_initialized_with_probe_list(const probe_entry_t* list, uint16_t count)
   {
     erd_bridge_poll_init(
       &self,
@@ -51,7 +52,7 @@ TEST_GROUP_BASE(erd_bridge_poll, simulation_test_base)
   void given_that_the_bridge_has_entered_polling_state()
   {
     mock().disable();
-    const tiny_erd_t probe_list[] = { polled_erd };
+    const probe_entry_t probe_list[] = {{polled_erd, PROBE_ENTRY_DEFAULT_ADDRESS}};
     when_the_bridge_is_initialized_with_probe_list(probe_list, 1);
 
     // Probe phase: the single ERD responds successfully.
@@ -88,7 +89,7 @@ TEST_GROUP_BASE(erd_bridge_poll, simulation_test_base)
 TEST(erd_bridge_poll, should_preserve_cache_data_on_reprobe_after_appliance_lost)
 {
   mock().disable();
-  const tiny_erd_t probe_list[] = { polled_erd };
+  const probe_entry_t probe_list[] = {{polled_erd, PROBE_ENTRY_DEFAULT_ADDRESS}};
   when_the_bridge_is_initialized_with_probe_list(probe_list, 1);
 
   // Probe phase: ERD responds, bridge enters polling.
@@ -232,7 +233,7 @@ TEST_GROUP_BASE(erd_bridge_poll_probe_list, simulation_test_base)
 
   erd_bridge_poll_t self;
 
-  const tiny_erd_t probe_list[2] = {probe_erd_1, probe_erd_2};
+  const probe_entry_t probe_list[2] = {{probe_erd_1, PROBE_ENTRY_DEFAULT_ADDRESS}, {probe_erd_2, PROBE_ENTRY_DEFAULT_ADDRESS}};
 
   void setup()
   {
@@ -436,7 +437,7 @@ TEST_GROUP_BASE(erd_bridge_poll_probe_failures, simulation_test_base)
 
   erd_bridge_poll_t self;
 
-  const tiny_erd_t probe_list[3] = {probe_erd_1, probe_erd_2, probe_erd_3};
+  const probe_entry_t probe_list[3] = {{probe_erd_1, PROBE_ENTRY_DEFAULT_ADDRESS}, {probe_erd_2, PROBE_ENTRY_DEFAULT_ADDRESS}, {probe_erd_3, PROBE_ENTRY_DEFAULT_ADDRESS}};
 
   void setup()
   {

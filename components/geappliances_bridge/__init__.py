@@ -303,9 +303,16 @@ async def to_code(config: dict[str, Any]) -> None:
             raise cv.Invalid(
                 f"custom_ha_discovery_file contains {generated_erd_count} ERDs; together with custom_erds "
                 "this exceeds the 128 ERD polling limit")
-        cg.add(var.add_custom_erds(
-            cg.RawExpression("custom_ha_discovery_erds"),
-            cg.RawExpression("CUSTOM_HA_DISCOVERY_ERD_COUNT")))
+        # Check for optional board address array (per-ERD board addressing)
+        if "custom_ha_discovery_erd_addresses" in contents:
+            cg.add(var.add_custom_erds_with_addresses(
+                cg.RawExpression("custom_ha_discovery_erds"),
+                cg.RawExpression("custom_ha_discovery_erd_addresses"),
+                cg.RawExpression("CUSTOM_HA_DISCOVERY_ERD_COUNT")))
+        else:
+            cg.add(var.add_custom_erds(
+                cg.RawExpression("custom_ha_discovery_erds"),
+                cg.RawExpression("CUSTOM_HA_DISCOVERY_ERD_COUNT")))
     # Create diagnostic sensors (auto-created by default, set to false to disable)
     await _create_diagnostic_sensor(config, CONF_ERD_PUBLISH_RATE_SENSOR, "ERD Publish Rate", "erd_publish_rate", "measurement", var, "set_erd_publish_rate_sensor")
     await _create_diagnostic_sensor(config, CONF_ERD_CACHE_ENTRIES_SENSOR, "ERD Cache Entries", "erd_cache_entries", "measurement", var, "set_erd_cache_entries_sensor", {"accuracy_decimals": 0})

@@ -144,7 +144,7 @@ TEST(erd_cache_mqtt_publisher, loop_publishes_updated_erd)
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
   uint8_t data = 0x42;
-  erd_cache_update(&cache, 0x0008, &data, sizeof(data));
+  erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
   bool published = erd_cache_mqtt_publisher_loop(&publisher);
   CHECK_TRUE(published);
@@ -174,7 +174,7 @@ TEST(erd_cache_mqtt_publisher, loop_publishes_one_per_call)
   // Insert 20 ERDs with update_required=true
   for (uint16_t i = 0; i < 20; i++) {
     uint8_t data = (uint8_t)i;
-    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), &data, sizeof(data));
+    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
   }
 
   // Only one ERD is published per call
@@ -192,7 +192,7 @@ TEST(erd_cache_mqtt_publisher, loop_skips_when_mqtt_disconnected)
     "device");
 
   uint8_t data = 0x01;
-  erd_cache_update(&cache, 0x0008, &data, sizeof(data));
+  erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
   // Disconnect so loop skips publishing
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
@@ -210,7 +210,7 @@ TEST(erd_cache_mqtt_publisher, loop_resumes_after_reconnect)
     "device");
 
   uint8_t data = 0x01;
-  erd_cache_update(&cache, 0x0008, &data, sizeof(data));
+  erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
   // Disconnect — should not publish
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
@@ -237,7 +237,7 @@ TEST(erd_cache_mqtt_publisher, loop_marks_unpublished_on_drop)
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
   uint8_t data = 0x42;
-  erd_cache_update(&cache, 0x0008, &data, sizeof(data));
+  erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
   /* Force the double to fail publish (simulates queue overflow). */
   mqtt_double.publish_should_fail_ = true;
@@ -261,7 +261,7 @@ TEST(erd_cache_mqtt_publisher, loop_retries_after_drop)
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
   uint8_t data = 0x42;
-  erd_cache_update(&cache, 0x0008, &data, sizeof(data));
+  erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
   /* First attempt fails. */
   mqtt_double.publish_should_fail_ = true;
@@ -296,7 +296,7 @@ TEST(erd_cache_mqtt_publisher, topic_format_correct)
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
   uint8_t data = 0x01;
-  erd_cache_update(&cache, 0x0008, &data, sizeof(data));
+  erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
   // The publisher will call esphome_mqtt_client_adapter_publish with the topic.
   // We verify it doesn't crash and the topic is constructed correctly.
@@ -317,7 +317,7 @@ TEST(erd_cache_mqtt_publisher, payload_lowercase_hex_no_separator)
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
   uint8_t data[] = {0x01, 0xAB, 0xFF};
-  erd_cache_update(&cache, 0x1001, data, sizeof(data));
+  erd_cache_update(&cache, 0x1001, 0xFF, data, sizeof(data));
 
   bool published = erd_cache_mqtt_publisher_loop(&publisher);
   CHECK_TRUE(published);
@@ -337,7 +337,7 @@ TEST(erd_cache_mqtt_publisher, retain_flag_true)
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
   uint8_t data = 0x01;
-  erd_cache_update(&cache, 0x0008, &data, sizeof(data));
+  erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
   // The publisher always passes retain=true to esphome_mqtt_client_adapter_publish.
   // We verify the call completes without crashing.
@@ -433,7 +433,7 @@ TEST(erd_cache_mqtt_publisher, loop_advances_publish_index)
   // Insert 10 ERDs
   for (uint16_t i = 0; i < 10; i++) {
     uint8_t data = (uint8_t)i;
-    erd_cache_update(&cache, (tiny_erd_t)(0x2000 + i), &data, sizeof(data));
+    erd_cache_update(&cache, (tiny_erd_t)(0x2000 + i), 0xFF, &data, sizeof(data));
   }
 
   // Each call publishes one ERD and advances the index
@@ -488,9 +488,9 @@ TEST(erd_cache_mqtt_publisher, loop_publishes_one_per_call_with_multiple_pending
   uint8_t data_a = 0x01;
   uint8_t data_b = 0x02;
   uint8_t data_c = 0x03;
-  erd_cache_update(&cache, 0x4001, &data_a, sizeof(data_a));
-  erd_cache_update(&cache, 0x4002, &data_b, sizeof(data_b));
-  erd_cache_update(&cache, 0x4003, &data_c, sizeof(data_c));
+  erd_cache_update(&cache, 0x4001, 0xFF, &data_a, sizeof(data_a));
+  erd_cache_update(&cache, 0x4002, 0xFF, &data_b, sizeof(data_b));
+  erd_cache_update(&cache, 0x4003, 0xFF, &data_c, sizeof(data_c));
 
   // Each call publishes exactly one ERD
   CHECK_TRUE(erd_cache_mqtt_publisher_loop(&publisher));
@@ -522,7 +522,7 @@ TEST(erd_cache_mqtt_publisher, loop_publishes_32_byte_payload)
   for (uint8_t i = 0; i < 32; i++) {
     data[i] = i;
   }
-  erd_cache_update(&cache, 0x1001, data, sizeof(data));
+  erd_cache_update(&cache, 0x1001, 0xFF, data, sizeof(data));
 
   bool published = erd_cache_mqtt_publisher_loop(&publisher);
   CHECK_TRUE(published);
@@ -551,9 +551,9 @@ TEST_GROUP(erd_cache_change_detection)
 TEST(erd_cache_change_detection, same_size_same_data_no_change)
 {
   uint8_t data[] = { 0x01, 0x02, 0x03 };
-  erd_cache_update(&cache, 0x1001, data, sizeof(data));
+  erd_cache_update(&cache, 0x1001, 0xFF, data, sizeof(data));
   /* update with identical data */
-  CHECK_FALSE(erd_cache_update(&cache, 0x1001, data, sizeof(data)));
+  CHECK_FALSE(erd_cache_update(&cache, 0x1001, 0xFF, data, sizeof(data)));
 }
 
 /* same-size, different data → change detected */
@@ -561,8 +561,8 @@ TEST(erd_cache_change_detection, same_size_different_data_change_detected)
 {
   uint8_t data1[] = { 0x01, 0x02, 0x03 };
   uint8_t data2[] = { 0x01, 0x02, 0x04 };
-  erd_cache_update(&cache, 0x1001, data1, sizeof(data1));
-  CHECK_TRUE(erd_cache_update(&cache, 0x1001, data2, sizeof(data2)));
+  erd_cache_update(&cache, 0x1001, 0xFF, data1, sizeof(data1));
+  CHECK_TRUE(erd_cache_update(&cache, 0x1001, 0xFF, data2, sizeof(data2)));
 }
 
 /* Size shrink is treated as appliance lost — returns false. */
@@ -570,8 +570,8 @@ TEST(erd_cache_change_detection, size_shrink_same_prefix_change_detected)
 {
   uint8_t data1[] = { 0x01, 0x02, 0x03, 0x04 };
   uint8_t data2[] = { 0x01, 0x02 };
-  erd_cache_update(&cache, 0x1001, data1, sizeof(data1));
-  CHECK_FALSE(erd_cache_update(&cache, 0x1001, data2, sizeof(data2)));
+  erd_cache_update(&cache, 0x1001, 0xFF, data1, sizeof(data1));
+  CHECK_FALSE(erd_cache_update(&cache, 0x1001, 0xFF, data2, sizeof(data2)));
 }
 
 /* Size grow is treated as appliance lost — returns false. */
@@ -579,8 +579,8 @@ TEST(erd_cache_change_detection, size_grow_same_prefix_change_detected)
 {
   uint8_t data1[] = { 0x01, 0x02 };
   uint8_t data2[] = { 0x01, 0x02, 0x03, 0x04 };
-  erd_cache_update(&cache, 0x1001, data1, sizeof(data1));
-  CHECK_FALSE(erd_cache_update(&cache, 0x1001, data2, sizeof(data2)));
+  erd_cache_update(&cache, 0x1001, 0xFF, data1, sizeof(data1));
+  CHECK_FALSE(erd_cache_update(&cache, 0x1001, 0xFF, data2, sizeof(data2)));
 }
 
 /* Size change (growth) is treated as appliance lost — returns false. */
@@ -588,12 +588,12 @@ TEST(erd_cache_change_detection, size_change_grow_rejected)
 {
   uint8_t data_small[8];
   memset(data_small, 0xAA, sizeof(data_small));
-  erd_cache_update(&cache, 0x1001, data_small, sizeof(data_small));
+  erd_cache_update(&cache, 0x1001, 0xFF, data_small, sizeof(data_small));
 
   uint8_t data_large[20];
   memcpy(data_large, data_small, sizeof(data_small));
   memset(data_large + sizeof(data_small), 0xBB, sizeof(data_large) - sizeof(data_small));
-  CHECK_FALSE(erd_cache_update(&cache, 0x1001, data_large, sizeof(data_large)));
+  CHECK_FALSE(erd_cache_update(&cache, 0x1001, 0xFF, data_large, sizeof(data_large)));
 }
 
 /* Size change (shrink) is treated as appliance lost — returns false. */
@@ -601,11 +601,11 @@ TEST(erd_cache_change_detection, size_change_shrink_rejected)
 {
   uint8_t data_large[20];
   memset(data_large, 0xAA, sizeof(data_large));
-  erd_cache_update(&cache, 0x1001, data_large, sizeof(data_large));
+  erd_cache_update(&cache, 0x1001, 0xFF, data_large, sizeof(data_large));
 
   uint8_t data_small[8];
   memset(data_small, 0xAA, sizeof(data_small));
-  CHECK_FALSE(erd_cache_update(&cache, 0x1001, data_small, sizeof(data_small)));
+  CHECK_FALSE(erd_cache_update(&cache, 0x1001, 0xFF, data_small, sizeof(data_small)));
 }
 
 /* New entry with data stored in arena */
@@ -615,7 +615,7 @@ TEST(erd_cache_change_detection, arena_path_new_entry_stored)
   for (uint8_t i = 0; i < 20; i++) {
     data[i] = i;
   }
-  erd_cache_update(&cache, 0x1001, data, sizeof(data));
+  erd_cache_update(&cache, 0x1001, 0xFF, data, sizeof(data));
 
   CHECK_EQUAL(1u, erd_cache_get_count(&cache));
 
@@ -636,13 +636,13 @@ TEST(erd_cache_change_detection, arena_path_update_existing_entry)
   for (uint8_t i = 0; i < 20; i++) {
     data1[i] = i;
   }
-  erd_cache_update(&cache, 0x1001, data1, sizeof(data1));
+  erd_cache_update(&cache, 0x1001, 0xFF, data1, sizeof(data1));
 
   uint8_t data2[20];
   for (uint8_t i = 0; i < 20; i++) {
     data2[i] = 255 - i;
   }
-  CHECK_TRUE(erd_cache_update(&cache, 0x1001, data2, sizeof(data2)));
+  CHECK_TRUE(erd_cache_update(&cache, 0x1001, 0xFF, data2, sizeof(data2)));
 
   CHECK_EQUAL(1u, erd_cache_get_count(&cache));
 
@@ -661,13 +661,13 @@ TEST(erd_cache_change_detection, cache_overflow_rejects_new_erd)
 {
   for (uint16_t i = 0; i < ERD_CACHE_CAPACITY; i++) {
     uint8_t data = 0x42;
-    erd_cache_update(&cache, (tiny_erd_t)(0x8000 + i), &data, sizeof(data));
+    erd_cache_update(&cache, (tiny_erd_t)(0x8000 + i), 0xFF, &data, sizeof(data));
   }
   CHECK_EQUAL(ERD_CACHE_CAPACITY, erd_cache_get_count(&cache));
 
   /* 201st ERD should be rejected */
   uint8_t data = 0xFF;
-  CHECK_FALSE(erd_cache_update(&cache, 0xFFFF, &data, sizeof(data)));
+  CHECK_FALSE(erd_cache_update(&cache, 0xFFFF, 0xFF, &data, sizeof(data)));
   CHECK_EQUAL(ERD_CACHE_CAPACITY, erd_cache_get_count(&cache));
 }
 
@@ -682,7 +682,7 @@ TEST(erd_cache_mqtt_publisher, loop_publishes_after_disconnect_reconnect)
     "device");
 
   uint8_t data = 0x42;
-  erd_cache_update(&cache, 0x1001, &data, sizeof(data));
+  erd_cache_update(&cache, 0x1001, 0xFF, &data, sizeof(data));
 
   /* Simulate disconnect — loop should skip publishing */
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
@@ -706,7 +706,7 @@ TEST(erd_cache_mqtt_publisher, loop_no_publish_after_reconnect_when_no_changes)
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
   uint8_t data = 0x42;
-  erd_cache_update(&cache, 0x1001, &data, sizeof(data));
+  erd_cache_update(&cache, 0x1001, 0xFF, &data, sizeof(data));
 
   /* Publish the ERD first to clear update_required */
   bool published = erd_cache_mqtt_publisher_loop(&publisher);
@@ -733,7 +733,7 @@ TEST(erd_cache_mqtt_publisher, short_disconnect_no_republish)
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
   uint8_t data = 0x42;
-  erd_cache_update(&cache, 0x1001, &data, sizeof(data));
+  erd_cache_update(&cache, 0x1001, 0xFF, &data, sizeof(data));
 
   /* Publish to clear update_required */
   bool published = erd_cache_mqtt_publisher_loop(&publisher);
@@ -765,9 +765,9 @@ TEST(erd_cache_mqtt_publisher, long_disconnect_republish_all)
 
   /* Insert 3 ERDs and publish them to clear update_required */
   uint8_t data1 = 0x01, data2 = 0x02, data3 = 0x03;
-  erd_cache_update(&cache, 0x1001, &data1, sizeof(data1));
-  erd_cache_update(&cache, 0x1002, &data2, sizeof(data2));
-  erd_cache_update(&cache, 0x1003, &data3, sizeof(data3));
+  erd_cache_update(&cache, 0x1001, 0xFF, &data1, sizeof(data1));
+  erd_cache_update(&cache, 0x1002, 0xFF, &data2, sizeof(data2));
+  erd_cache_update(&cache, 0x1003, 0xFF, &data3, sizeof(data3));
   /* Publish all 3 to clear update_required */
   erd_cache_mqtt_publisher_loop(&publisher);
   erd_cache_mqtt_publisher_loop(&publisher);
@@ -823,7 +823,7 @@ TEST(erd_cache_mqtt_publisher, exact_threshold_republish)
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
   uint8_t data = 0x42;
-  erd_cache_update(&cache, 0x1001, &data, sizeof(data));
+  erd_cache_update(&cache, 0x1001, 0xFF, &data, sizeof(data));
   bool published = erd_cache_mqtt_publisher_loop(&publisher);
   CHECK_TRUE(published);
 
@@ -850,7 +850,7 @@ TEST(erd_cache_mqtt_publisher, just_under_threshold_no_republish)
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
   uint8_t data = 0x42;
-  erd_cache_update(&cache, 0x1001, &data, sizeof(data));
+  erd_cache_update(&cache, 0x1001, 0xFF, &data, sizeof(data));
   bool published = erd_cache_mqtt_publisher_loop(&publisher);
   CHECK_TRUE(published);
 
@@ -877,7 +877,7 @@ TEST(erd_cache_mqtt_publisher, loop_reloads_cooldown_after_publish)
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
   uint8_t data = 0x42;
-  erd_cache_update(&cache, 0x1001, &data, sizeof(data));
+  erd_cache_update(&cache, 0x1001, 0xFF, &data, sizeof(data));
 
   /* First publish — immediate (new entry, cooldown=0). */
   bool published = erd_cache_mqtt_publisher_loop(&publisher);
@@ -902,7 +902,7 @@ TEST(erd_cache_mqtt_publisher, loop_skips_rate_limited_entries)
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
   uint8_t data = 0x42;
-  erd_cache_update(&cache, 0x1001, &data, sizeof(data));
+  erd_cache_update(&cache, 0x1001, 0xFF, &data, sizeof(data));
 
   /* First publish — immediate. */
   bool published = erd_cache_mqtt_publisher_loop(&publisher);
@@ -910,7 +910,7 @@ TEST(erd_cache_mqtt_publisher, loop_skips_rate_limited_entries)
 
   /* Update again — cooldown is 5, should be blocked. */
   uint8_t data2 = 0x99;
-  erd_cache_update(&cache, 0x1001, &data2, sizeof(data2));
+  erd_cache_update(&cache, 0x1001, 0xFF, &data2, sizeof(data2));
 
   /* Loop should publish nothing (rate-limited). */
   published = erd_cache_mqtt_publisher_loop(&publisher);
@@ -1070,5 +1070,40 @@ TEST(erd_cache_mqtt_publisher, cumulative_disconnect_duration_across_reconnect_a
   CHECK_EQUAL(15000u, erd_cache_mqtt_publisher_get_last_disconnect_duration_ms(&publisher));
 
   fake_time = 1000;
+}
+/* ------------------------------------------------------------------ */
+/* Address-qualified topic format                                      */
+/* ------------------------------------------------------------------ */
+
+TEST(erd_cache_mqtt_publisher, default_address_publishes_without_crashing)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "my_device");
+  erd_cache_mqtt_publisher_on_connected(&publisher);
+
+  uint8_t data = 0x42;
+  erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
+
+  bool published = erd_cache_mqtt_publisher_loop(&publisher);
+  CHECK_TRUE(published);
+}
+
+TEST(erd_cache_mqtt_publisher, non_default_address_publishes_without_crashing)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "my_device");
+  erd_cache_mqtt_publisher_on_connected(&publisher);
+
+  uint8_t data = 0x42;
+  erd_cache_update(&cache, 0x0008, 0x10, &data, sizeof(data));
+
+  bool published = erd_cache_mqtt_publisher_loop(&publisher);
+  CHECK_TRUE(published);
 }
 

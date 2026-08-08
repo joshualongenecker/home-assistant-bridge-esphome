@@ -28,10 +28,11 @@
 
 typedef struct {
   tiny_erd_t erd;
-  uint16_t data_offset;     /* offset into arena */
-  uint8_t data_size;        /* invariant after registration */
+  uint8_t board_address;      /* board address; 0xFF = primary host */
+  uint16_t data_offset;        /* offset into arena */
+  uint8_t data_size;           /* invariant after registration */
   bool update_required;
-  uint8_t publish_cooldown; /* counts down from max_cooldown to 0; 0 = eligible */
+  uint8_t publish_cooldown;    /* counts down from max_cooldown to 0; 0 = eligible */
   bool valid;
 } erd_cache_entry_t;
 
@@ -63,8 +64,9 @@ void erd_cache_destroy(erd_cache_t* self);
  *   - cache is full (300 entries)
  *   - arena is full (4096 bytes)
  *   - data is unchanged
- *   - ERD size changed (appliance lost) */
-bool erd_cache_update(erd_cache_t* self, tiny_erd_t erd, const uint8_t* data, uint8_t data_size);
+ *   - ERD size changed (appliance lost)
+ */
+bool erd_cache_update(erd_cache_t* self, tiny_erd_t erd, uint8_t board_address, const uint8_t* data, uint8_t data_size);
 
 /* Set the minimum interval (in seconds) between publishes for any ERD.
  * 0 = disabled (publish on every update). Range: 0-255. */

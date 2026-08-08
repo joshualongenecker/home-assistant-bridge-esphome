@@ -106,7 +106,7 @@ TEST(erd_cache_mqtt_publisher_pause, loop_skips_publishing_when_paused)
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
   uint8_t data = 0x42;
-  erd_cache_update(&cache, 0x0008, &data, sizeof(data));
+  erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
   /* Pause before loop. */
   erd_cache_mqtt_publisher_pause(&publisher);
@@ -135,7 +135,7 @@ TEST(erd_cache_mqtt_publisher_pause, loop_resumes_publishing_after_resume)
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
   uint8_t data = 0x42;
-  erd_cache_update(&cache, 0x0008, &data, sizeof(data));
+  erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
   /* Pause, then resume. */
   erd_cache_mqtt_publisher_pause(&publisher);
@@ -164,7 +164,7 @@ TEST(erd_cache_mqtt_publisher_pause, first_round_done_false_after_resume_true_af
 
   /* Insert a single ERD so a full round is one entry. */
   uint8_t data = 0x42;
-  erd_cache_update(&cache, 0x0008, &data, sizeof(data));
+  erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
   /* Pause and resume — first_round_done should be false after resume
    * (pause resets it, resume does not set it). */

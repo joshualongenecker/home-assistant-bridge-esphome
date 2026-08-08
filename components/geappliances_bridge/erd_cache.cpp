@@ -37,8 +37,8 @@ void erd_cache_init(erd_cache_t* self)
   for (uint16_t i = 0; i < ERD_CACHE_CAPACITY; i++) {
     erd_cache_entry_t* e = &self->entries[i];
     e->erd = 0;
+    e->board_address = 0;
     e->data_offset = 0;
-    e->data_size = 0;
     e->update_required = false;
     e->publish_cooldown = 0;
     e->valid = false;
@@ -60,18 +60,18 @@ void erd_cache_destroy(erd_cache_t* self)
   self->initialized = false;
 }
 
-erd_cache_entry_t* erd_cache_find(erd_cache_t* self, tiny_erd_t erd)
+erd_cache_entry_t* erd_cache_find(erd_cache_t* self, tiny_erd_t erd, uint8_t board_address)
 {
   for (uint16_t i = 0; i < ERD_CACHE_CAPACITY; i++) {
     erd_cache_entry_t* e = &self->entries[i];
-    if (e->valid && e->erd == erd) {
+    if (e->valid && e->erd == erd && e->board_address == board_address) {
       return e;
     }
   }
   return nullptr;
 }
 
-bool erd_cache_update(erd_cache_t* self, tiny_erd_t erd, const uint8_t* data, uint8_t data_size)
+bool erd_cache_update(erd_cache_t* self, tiny_erd_t erd, uint8_t board_address, const uint8_t* data, uint8_t data_size)
 {
   /* Reject ERDs exceeding GEA3 max payload size */
   if (data_size > ERD_CACHE_MAX_DATA_SIZE) {
@@ -83,7 +83,7 @@ bool erd_cache_update(erd_cache_t* self, tiny_erd_t erd, const uint8_t* data, ui
     return false;
   }
 
-  erd_cache_entry_t* existing = erd_cache_find(self, erd);
+  erd_cache_entry_t* existing = erd_cache_find(self, erd, board_address);
 
   if (existing) {
     /* Count every cache touch for ERD Publish Rate. */
@@ -157,10 +157,10 @@ bool erd_cache_update(erd_cache_t* self, tiny_erd_t erd, const uint8_t* data, ui
   self->arena_offset += data_size;
 
   slot->erd = erd;
+  slot->board_address = board_address;
   slot->data_size = data_size;
   slot->valid = true;
   slot->update_required = true;
-  slot->publish_cooldown = 0;
 
   ESP_LOGD(TAG, "ERD 0x%04X added to cache (%u bytes, arena offset %u)",
            erd, data_size, slot->data_offset);
