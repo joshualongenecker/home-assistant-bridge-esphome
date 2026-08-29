@@ -452,6 +452,7 @@ extern const tiny_erd_t appliance_api_home_water_filter_v1_notifications_erds[];
 extern const tiny_erd_t appliance_api_home_water_filter_v1_filter_1_status_erds[];
 extern const tiny_erd_t appliance_api_home_water_filter_v1_filter_2_status_erds[];
 extern const tiny_erd_t appliance_api_home_water_filter_v1_home_water_filter_platform_erds[];
+extern const tiny_erd_t appliance_api_home_water_filter_v1_hydration_station_erds[];
 extern const tiny_erd_t appliance_api_delivery_box_v1_go_box_foundation_erds[];
 extern const tiny_erd_t appliance_api_delivery_box_v1_go_box_mini_foundation_erds[];
 extern const tiny_erd_t appliance_api_zoneline_v1_foundation_erds[];

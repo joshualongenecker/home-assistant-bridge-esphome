@@ -2614,6 +2614,10 @@ const tiny_erd_t appliance_api_home_water_filter_v1_home_water_filter_platform_e
   0x1178,
 };
 
+const tiny_erd_t appliance_api_home_water_filter_v1_hydration_station_erds[] = {
+  0x1060,
+};
+
 const tiny_erd_t appliance_api_delivery_box_v1_go_box_foundation_erds[] = {
   0x1016,
   0x116f,
@@ -6064,6 +6068,7 @@ const appliance_feature_api_descriptor_t appliance_feature_api_descriptors[] = {
   {0x0010, 1, 0x00002000, "Home Water Filter / Filter 1 Status", appliance_api_home_water_filter_v1_filter_1_status_erds, 2},
   {0x0010, 1, 0x00004000, "Home Water Filter / Filter 2 Status", appliance_api_home_water_filter_v1_filter_2_status_erds, 2},
   {0x0010, 1, 0x00008000, "Home Water Filter / Home Water Filter Platform", appliance_api_home_water_filter_v1_home_water_filter_platform_erds, 1},
+  {0x0010, 1, 0x00010000, "Home Water Filter / Hydration Station", appliance_api_home_water_filter_v1_hydration_station_erds, 1},
   {0x0012, 1, 0x00000001, "Delivery Box / Go Box Foundation", appliance_api_delivery_box_v1_go_box_foundation_erds, 5},
   {0x0012, 1, 0x00000004, "Delivery Box / Go Box Mini Foundation", appliance_api_delivery_box_v1_go_box_mini_foundation_erds, 2},
   {0x0014, 1, 0x00000001, "Zoneline / Foundation", appliance_api_zoneline_v1_foundation_erds, 41},
