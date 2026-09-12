@@ -1098,6 +1098,14 @@ void ha_discovery_manager_init(ha_discovery_manager_t* self)
     uint16_t custom_max_chunk = self->custom_max_decompressed_chunk;
     uint32_t custom_data_hash = self->custom_data_hash;
 
+    /* Free any discovery buffers still allocated from a prior run before
+     * zeroing the struct, so a re-init can never orphan the ~44 KB of heap
+     * memory (mirrors ha_discovery_manager_cleanup()). free(NULL) is a no-op
+     * when the buffers were never allocated. */
+    free(self->decomp_buf);
+    free(self->line_buf);
+    free(self->payload_buf);
+
     /* Zero all runtime state. */
     memset(self, 0, sizeof(*self));
 
