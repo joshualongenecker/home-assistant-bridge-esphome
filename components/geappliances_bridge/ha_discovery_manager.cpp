@@ -606,7 +606,7 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
      * avoiding intermediate buffer limits. */
     char* payload = self->payload_buf;
     int pos = 0;
-    int space = (int)sizeof(self->payload_buf) - 1;  /* leave room for null */
+    int space = (int)HA_DISCOVERY_PAYLOAD_BUF_SIZE - 1;  /* leave room for null */
 
     int n;
 
@@ -903,6 +903,12 @@ static bool should_process_category(const char* category, uint8_t appliance_type
 
 static void cleanup_resources(ha_discovery_manager_t* self)
 {
+    free(self->decomp_buf);
+    self->decomp_buf = NULL;
+    free(self->line_buf);
+    self->line_buf = NULL;
+    free(self->payload_buf);
+    self->payload_buf = NULL;
     ha_discovery_cleanup_destroy(&self->cleanup);
 }
 
@@ -977,7 +983,7 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
                     self->current_chunk, cat.num_chunks, cat.name, chunk->size);
                 const uint8_t* src = cat.data + chunk->offset;
 
-                size_t dst_size = sizeof(self->decomp_buf);
+                size_t dst_size = HA_DISCOVERY_DECOMP_BUF_SIZE;
                 if (chunk_decompress(self, src, chunk->size, self->decomp_buf, &dst_size) != 0) {
                     ESP_LOGE(TAG, "Decompression failed for category '%s' chunk %u (offset %lu, size %u)",
                         cat.name, self->current_chunk, (unsigned long)chunk->offset, chunk->size);
@@ -1005,8 +1011,8 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
                     self->current_offset++;
                     continue;
                 }
-                if (line_len >= sizeof(self->line_buf) - 1) {
-                    line_len = sizeof(self->line_buf) - 1;
+                if (line_len >= (size_t)HA_DISCOVERY_LINE_BUF_SIZE - 1) {
+                    line_len = (size_t)HA_DISCOVERY_LINE_BUF_SIZE - 1;
                 }
                 memcpy(self->line_buf, line_start, line_len);
                 self->line_buf[line_len] = '\0';
@@ -1137,6 +1143,30 @@ void ha_discovery_manager_configure(
 void ha_discovery_manager_start(ha_discovery_manager_t* self)
 {
     if (self->state != ha_discovery_state_idle) return;
+
+    /* Allocate the large discovery buffers on the heap for the duration of
+     * this run only. The device reboots after discovery, so this memory never
+     * persists into steady state; keeping it out of the struct removes the
+     * ~44 KB from the permanent heap carve on non-discovery boots. */
+    size_t free_heap __attribute__((unused)) = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t largest_free __attribute__((unused)) = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    ESP_LOGI(TAG, "Discovery: allocating %u bytes (decomp+line+payload); free heap=%u, largest block=%u",
+             (unsigned)(HA_DISCOVERY_DECOMP_BUF_SIZE + HA_DISCOVERY_LINE_BUF_SIZE + HA_DISCOVERY_PAYLOAD_BUF_SIZE),
+             (unsigned)free_heap, (unsigned)largest_free);
+    self->decomp_buf = (uint8_t*)malloc(HA_DISCOVERY_DECOMP_BUF_SIZE);
+    self->line_buf = (char*)malloc(HA_DISCOVERY_LINE_BUF_SIZE);
+    self->payload_buf = (char*)malloc(HA_DISCOVERY_PAYLOAD_BUF_SIZE);
+    if (!self->decomp_buf || !self->line_buf || !self->payload_buf) {
+        ESP_LOGE(TAG, "Discovery: failed to allocate discovery buffers (free heap=%u)", (unsigned)free_heap);
+        free(self->decomp_buf);
+        self->decomp_buf = NULL;
+        free(self->line_buf);
+        self->line_buf = NULL;
+        free(self->payload_buf);
+        self->payload_buf = NULL;
+        self->state = ha_discovery_state_failed;
+        return;
+    }
 
     /* Build sorted ERD list and device JSON inline. */
     build_sorted_erd_list(self);

@@ -98,15 +98,19 @@ typedef struct {
   uint16_t sorted_erds_count;
 
   tinfl_decompressor decomp_state;
-  /* Decompression buffer for JSONL chunks (18KB). */
-  uint8_t decomp_buf[HA_DISCOVERY_DECOMP_BUF_SIZE];
+  /* Decompression buffer for JSONL chunks (18KB). Heap-allocated only while a
+   * discovery run is active (see ha_discovery_manager_start/cleanup); NULL
+   * otherwise, so non-discovery boots don't carry this ~44 KB in the object. */
+  uint8_t* decomp_buf;
 
-  /* Line parsing buffer. */
-  char line_buf[HA_DISCOVERY_LINE_BUF_SIZE];
+  /* Line parsing buffer. Heap-allocated only while a discovery run is active. */
+  char* line_buf;
 
-  /* Payload buffer for building discovery payloads. */
+  /* Topic buffer (small; stays a static member). */
   char topic_buf[HA_DISCOVERY_TOPIC_BUF_SIZE];
-  char payload_buf[HA_DISCOVERY_PAYLOAD_BUF_SIZE];
+  /* Payload buffer for building discovery payloads. Heap-allocated only while
+   * a discovery run is active. */
+  char* payload_buf;
 
 
   /* Device JSON built once at start. */
