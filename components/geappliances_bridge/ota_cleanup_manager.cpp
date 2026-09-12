@@ -260,18 +260,17 @@ void OtaCleanupManager::loop() {
     } else {
       this->ota_discovery_publishing_ = false;
 
-      if (this->cleanup_trigger_ == CleanupTrigger::INITIAL) {
-        // Initial publish: no cleanup needed, but still reboot after.
-        this->initial_discovery_done_ = true;
-        this->cleanup_trigger_ = CleanupTrigger::NONE;
-        ESP_LOGI(TAG, "Initial HA discovery publish complete, preparing reboot...");
-      } else {
-        // OTA or DiscoveryRefresh: prepare for reboot.
-        this->cleanup_trigger_ = CleanupTrigger::NONE;
-        ESP_LOGI(TAG, "OTA HA discovery publish complete, preparing reboot...");
-      }
+      // A discovery run ends in either COMPLETE or FAILED; is_processing() is
+      // false for both, so branch on the actual state. A FAILED run (e.g. a
+      // buffer-allocation or decompression error) must not be recorded as a
+      // successful publish, or the next boot's change check sees a matching
+      // hash and never retries.
+      bool discovery_failed =
+          ha_discovery_manager_get_state(this->ha_discovery_manager_) ==
+          ha_discovery_state_failed;
 
-      // Clear safe mode counter and mark OTA valid before reboot.
+      // Always confirm the firmware is valid so a good OTA is not rolled
+      // back, regardless of the discovery outcome.
       {
         uint32_t val = 0;
         static constexpr uint32_t SAFE_MODE_RTC_KEY = 233825507UL;
@@ -282,29 +281,48 @@ void OtaCleanupManager::loop() {
         ESP_LOGI(TAG, "Safe mode counter cleared, OTA rollback cancelled");
       }
 
-      this->ota_reboot_pending_ = true;
-      this->ota_reboot_start_ms_ = esphome::millis();
+      if (discovery_failed) {
+        // Do not save the discovery hash and do not schedule the post-publish
+        // reboot: leaving the stored hash stale/absent is what makes
+        // check_discovery_changes() re-trigger discovery on the next boot.
+        this->cleanup_trigger_ = CleanupTrigger::NONE;
+        ESP_LOGE(TAG, "HA discovery failed; not saving discovery state, will retry on next boot");
+      } else {
+        if (this->cleanup_trigger_ == CleanupTrigger::INITIAL) {
+          // Initial publish: no cleanup needed, but still reboot after.
+          this->initial_discovery_done_ = true;
+          this->cleanup_trigger_ = CleanupTrigger::NONE;
+          ESP_LOGI(TAG, "Initial HA discovery publish complete, preparing reboot...");
+        } else {
+          // OTA or DiscoveryRefresh: prepare for reboot.
+          this->cleanup_trigger_ = CleanupTrigger::NONE;
+          ESP_LOGI(TAG, "OTA HA discovery publish complete, preparing reboot...");
+        }
 
-      // Store current discovery state (hash + device ID) in NVS for
-      // change detection on next boot.
-      {
-        static const uint32_t DISCOVERY_NVS_KEY = 0x64697363u; // "disc"
-        auto pref = global_preferences->make_preference<DiscoveryNVS>(DISCOVERY_NVS_KEY);
-        DiscoveryNVS state{};
-        state.version = 3;
-        state.hash = discovery_data_hash(this->ha_discovery_manager_);
-        strncpy(state.device_id,
-                this->device_identity_manager_->get_device_id(),
-                sizeof(state.device_id) - 1);
-        state.device_id[sizeof(state.device_id) - 1] = '\0';
-        state.appliance_api_parsing = this->appliance_api_parsing_;
-        state.filter_config_topics = this->filter_config_topics_;
-        pref.save(&state);
-        global_preferences->sync();
-        ESP_LOGD(TAG, "Stored discovery state hash=0x%08" PRIx32
-                 " device_id=%s api_parsing=%d filter_topics=%d",
-                 state.hash, state.device_id,
-                 state.appliance_api_parsing, state.filter_config_topics);
+        this->ota_reboot_pending_ = true;
+        this->ota_reboot_start_ms_ = esphome::millis();
+
+        // Store current discovery state (hash + device ID) in NVS for
+        // change detection on next boot.
+        {
+          static const uint32_t DISCOVERY_NVS_KEY = 0x64697363u; // "disc"
+          auto pref = global_preferences->make_preference<DiscoveryNVS>(DISCOVERY_NVS_KEY);
+          DiscoveryNVS state{};
+          state.version = 3;
+          state.hash = discovery_data_hash(this->ha_discovery_manager_);
+          strncpy(state.device_id,
+                  this->device_identity_manager_->get_device_id(),
+                  sizeof(state.device_id) - 1);
+          state.device_id[sizeof(state.device_id) - 1] = '\0';
+          state.appliance_api_parsing = this->appliance_api_parsing_;
+          state.filter_config_topics = this->filter_config_topics_;
+          pref.save(&state);
+          global_preferences->sync();
+          ESP_LOGD(TAG, "Stored discovery state hash=0x%08" PRIx32
+                   " device_id=%s api_parsing=%d filter_topics=%d",
+                   state.hash, state.device_id,
+                   state.appliance_api_parsing, state.filter_config_topics);
+        }
       }
     }
   }
