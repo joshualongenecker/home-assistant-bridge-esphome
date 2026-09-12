@@ -282,9 +282,12 @@ void OtaCleanupManager::loop() {
       }
 
       if (discovery_failed) {
-        // Do not save the discovery hash and do not schedule the post-publish
+        // Reset the manager to idle: this frees the discovery buffers (so the
+        // ~44 KB does not linger for the rest of the boot) and clears run state.
+        // Also do not save the discovery hash and do not schedule the post-publish
         // reboot: leaving the stored hash stale/absent is what makes
         // check_discovery_changes() re-trigger discovery on the next boot.
+        ha_discovery_manager_init(this->ha_discovery_manager_);
         this->cleanup_trigger_ = CleanupTrigger::NONE;
         ESP_LOGE(TAG, "HA discovery failed; not saving discovery state, will retry on next boot");
       } else {
