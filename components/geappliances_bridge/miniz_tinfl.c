@@ -190,14 +190,16 @@ extern "C"
             MZ_CLEAR_ARR(r->m_tree_2);
     }
 
-    /* Renamed from upstream tinfl_decompress: ESP-IDF's esp32c6.rom.ld (and
-     * equivalent ROM ld files on other chips) defines tinfl_decompress as an
-     * absolute symbol pointing at the ROM copy, and linker-script symbol
-     * assignments take precedence over app object-file definitions. Defining
-     * the upstream name here would be silently discarded and calls would
-     * still resolve to the ROM implementation, whose tinfl_decompressor
-     * struct layout does not match this header. The gea_ prefix keeps the
-     * symbol out of the ROM's namespace so the app copy is actually used. */
+    /* Renamed from upstream tinfl_decompress: ESP-IDF's esp32c6.rom.ld,
+     * esp32c3.rom.ld, and esp32s3.rom.ld define tinfl_decompress (and the
+     * tinfl_decompress_mem_to_* helpers) as absolute symbols pointing at the
+     * ROM copies, and linker-script symbol assignments take precedence over
+     * app object-file definitions. Defining the upstream names here would be
+     * silently discarded on those chips and calls would still resolve to the
+     * ROM implementation, whose tinfl_decompressor struct layout does not
+     * match this header. (esp32s2.rom.ld and esp32.rom.ld wrap the same
+     * symbols in PROVIDE(), which yields to app definitions, but the gea_
+     * prefix keeps behavior uniform across all chips.) */
 
     tinfl_status gea_tinfl_decompress(tinfl_decompressor *r, const mz_uint8 *pIn_buf_next, size_t *pIn_buf_size, mz_uint8 *pOut_buf_start, mz_uint8 *pOut_buf_next, size_t *pOut_buf_size, const mz_uint32 decomp_flags)
     {
@@ -686,7 +688,7 @@ extern "C"
     }
 
     /* Higher level helper functions. */
-    void *tinfl_decompress_mem_to_heap(const void *pSrc_buf, size_t src_buf_len, size_t *pOut_len, int flags)
+    void *gea_tinfl_decompress_mem_to_heap(const void *pSrc_buf, size_t src_buf_len, size_t *pOut_len, int flags)
     {
         tinfl_decompressor decomp;
         void *pBuf = NULL, *pNew_buf;
@@ -724,7 +726,7 @@ extern "C"
         return pBuf;
     }
 
-    size_t tinfl_decompress_mem_to_mem(void *pOut_buf, size_t out_buf_len, const void *pSrc_buf, size_t src_buf_len, int flags)
+    size_t gea_tinfl_decompress_mem_to_mem(void *pOut_buf, size_t out_buf_len, const void *pSrc_buf, size_t src_buf_len, int flags)
     {
         tinfl_decompressor decomp;
         tinfl_status status;
@@ -733,7 +735,7 @@ extern "C"
         return (status != TINFL_STATUS_DONE) ? TINFL_DECOMPRESS_MEM_TO_MEM_FAILED : out_buf_len;
     }
 
-    int tinfl_decompress_mem_to_callback(const void *pIn_buf, size_t *pIn_buf_size, tinfl_put_buf_func_ptr pPut_buf_func, void *pPut_buf_user, int flags)
+    int gea_tinfl_decompress_mem_to_callback(const void *pIn_buf, size_t *pIn_buf_size, tinfl_put_buf_func_ptr pPut_buf_func, void *pPut_buf_user, int flags)
     {
         int result = 0;
         tinfl_decompressor decomp;

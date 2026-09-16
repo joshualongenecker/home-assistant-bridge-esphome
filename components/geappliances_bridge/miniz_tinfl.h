@@ -22,24 +22,34 @@ extern "C"
     };
 
     /* High level decompression functions: */
-    /* tinfl_decompress_mem_to_heap() decompresses a block in memory to a heap block allocated via malloc(). */
+
+    /* All tinfl functions in this component carry a gea_ prefix instead of
+     * the upstream names: ESP-IDF's ROM linker scripts (esp32c6.rom.ld,
+     * esp32c3.rom.ld, esp32s3.rom.ld) define the upstream tinfl_decompress*
+     * symbols as absolute addresses of the ROM copies, and linker-script
+     * symbol assignments take precedence over app object-file definitions —
+     * defining the upstream names would be silently discarded and calls
+     * would resolve to the ROM implementation, whose tinfl_decompressor
+     * layout does not match this header. See miniz_tinfl.c. */
+
+    /* gea_tinfl_decompress_mem_to_heap() decompresses a block in memory to a heap block allocated via malloc(). */
     /* On entry: */
     /*  pSrc_buf, src_buf_len: Pointer and size of the Deflate or zlib source data to decompress. */
     /* On return: */
     /*  Function returns a pointer to the decompressed data, or NULL on failure. */
     /*  *pOut_len will be set to the decompressed data's size, which could be larger than src_buf_len on uncompressible data. */
     /*  The caller must call mz_free() on the returned block when it's no longer needed. */
-    MINIZ_EXPORT void *tinfl_decompress_mem_to_heap(const void *pSrc_buf, size_t src_buf_len, size_t *pOut_len, int flags);
+    MINIZ_EXPORT void *gea_tinfl_decompress_mem_to_heap(const void *pSrc_buf, size_t src_buf_len, size_t *pOut_len, int flags);
 
-/* tinfl_decompress_mem_to_mem() decompresses a block in memory to another block in memory. */
+/* gea_tinfl_decompress_mem_to_mem() decompresses a block in memory to another block in memory. */
 /* Returns TINFL_DECOMPRESS_MEM_TO_MEM_FAILED on failure, or the number of bytes written on success. */
 #define TINFL_DECOMPRESS_MEM_TO_MEM_FAILED ((size_t)(-1))
-    MINIZ_EXPORT size_t tinfl_decompress_mem_to_mem(void *pOut_buf, size_t out_buf_len, const void *pSrc_buf, size_t src_buf_len, int flags);
+    MINIZ_EXPORT size_t gea_tinfl_decompress_mem_to_mem(void *pOut_buf, size_t out_buf_len, const void *pSrc_buf, size_t src_buf_len, int flags);
 
-    /* tinfl_decompress_mem_to_callback() decompresses a block in memory to an internal 32KB buffer, and a user provided callback function will be called to flush the buffer. */
+    /* gea_tinfl_decompress_mem_to_callback() decompresses a block in memory to an internal 32KB buffer, and a user provided callback function will be called to flush the buffer. */
     /* Returns 1 on success or 0 on failure. */
     typedef int (*tinfl_put_buf_func_ptr)(const void *pBuf, int len, void *pUser);
-    MINIZ_EXPORT int tinfl_decompress_mem_to_callback(const void *pIn_buf, size_t *pIn_buf_size, tinfl_put_buf_func_ptr pPut_buf_func, void *pPut_buf_user, int flags);
+    MINIZ_EXPORT int gea_tinfl_decompress_mem_to_callback(const void *pIn_buf, size_t *pIn_buf_size, tinfl_put_buf_func_ptr pPut_buf_func, void *pPut_buf_user, int flags);
 
     struct tinfl_decompressor_tag;
     typedef struct tinfl_decompressor_tag tinfl_decompressor;
@@ -101,7 +111,7 @@ extern "C"
 
     /* Main low-level decompressor coroutine function. This is the only function actually needed for decompression. All the other functions are just high-level helpers for improved usability. */
     /* This is a universal API, i.e. it can be used as a building block to build any desired higher level decompression API. In the limit case, it can be called once per every byte input or output. */
-    MINIZ_EXPORT tinfl_status tinfl_decompress(tinfl_decompressor *r, const mz_uint8 *pIn_buf_next, size_t *pIn_buf_size, mz_uint8 *pOut_buf_start, mz_uint8 *pOut_buf_next, size_t *pOut_buf_size, const mz_uint32 decomp_flags);
+    MINIZ_EXPORT tinfl_status gea_tinfl_decompress(tinfl_decompressor *r, const mz_uint8 *pIn_buf_next, size_t *pIn_buf_size, mz_uint8 *pOut_buf_start, mz_uint8 *pOut_buf_next, size_t *pOut_buf_size, const mz_uint32 decomp_flags);
 
     /* Internal/private bits follow. */
     enum
