@@ -23,7 +23,7 @@ extern "C"
 
     /* High level decompression functions: */
 
-    /* All tinfl functions in this component carry a gea_ prefix instead of
+    /* The tinfl_decompress* functions in this component carry a gea_ prefix instead of
      * the upstream names: ESP-IDF's ROM linker scripts (esp32c6.rom.ld,
      * esp32c3.rom.ld, esp32s3.rom.ld) define the upstream tinfl_decompress*
      * symbols as absolute addresses of the ROM copies, and linker-script
