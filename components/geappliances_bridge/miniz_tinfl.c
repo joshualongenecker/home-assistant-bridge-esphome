@@ -197,9 +197,9 @@ extern "C"
      * app object-file definitions. Defining the upstream names here would be
      * silently discarded on those chips and calls would still resolve to the
      * ROM implementation, whose tinfl_decompressor struct layout does not
-     * match this header. (esp32s2.rom.ld and esp32.rom.ld wrap the same
-     * symbols in PROVIDE(), which yields to app definitions, but the gea_
-     * prefix keeps behavior uniform across all chips.) */
+     * match this header. (esp32s2.rom.ld and esp32.rom.ld wrap three of
+     * these symbols in PROVIDE(), which yields to app definitions, but the
+     * gea_ prefix keeps behavior uniform across all chips.) */
 
     tinfl_status gea_tinfl_decompress(tinfl_decompressor *r, const mz_uint8 *pIn_buf_next, size_t *pIn_buf_size, mz_uint8 *pOut_buf_start, mz_uint8 *pOut_buf_next, size_t *pOut_buf_size, const mz_uint32 decomp_flags)
     {
