@@ -32,6 +32,14 @@
 #define MINIZ_NO_ZLIB_APIS
 #define MINIZ_NO_STDIO
 #include "miniz.h"
+
+/* App-side tinfl implementation (miniz_tinfl.c). Named gea_tinfl_decompress
+ * because the chip ROM's linker script claims the upstream name
+ * tinfl_decompress as an absolute symbol — see miniz_tinfl.c. */
+extern "C" tinfl_status gea_tinfl_decompress(tinfl_decompressor *r, const mz_uint8 *pIn_buf_next,
+                                             size_t *pIn_buf_size, mz_uint8 *pOut_buf_start,
+                                             mz_uint8 *pOut_buf_next, size_t *pOut_buf_size,
+                                             const mz_uint32 decomp_flags);
 #endif
 
 GEA_TAG(TAG) = "ha_discovery";
@@ -269,7 +277,7 @@ static int chunk_decompress(ha_discovery_manager_t* self, const uint8_t* compres
     size_t src_size = compressed_len;
     size_t dst_size = *output_len;
 
-    tinfl_status status = tinfl_decompress(
+    tinfl_status status = gea_tinfl_decompress(
         &self->decomp_state,
         compressed, &src_size,
         output, output, &dst_size,
