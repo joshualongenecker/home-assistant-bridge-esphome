@@ -45,6 +45,11 @@ const tiny_erd_t commonErds[] = {
   0x0416,
   0x0417,
   0x0418,
+  0x0420,
+  0x0421,
+  0x0422,
+  0x0423,
+  0x0424,
   0x0501,
   0x0502,
   0x0503,
@@ -83,6 +88,7 @@ const tiny_erd_t commonErds[] = {
   0x0912,
   0x0913,
   0x0914,
+  0x0a00,
 };
 const uint16_t commonErdCount = sizeof(commonErds) / sizeof(commonErds[0]);
 
@@ -2156,6 +2162,13 @@ const tiny_erd_t smallApplianceErds[] = {
   0x9507,
   0x9508,
   0x9509,
+  0x9600,
+  0x9601,
+  0x9602,
+  0x9603,
+  0x9604,
+  0x9605,
+  0x9606,
 };
 const uint16_t smallApplianceErdCount = sizeof(smallApplianceErds) / sizeof(smallApplianceErds[0]);
 

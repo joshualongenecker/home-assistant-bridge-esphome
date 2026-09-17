@@ -4581,6 +4581,40 @@ const tiny_erd_t appliance_api_laundry_center_v1_water_temperature_option_erds[]
   0x20bc,
 };
 
+const tiny_erd_t appliance_api_smart_plug_v1_foundation_erds[] = {
+  0x0402,
+  0x0410,
+  0x0411,
+};
+
+const tiny_erd_t appliance_api_smart_plug_v1_power_and_energy_erds[] = {
+  0x0420,
+  0x0421,
+  0x0422,
+  0x0423,
+  0x0424,
+};
+
+const tiny_erd_t appliance_api_smart_plug_v1_schedule_erds[] = {
+  0x0a00,
+};
+
+const tiny_erd_t appliance_api_smart_plug_v1_mode_erds[] = {
+  0x9600,
+  0x9601,
+  0x9602,
+  0x9603,
+  0x9604,
+};
+
+const tiny_erd_t appliance_api_smart_plug_v1_power_outage_notification_erds[] = {
+  0x9605,
+};
+
+const tiny_erd_t appliance_api_smart_plug_v1_over_or_under_voltage_notification_erds[] = {
+  0x9606,
+};
+
 const tiny_erd_t appliance_api_sourdough_starter_v1_foundation_erds[] = {
   0x9500,
 };
@@ -6392,6 +6426,12 @@ const appliance_feature_api_descriptor_t appliance_feature_api_descriptors[] = {
   {0x002e, 1, 0x00000800, "Laundry Center / Washer Eco Option", appliance_api_laundry_center_v1_washer_eco_option_erds, 2},
   {0x002e, 1, 0x00001000, "Laundry Center / Washer UV Sanitize Option", appliance_api_laundry_center_v1_washer_uv_sanitize_option_erds, 2},
   {0x002e, 1, 0x00002000, "Laundry Center / Water Temperature Option", appliance_api_laundry_center_v1_water_temperature_option_erds, 2},
+  {0x0032, 1, 0x00000001, "Smart Plug / Foundation", appliance_api_smart_plug_v1_foundation_erds, 3},
+  {0x0032, 1, 0x00000002, "Smart Plug / Power and Energy", appliance_api_smart_plug_v1_power_and_energy_erds, 5},
+  {0x0032, 1, 0x00000004, "Smart Plug / Schedule", appliance_api_smart_plug_v1_schedule_erds, 1},
+  {0x0032, 1, 0x00000008, "Smart Plug / Mode", appliance_api_smart_plug_v1_mode_erds, 5},
+  {0x0032, 1, 0x00000010, "Smart Plug / Power Outage Notification", appliance_api_smart_plug_v1_power_outage_notification_erds, 1},
+  {0x0032, 1, 0x00000020, "Smart Plug / Over or Under Voltage Notification", appliance_api_smart_plug_v1_over_or_under_voltage_notification_erds, 1},
   {0x0037, 1, 0x00000001, "Sourdough Starter / Foundation", appliance_api_sourdough_starter_v1_foundation_erds, 1},
   {0x0037, 1, 0x00000002, "Sourdough Starter / Ambient Temperature Supported", appliance_api_sourdough_starter_v1_ambient_temperature_supported_erds, 1},
   {0x0037, 1, 0x00000004, "Sourdough Starter / Ambient Temperature Offset Supported", appliance_api_sourdough_starter_v1_ambient_temperature_offset_supported_erds, 3},
