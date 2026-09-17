@@ -165,8 +165,6 @@
 {"i":"3088","n":"Analog Door Latch AD Counts - Door Open Average ADC","d":"sensor","ds":6,"sc":"measurement","vt":"{{ value[0:4] | int(base=16) }}"}
 {"i":"3088","n":"Analog Door Latch AD Counts - Door Closed Average ADC","d":"sensor","ds":6,"sc":"measurement","vt":"{{ value[4:8] | int(base=16) }}","fi":"door_closed_average_adc"}
 {"i":"3088","n":"Analog Door Latch AD Counts - Door Invalid Average ADC","d":"sensor","ds":6,"sc":"measurement","vt":"{{ value[8:12] | int(base=16) }}","fi":"door_invalid_average_adc"}
-{"i":"3089","n":"Control Lock Tub 0 Request","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
-{"i":"308a","n":"Control Lock Tub 0 Option State","d":"binary_sensor","ds":1,"pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3100","n":"Turbidity Calibration Value","d":"sensor","ds":2,"vt":"{{ value | int(base=16) }}"}
 {"i":"3101","n":"Rinse Aid Option State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3103","n":"Total AC Current Report","d":"sensor","ds":8,"vt":"{{ value[0:8] | int(base=16) }}"}
@@ -586,8 +584,6 @@
 {"i":"3449","n":"Tub 1 Fan 1 Speed Percentage","d":"sensor","ds":1,"u":"%","vt":"{{ value | int(base=16) }}"}
 {"i":"3483","n":"Tub 1 Hue Score","d":"sensor","ds":2,"sc":"measurement","vt":"{{ value | int(base=16) }}"}
 {"i":"3487","n":"Tub 1 Remote Start Enable","d":"binary_sensor","ds":1,"pon":"01","poff":"00","son":"01","soff":"00"}
-{"i":"3489","n":"Control Lock Tub 1 Request","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
-{"i":"348a","n":"Control Lock Tub 1 Option State","d":"binary_sensor","ds":1,"pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3600","n":"Tub 1 Dish Feature Configuration","d":"sensor","ds":15,"sc":"measurement","vt":"{{ value[0:2] | int(base=16) }}"}
 {"i":"3600","n":"Tub 1 Dish Feature Configuration - displayInHoursAndMinutes","d":"binary_sensor","ds":15,"vt":"{{ '01' if ((value[22:24] | int(base=16)) // 1) % 2 else '00' }}","fi":"displayinhoursandminutes","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3600","n":"Tub 1 Dish Feature Configuration - bottleJets","d":"binary_sensor","ds":15,"vt":"{{ '01' if ((value[22:24] | int(base=16)) // 2) % 2 else '00' }}","fi":"bottlejets","pon":"01","poff":"00","son":"01","soff":"00"}
