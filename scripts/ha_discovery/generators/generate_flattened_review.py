@@ -56,6 +56,8 @@ def make_entry(erd, erd_features, existing_review=None):
 
     If existing_review is provided, merge it into the review section.
     This preserves previously reviewed data when regenerating from source.
+    All non-None keys are preserved (including override-only keys such as
+    force_classification and value_template that post_process re-applies).
     """
     review = {
         'ha_domain': None,
@@ -70,9 +72,9 @@ def make_entry(erd, erd_features, existing_review=None):
         'reasoning': '',
     }
     if existing_review:
-        for k in review:
-            if k in existing_review and existing_review[k] is not None:
-                review[k] = existing_review[k]
+        for k, v in existing_review.items():
+            if v is not None:
+                review[k] = v
     return {
         'erd_id': erd['id'],
         'erd_name': erd['name'],

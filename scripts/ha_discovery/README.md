@@ -31,7 +31,9 @@ compress_ha_discovery.py      -->  components/geappliances_bridge/ha_discovery_d
 python3 scripts/ha_discovery/run_pipeline.py
 ```
 
-**Always run this before committing changes to the processed JSON or generator scripts.** It regenerates all derived artifacts (JSONL files, compressed headers) so ESPHome builds use the latest data.
+**Always run this before committing changes to the processed JSON, generator scripts, or overrides.** It regenerates all derived artifacts: the processed JSON (flattened from the `lib/public-appliance-api-documentation` submodule, preserving existing review data), the JSONL files, and the compressed headers, so ESPHome builds use the latest data.
+
+The submodule must be checked out: `git submodule update --init`.
 
 ## Directory Structure
 
