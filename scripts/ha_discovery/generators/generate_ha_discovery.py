@@ -670,7 +670,10 @@ def _select_options_and_templates(enum_values: Dict[str, str], data_size: int):
     hex_to_name = ', '.join(
         f"'{k:0{hex_chars}x}': '{_jinja2_escape(v)}'" for k, v in valid_pairs
     )
-    value_template = f"{{{{ {{{hex_to_name}}}.get(value[:{hex_chars}], 'Unknown') }}}}"
+    # Unmapped raw values fall back to 'None', which HA's MQTT select treats
+    # as "state unknown". Any other non-option string is logged as an error
+    # on every update (e.g. a 00 request ERD with options only for 01/02).
+    value_template = f"{{{{ {{{hex_to_name}}}.get(value[:{hex_chars}], 'None') }}}}"
 
     # Build command_template: map option name -> hex string
     name_to_hex = ', '.join(

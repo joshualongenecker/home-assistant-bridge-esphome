@@ -537,7 +537,10 @@ class TestActualZonelineERDs(unittest.TestCase):
         self.assertEqual(tmpl.render(value='00'), 'Stop')
         self.assertEqual(tmpl.render(value='01'), 'Heat')
         self.assertEqual(tmpl.render(value='03'), 'Cool')
-        self.assertEqual(tmpl.render(value='ff'), 'Unknown')
+        # Selects fall back to 'None' (HA's "unknown state" payload);
+        # enum sensors keep 'Unknown'.
+        expected = 'None' if obj['d'] == 'select' else 'Unknown'
+        self.assertEqual(tmpl.render(value='ff'), expected)
 
     def test_erd_7002_target_heating_temp(self):
         """ERD 0x7002 Target Heating Temperature signed i16 template."""
@@ -993,6 +996,28 @@ class TestControllableEntitiesHaveCommandTopic(unittest.TestCase):
         ct = JINJA2_ENV.from_string(valve[0]['ct'])
         self.assertEqual(ct.render(value='Open'), '01')
         self.assertEqual(ct.render(value='Closed'), '02')
+
+
+class TestSelectUnmappedFallback(unittest.TestCase):
+    """Select VTs must not emit a non-option string for unmapped values.
+
+    HA's MQTT select logs an error for any payload not in its options,
+    except 'None', which it treats as an unknown state.
+    """
+
+    def test_select_fallback_is_none(self):
+        for obj in load_all_entities():
+            if obj['d'] != 'select' or 'vt' not in obj:
+                continue
+            with self.subTest(entity=obj['n'], erd=obj['i']):
+                self.assertNotIn("'Unknown')", obj['vt'])
+                opts = json.loads(obj['o']) if isinstance(obj.get('o'), str) else obj.get('o', [])
+                ds = obj.get('ds', 1)
+                # A value that maps to no option must render as 'None'.
+                for raw in ('ff' * ds, 'fe' * ds, '00' * ds):
+                    out = JINJA2_ENV.from_string(obj['vt']).render(value=raw)
+                    self.assertTrue(out in opts or out == 'None',
+                                    f'{obj["n"]}: {raw!r} -> {out!r}')
 
 
 class TestUnpairedMultiFieldDemotion(unittest.TestCase):
