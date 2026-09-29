@@ -642,5 +642,59 @@ class TestPerFieldPairingOverrides(unittest.TestCase):
         self.assertEqual(erds[0]["data"][1]["pair_role"], "status")
 
 
+import auto_detect_ha_domain as domain_detect
+import auto_detect_pairings as pairings
+
+
+class TestBinaryEnumKeying(unittest.TestCase):
+    """Binary enums keyed other than 0/1 can't be switch/binary_sensor."""
+
+    def _entry(self, values, writable=True):
+        return {
+            "field_type": "enum",
+            "field_name": "Test",
+            "field_values": values,
+            "erd_operations": ["read", "write"] if writable else ["read"],
+            "review": {},
+        }
+
+    def test_zero_one_writable_is_switch(self):
+        d, _ = domain_detect.infer_ha_domain(self._entry({"0": "Off", "1": "On"}))
+        self.assertEqual(d, "switch")
+
+    def test_one_two_writable_is_select(self):
+        d, _ = domain_detect.infer_ha_domain(self._entry({"1": "Open", "2": "Closed"}))
+        self.assertEqual(d, "select")
+
+    def test_zero_ff_read_only_is_sensor(self):
+        d, _ = domain_detect.infer_ha_domain(
+            self._entry({"0": "Inactive", "255": "Active"}, writable=False))
+        self.assertEqual(d, "sensor")
+
+
+class TestRequestedDesiredPairing(unittest.TestCase):
+    """'- Requested/Desired' pairs with '- Status/Actual'."""
+
+    def test_strip_compound_suffixes(self):
+        self.assertEqual(
+            pairings.strip_request_status("Water Heater Boost Mode State - Requested/Desired"),
+            "Water Heater Boost Mode State")
+        self.assertEqual(
+            pairings.strip_request_status("Water Heater Boost Mode State - Status/Actual"),
+            "Water Heater Boost Mode State")
+
+    def test_plain_suffixes_unchanged(self):
+        self.assertEqual(pairings.strip_request_status("Fan Speed Request"), "Fan Speed")
+        self.assertEqual(pairings.strip_request_status("Fan Speed Status"), "Fan Speed")
+
+    def test_find_pairs(self):
+        erd_by_id = {
+            "0x4220": {"id": "0x4220", "name": "Water Heater Boost Mode State - Status/Actual"},
+            "0x4221": {"id": "0x4221", "name": "Water Heater Boost Mode State - Requested/Desired"},
+        }
+        pairs = pairings.find_erd_pairs(erd_by_id, ["0x4220", "0x4221"])
+        self.assertEqual(pairs, [("0x4221", "0x4220")])
+
+
 if __name__ == "__main__":
     unittest.main()

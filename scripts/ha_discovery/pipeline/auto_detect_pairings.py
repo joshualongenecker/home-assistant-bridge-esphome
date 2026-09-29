@@ -23,8 +23,15 @@ from pipeline_utils import SCRIPT_DIR, REPO_ROOT, load_json
 
 
 def strip_request_status(name):
-    """Strip 'Request' or 'Status' suffix from an ERD name, handling trailing content."""
-    n = re.sub(r'\s*(request|status)\s*$', '', name, flags=re.IGNORECASE).strip()
+    """Strip 'Request' or 'Status' suffix from an ERD name, handling trailing content.
+
+    Also handles the compound form used by some ERDs, e.g.
+    "Water Heater Boost Mode State - Requested/Desired" and
+    "Water Heater Boost Mode State - Status/Actual".
+    """
+    n = re.sub(r'\s*[-–—:]?\s*(requested|request|status)\s*/\s*(desired|actual)\s*$',
+               '', name, flags=re.IGNORECASE).strip()
+    n = re.sub(r'\s*(request|status)\s*$', '', n, flags=re.IGNORECASE).strip()
     # Also strip trailing numbers after Request/Status (e.g. "Request 0" -> base)
     n = re.sub(r'\s*(request|status)\s*\d+\s*$', '', n, flags=re.IGNORECASE).strip()
     return n

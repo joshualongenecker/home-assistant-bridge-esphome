@@ -7,8 +7,9 @@ a separate review step.
 
 AGENTS.md rules:
 - bool + writable -> switch; bool + read-only -> binary_sensor; bool + one-shot -> button
-- enum 2-value on/off + writable -> switch; read-only -> binary_sensor
-- enum 2-value descriptive + writable -> select; read-only -> sensor
+- enum 2-value on/off keyed 0/1 + writable -> switch; read-only -> binary_sensor
+- enum 2-value descriptive, or on/off keyed other than 0/1 (e.g. 1/2)
+  + writable -> select; read-only -> sensor
 - enum >2-value + writable -> select; read-only -> sensor
 - numeric + read-only -> sensor; writable -> number
 - string -> sensor
@@ -125,6 +126,25 @@ def _is_binary_enum(entry):
     return False
 
 
+def _binary_enum_keyed_zero_one(entry):
+    """Check that a binary enum's functional values are exactly 0 and 1.
+
+    switch and binary_sensor entities encode state as '00'/'01'. Binary enums
+    keyed on other values (e.g. 1=Open, 2=Closed) cannot round-trip through
+    those payloads and must be exposed as select/sensor with their labels.
+    """
+    values = entry.get('field_values', {}) or {}
+    keys = set()
+    for k, label in values.items():
+        if label in PROTOCOL_MARKERS:
+            continue
+        try:
+            keys.add(int(k))
+        except (TypeError, ValueError):
+            return False
+    return keys == {0, 1}
+
+
 def _is_bit_field(entry):
     """Check if field is a bit-field (field_bits is a dict)."""
     bits = entry.get('field_bits')
@@ -155,7 +175,7 @@ def infer_ha_domain(entry):
             return None, None
 
         if count == 2:
-            if _is_binary_enum(entry):
+            if _is_binary_enum(entry) and _binary_enum_keyed_zero_one(entry):
                 # Binary enum: on/off-like semantics
                 if writable:
                     return 'switch', 0.9

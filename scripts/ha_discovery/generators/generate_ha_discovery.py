@@ -874,6 +874,18 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
         if pf is None:
             pf = {'name': '', 'type': 'u8', 'offset': 0, 'size': 1}
         vt = _paired_switch_vt(pf, paired_erd_str, pair_role, erd_by_id)
+        if not paired_erd_str:
+            # Unpaired switch: the bridge only emits command_topic when a
+            # command_template is present (or the ERD is paired), and HA
+            # rejects a switch without one. A 1-byte ERD can take the
+            # '01'/'00' payload as-is; wider ERDs can't be written from a
+            # single byte, so expose them read-only instead.
+            if data_size == 1:
+                ct = '{{ value }}'
+            else:
+                # Keep the first-byte slice VT so '01'/'00' state matching
+                # still works for the wider payload.
+                ha_domain = 'binary_sensor'
     elif ha_domain == 'select':
         ev, fs = _get_first_enum_field_info(erd_data)
         if ev:
@@ -972,7 +984,22 @@ def _handle_byte_offset_erd(erd_by_id: Dict[str, Dict], collect,
         f_scaling = int(field.get('scaling_factor') or scaling_factor)
         if f_type not in ('u8', 'u16', 'u32', 'i8', 'i16', 'i32'):
             f_scaling = 1
-        if f_ha_domain == 'binary_sensor' and f_type == 'enum':
+        # An unpaired switch/number sub-field can't be written on its own
+        # (a write must carry the whole multi-field ERD payload), so no
+        # command_topic is emitted and HA would reject the entity outright.
+        # Expose it read-only instead, matching _handle_bitfield_erd.
+        bin_payloads = f_ha_domain == 'switch'
+        if not f_paired_id and f_ha_domain in ('switch', 'number'):
+            if f_ha_domain == 'switch':
+                f_ha_domain = 'binary_sensor'
+                f_dev_cls = ''
+                vt = _paired_switch_vt(field, '', '', erd_by_id)
+                opts, ct = '', ''
+            else:
+                f_ha_domain = 'sensor'
+                vt = _paired_field_vt(field, '', '', erd_by_id, f_scaling)
+                opts, ct = '', ''
+        elif f_ha_domain == 'binary_sensor' and f_type == 'enum':
             f_dev_cls = ''
             field_size = field.get('size', 1)
             vt = _compute_binary_sensor_value_template(field_size)
@@ -1004,10 +1031,10 @@ def _handle_byte_offset_erd(erd_by_id: Dict[str, Dict], collect,
         collect(erd_id_int, entity_name, f_ha_domain, f_unit, f_dev_cls,
                 f_state_cls, f_scaling, data_size, f_paired_id,
                 f_pair_role, vt, ct, opts, fid, '',
-                '01' if f_ha_domain == 'switch' else '',
-                '00' if f_ha_domain == 'switch' else '',
-                '01' if f_ha_domain == 'switch' else '',
-                '00' if f_ha_domain == 'switch' else '',
+                '01' if bin_payloads else '',
+                '00' if bin_payloads else '',
+                '01' if bin_payloads else '',
+                '00' if bin_payloads else '',
                 f_min, f_max, f_step)
 
 
@@ -1077,8 +1104,24 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
             if req.get('pair_role') == 'request' and req.get('ha_domain') in ('switch', 'select', 'number'):
                 skip_primary = True
 
+        # Unpaired switch/number primary fields share the ERD with bit-flag
+        # fields, so they can't be written on their own; expose read-only
+        # (see _handle_byte_offset_erd).
+        p_bin_payloads = p_ha_domain == 'switch'
+        p_demoted = False
+        if not p_paired_id and p_ha_domain in ('switch', 'number'):
+            p_ha_domain = 'binary_sensor' if p_ha_domain == 'switch' else 'sensor'
+            p_demoted = True
+
         if not skip_primary:
-            if p_ha_domain == 'binary_sensor' and p_type == 'enum':
+            if p_demoted:
+                if p_bin_payloads:
+                    p_dev_cls = ''
+                    p_vt = _paired_switch_vt(primary, '', '', erd_by_id)
+                else:
+                    p_vt = _paired_field_vt(primary, '', '', erd_by_id, p_scaling)
+                p_ct = ''
+            elif p_ha_domain == 'binary_sensor' and p_type == 'enum':
                 # binary_sensor can't display enum labels; use ON/OFF
                 p_dev_cls = ''
                 p_field_size = primary.get('size', 1)
@@ -1104,10 +1147,10 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
                     primary.get('state_class') or state_class, p_scaling, data_size, p_paired_id,
                     p_pair_role, p_vt, p_ct, '', '',
                     'box' if p_ha_domain == 'number' else '',
-                    '01' if p_ha_domain == 'switch' else '',
-                    '00' if p_ha_domain == 'switch' else '',
-                    '01' if p_ha_domain == 'switch' else '',
-                    '00' if p_ha_domain == 'switch' else '',
+                    '01' if p_bin_payloads else '',
+                    '00' if p_bin_payloads else '',
+                    '01' if p_bin_payloads else '',
+                    '00' if p_bin_payloads else '',
                     p_min, p_max, p_step)
 
     for field in [d for d in erd_data

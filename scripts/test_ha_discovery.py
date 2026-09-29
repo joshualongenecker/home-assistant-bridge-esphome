@@ -955,5 +955,85 @@ class TestFloat32Templates(unittest.TestCase):
         )
 
 
+class TestControllableEntitiesHaveCommandTopic(unittest.TestCase):
+    """Every switch/number/select must produce a command_topic.
+
+    The bridge emits command_topic only when an entity has a command
+    template ('ct') or a paired ERD ('p'). Home Assistant rejects a
+    switch/number/select discovery message without one, so the entity
+    silently never appears.
+    """
+
+    def setUp(self):
+        self.entities = load_all_entities()
+
+    def test_controls_have_ct_or_pairing(self):
+        for obj in self.entities:
+            if obj['d'] not in ('switch', 'number', 'select'):
+                continue
+            with self.subTest(entity=obj['n'], erd=obj['i'], field=obj.get('fi', '')):
+                self.assertTrue(
+                    obj.get('ct') or obj.get('p'),
+                    f'{obj["n"]} ({obj["i"]}) is a {obj["d"]} with no '
+                    f'command_template and no paired ERD')
+
+    def test_boost_mode_request_paired_with_status(self):
+        """Boost Mode Requested/Desired (0x4221) pairs with Status/Actual (0x4220)."""
+        boost = [e for e in self.entities if e['i'] == '4221']
+        self.assertEqual(len(boost), 1)
+        self.assertEqual(boost[0]['d'], 'switch')
+        self.assertEqual(boost[0].get('p'), '4220')
+        self.assertEqual(boost[0].get('r'), 'request')
+
+    def test_non_zero_one_binary_enum_is_select(self):
+        """Requested Water Valve Position (1=Open, 2=Closed) is a select."""
+        valve = [e for e in self.entities if e['i'] == '4223']
+        self.assertEqual(len(valve), 1)
+        self.assertEqual(valve[0]['d'], 'select')
+        ct = JINJA2_ENV.from_string(valve[0]['ct'])
+        self.assertEqual(ct.render(value='Open'), '01')
+        self.assertEqual(ct.render(value='Closed'), '02')
+
+
+class TestUnpairedMultiFieldDemotion(unittest.TestCase):
+    """Unpaired switch/number sub-fields of multi-field ERDs are read-only."""
+
+    def test_byte_offset_unpaired_number_becomes_sensor(self):
+        entries = []
+
+        def collect(*args):
+            entries.append(args)
+
+        erd_data = [
+            {'name': 'Minimum setpoint', 'type': 'u16', 'offset': 0, 'size': 2},
+            {'name': 'Maximum setpoint', 'type': 'u16', 'offset': 2, 'size': 2},
+        ]
+        gen._handle_byte_offset_erd({}, collect, 0x4048, 'Vacation setpoint',
+                                    'number', '', '', 10, 4, '', '', erd_data)
+        self.assertEqual([e[2] for e in entries], ['sensor', 'sensor'])
+        self.assertEqual([e[11] for e in entries], ['', ''])  # no ct
+        vt = JINJA2_ENV.from_string(entries[1][10])
+        self.assertEqual(float(vt.render(value='02d00384')), 90.0)
+
+    def test_byte_offset_unpaired_switch_becomes_binary_sensor(self):
+        entries = []
+
+        def collect(*args):
+            entries.append(args)
+
+        erd_data = [
+            {'name': 'Flag A', 'type': 'bool', 'offset': 0, 'size': 1},
+            {'name': 'Flag B', 'type': 'bool', 'offset': 1, 'size': 1},
+        ]
+        gen._handle_byte_offset_erd({}, collect, 0x1234, 'Flags',
+                                    'switch', '', '', 1, 2, '', '', erd_data)
+        self.assertEqual([e[2] for e in entries], ['binary_sensor', 'binary_sensor'])
+        # payload_on/off present so '01'/'00' state matching works
+        self.assertEqual(entries[1][15], '01')
+        self.assertEqual(entries[1][16], '00')
+        vt = JINJA2_ENV.from_string(entries[1][10])
+        self.assertEqual(vt.render(value='0001'), '01')
+
+
 if __name__ == '__main__':
     unittest.main()

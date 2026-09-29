@@ -165,10 +165,10 @@
 {"i":"3088","n":"Analog Door Latch AD Counts - Door Open Average ADC","d":"sensor","ds":6,"sc":"measurement","vt":"{{ value[0:4] | int(base=16) }}"}
 {"i":"3088","n":"Analog Door Latch AD Counts - Door Closed Average ADC","d":"sensor","ds":6,"sc":"measurement","vt":"{{ value[4:8] | int(base=16) }}","fi":"door_closed_average_adc"}
 {"i":"3088","n":"Analog Door Latch AD Counts - Door Invalid Average ADC","d":"sensor","ds":6,"sc":"measurement","vt":"{{ value[8:12] | int(base=16) }}","fi":"door_invalid_average_adc"}
-{"i":"3089","n":"Control Lock Tub 0 Request","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"3089","n":"Control Lock Tub 0 Request","d":"switch","ds":1,"vt":"{{ value[0:2] }}","ct":"{{ value }}","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"308a","n":"Control Lock Tub 0 Option State","d":"binary_sensor","ds":1,"pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3100","n":"Turbidity Calibration Value","d":"sensor","ds":2,"vt":"{{ value | int(base=16) }}"}
-{"i":"3101","n":"Rinse Aid Option State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"3101","n":"Rinse Aid Option State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","ct":"{{ value }}","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3103","n":"Total AC Current Report","d":"sensor","ds":8,"vt":"{{ value[0:8] | int(base=16) }}"}
 {"i":"3103","n":"Total AC Current Report - waterHeater","d":"binary_sensor","ds":8,"vt":"{{ '01' if ((value[8:12] | int(base=16)) // 256) % 2 else '00' }}","fi":"waterheater","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3103","n":"Total AC Current Report - drainPump","d":"binary_sensor","ds":8,"vt":"{{ '01' if ((value[8:12] | int(base=16)) // 512) % 2 else '00' }}","fi":"drainpump","pon":"01","poff":"00","son":"01","soff":"00"}
@@ -198,8 +198,8 @@
 {"i":"3106","n":"DC Current Report - compartmentFan","d":"binary_sensor","ds":6,"vt":"{{ '01' if ((value[4:8] | int(base=16)) // 4096) % 2 else '00' }}","fi":"compartmentfan","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3106","n":"DC Current Report - doorFan","d":"binary_sensor","ds":6,"vt":"{{ '01' if ((value[4:8] | int(base=16)) // 8192) % 2 else '00' }}","fi":"doorfan","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3107","n":"AC Line Voltage","d":"sensor","ds":2,"u":"V","dc":"voltage","sc":"measurement","vt":"{{ value | int(base=16) }}"}
-{"i":"3108","n":"Door Pocket Light State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
-{"i":"3109","n":"Demo Mode State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"3108","n":"Door Pocket Light State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","ct":"{{ value }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"3109","n":"Demo Mode State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","ct":"{{ value }}","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"310a","n":"Critical Fault Status","d":"binary_sensor","ds":1,"dc":"problem","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"310b","n":"Noncritical Fault Status","d":"binary_sensor","ds":1,"dc":"problem","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"310c","n":"Smart Assist Cloud Notification","d":"switch","ds":1,"p":"310d","r":"request","vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
@@ -257,7 +257,7 @@
 {"i":"320a","n":"Water Softener Setting","d":"sensor","ds":1,"dc":"enum","vt":"{{ {'00': 'Water softener off', '01': 'Water softener setting 1', '02': 'Water softener setting 2', '03': 'Water softener setting 3', '04': 'Water softener setting 4', '05': 'Water softener setting 5', '06': 'Water softener setting 6', '07': 'Water softener setting 7', '08': 'Water softener setting 8'}.get(value[:2], 'Unknown') }}"}
 {"i":"320b","n":"Water Softener Regeneration Frequency Setting Request","d":"select","ds":1,"vt":"{{ {'00': 'Water softener off', '01': 'Water softener setting 1', '02': 'Water softener setting 2', '03': 'Water softener setting 3', '04': 'Water softener setting 4', '05': 'Water softener setting 5', '06': 'Water softener setting 6', '07': 'Water softener setting 7', '08': 'Water softener setting 8'}.get(value[:2], 'Unknown') }}","ct":"{{ {'Water softener off': '00', 'Water softener setting 1': '01', 'Water softener setting 2': '02', 'Water softener setting 3': '03', 'Water softener setting 4': '04', 'Water softener setting 5': '05', 'Water softener setting 6': '06', 'Water softener setting 7': '07', 'Water softener setting 8': '08'}[value] }}","o":"[\"Water softener off\", \"Water softener setting 1\", \"Water softener setting 2\", \"Water softener setting 3\", \"Water softener setting 4\", \"Water softener setting 5\", \"Water softener setting 6\", \"Water softener setting 7\", \"Water softener setting 8\"]"}
 {"i":"320c","n":"Auto Lid Down Setting","d":"binary_sensor","ds":1,"pon":"01","poff":"00","son":"01","soff":"00"}
-{"i":"320d","n":"Auto Lid Down Request","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"320d","n":"Auto Lid Down Request","d":"switch","ds":1,"vt":"{{ value[0:2] }}","ct":"{{ value }}","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"320e","n":"Tub 1 Cycle Indication","d":"sensor","ds":1,"dc":"enum","vt":"{{ {'00': 'No Change', '01': 'PreWash', '02': 'Sensing', '03': 'Main Wash', '04': 'Drying', '05': 'Sanitizing', '06': 'Turbidity Cal', '07': 'Diverter Cal', '08': 'Pause', '09': 'Rinsing', '0a': 'PreWash 1', '0b': 'Final Rinse', '0c': 'End PreWash 1', '0d': 'Auto Hot Start 1', '0e': 'Auto Hot Start 2', '0f': 'Auto Hot Start 3', '10': 'Final Rinse Fill', '11': 'Cycle Inactive', '12': 'End of Cycle'}.get(value[:2], 'Unknown') }}"}
 {"i":"320f","n":"Analog Inputs Tub 1 - A2D Turbidity Temp","d":"sensor","ds":12,"u":"°F","dc":"temperature","sc":"measurement","vt":"{{ value[8:10] | int(base=16) }}"}
 {"i":"320f","n":"Analog Inputs Tub 1 - A2D Turbidity","d":"sensor","ds":12,"vt":"{{ value[10:12] | int(base=16) }}","fi":"a2d_turbidity"}
@@ -428,9 +428,9 @@
 {"i":"321c","n":"Wash Temperature Setting","d":"select","ds":1,"vt":"{{ {'00': 'eWashTemp_None', '01': 'eWashTemp_Boost', '02': 'eWashTemp_Sani', '03': 'eWashTemp_SaniAndBoost'}.get(value[:2], 'Unknown') }}","ct":"{{ {'eWashTemp_None': '00', 'eWashTemp_Boost': '01', 'eWashTemp_Sani': '02', 'eWashTemp_SaniAndBoost': '03'}[value] }}","o":"[\"eWashTemp_None\", \"eWashTemp_Boost\", \"eWashTemp_Sani\", \"eWashTemp_SaniAndBoost\"]"}
 {"i":"321d","n":"Heated Dry Setting","d":"select","ds":1,"vt":"{{ {'00': 'eHeatedDry_None', '01': 'eHeatedDry_AddedHeat', '02': 'eHeatedDry_MaxDry'}.get(value[:2], 'Unknown') }}","ct":"{{ {'eHeatedDry_None': '00', 'eHeatedDry_AddedHeat': '01', 'eHeatedDry_MaxDry': '02'}[value] }}","o":"[\"eHeatedDry_None\", \"eHeatedDry_AddedHeat\", \"eHeatedDry_MaxDry\"]"}
 {"i":"321e","n":"Wash Zone Selection","d":"select","ds":1,"vt":"{{ {'00': 'eWashZone_Both', '01': 'eWashZone_Lower', '02': 'eWashZone_Upper'}.get(value[:2], 'Unknown') }}","ct":"{{ {'eWashZone_Both': '00', 'eWashZone_Lower': '01', 'eWashZone_Upper': '02'}[value] }}","o":"[\"eWashZone_Both\", \"eWashZone_Lower\", \"eWashZone_Upper\"]"}
-{"i":"321f","n":"Steam Option State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
-{"i":"3220","n":"Bottle Blast Option State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
-{"i":"3221","n":"UltraFresh Option State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"321f","n":"Steam Option State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","ct":"{{ value }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"3220","n":"Bottle Blast Option State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","ct":"{{ value }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"3221","n":"UltraFresh Option State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","ct":"{{ value }}","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3222","n":"Enable Features Tub 1 - Heated Dry","d":"binary_sensor","ds":1,"vt":"{{ '01' if ((value[0:2] | int(base=16)) // 1) % 2 else '00' }}","fi":"heated_dry","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3222","n":"Enable Features Tub 1 - Boost","d":"binary_sensor","ds":1,"vt":"{{ '01' if ((value[0:2] | int(base=16)) // 2) % 2 else '00' }}","fi":"boost","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3222","n":"Enable Features Tub 1 - Sani","d":"binary_sensor","ds":1,"vt":"{{ '01' if ((value[0:2] | int(base=16)) // 4) % 2 else '00' }}","fi":"sani","pon":"01","poff":"00","son":"01","soff":"00"}
@@ -481,7 +481,7 @@
 {"i":"3229","n":"DC Current Repot - circPump","d":"binary_sensor","ds":6,"vt":"{{ '01' if ((value[4:8] | int(base=16)) // 8) % 2 else '00' }}","fi":"circpump","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"322a","n":"Motor Identification Data - inputA","d":"sensor","ds":4,"sc":"measurement","vt":"{{ value[0:4] | int(base=16) }}"}
 {"i":"322a","n":"Motor Identification Data - inputB","d":"sensor","ds":4,"sc":"measurement","vt":"{{ value[4:8] | int(base=16) }}","fi":"inputb"}
-{"i":"322b","n":"Silverware Wash Option State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"322b","n":"Silverware Wash Option State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","ct":"{{ value }}","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"322c","n":"Custom Cycle Index","d":"number","ds":1,"mn":0.0,"mx":255.0,"st":1.0,"p":"322d","r":"request","vt":"{{ value[0:2] | int(base=16) }}","ct":"{{ '%02x' % (value | int) }}","m":"box"}
 {"i":"322e","n":"Dish Favorite Settings","d":"number","ds":12,"mn":0.0,"mx":255.0,"st":1.0,"p":"322f","r":"request","vt":"{{ value[6:8] | int(base=16) }}","ct":"{{ '%02x' % (value | int) }}","m":"box"}
 {"i":"322e","n":"Dish Favorite Settings - validStoredSettings","d":"switch","ds":12,"p":"322f","r":"request","vt":"{{ '01' if ((value[0:2] | int(base=16)) // 1) % 2 else '00' }}","fi":"validstoredsettings","pon":"01","poff":"00","son":"01","soff":"00"}
@@ -529,7 +529,7 @@
 {"i":"3230","n":"Latched Key Status - DishKey_ConnectPlus","d":"binary_sensor","ds":8,"vt":"{{ '01' if ((value[0:16] | int(base=16)) // 1073741824) % 2 else '00' }}","fi":"dishkey_connectplus","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3230","n":"Latched Key Status - DishKey_Sani","d":"binary_sensor","ds":8,"vt":"{{ '01' if ((value[0:16] | int(base=16)) // 2147483648) % 2 else '00' }}","fi":"dishkey_sani","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3231","n":"Default to Eco Cycle Setting","d":"binary_sensor","ds":1,"pon":"01","poff":"00","son":"01","soff":"00"}
-{"i":"3232","n":"Default to Eco Cycle Request","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"3232","n":"Default to Eco Cycle Request","d":"switch","ds":1,"vt":"{{ value[0:2] }}","ct":"{{ value }}","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3235","n":"Tub1 Water Temperature","d":"sensor","ds":1,"u":"°F","dc":"temperature","sc":"measurement","vt":"{{ value | int(base=16) }}"}
 {"i":"3236","n":"Average Turbidity Tub 1","d":"sensor","ds":2,"sc":"measurement","vt":"{{ value | int(base=16) }}"}
 {"i":"3237","n":"Tub 1 Dishwasher Door Status","d":"sensor","ds":1,"dc":"enum","vt":"{{ {'00': 'Open', '01': 'Closed', '02': 'Invalid', '03': 'Init', '04': 'Unknown'}.get(value[:2], 'Unknown') }}"}
@@ -571,10 +571,10 @@
 {"i":"3253","n":"Dishwasher Cycle Modifier Requested Tub 1 - Intensive","d":"binary_sensor","ds":2,"vt":"{{ '01' if ((value[0:4] | int(base=16)) // 4096) % 2 else '00' }}","fi":"intensive","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3253","n":"Dishwasher Cycle Modifier Requested Tub 1 - Gentle","d":"binary_sensor","ds":2,"vt":"{{ '01' if ((value[0:4] | int(base=16)) // 8192) % 2 else '00' }}","fi":"gentle","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3253","n":"Dishwasher Cycle Modifier Requested Tub 1 - Fast","d":"binary_sensor","ds":2,"vt":"{{ '01' if ((value[0:4] | int(base=16)) // 16384) % 2 else '00' }}","fi":"fast","pon":"01","poff":"00","son":"01","soff":"00"}
-{"i":"3260","n":"Rinse and Hold Request","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"3260","n":"Rinse and Hold Request","d":"switch","ds":1,"vt":"{{ value[0:2] }}","ct":"{{ value }}","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3261","n":"Rinse and Hold Option State","d":"binary_sensor","ds":1,"pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3262","n":"Rinse and Hold Active Step","d":"sensor","ds":1,"dc":"enum","vt":"{{ {'00': 'Inactive', '01': 'Filling', '02': 'Circulating', '03': 'Draining'}.get(value[:2], 'Unknown') }}"}
-{"i":"3263","n":"Auto Open Door Request","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"3263","n":"Auto Open Door Request","d":"switch","ds":1,"vt":"{{ value[0:2] }}","ct":"{{ value }}","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3264","n":"Auto Open Door Option State","d":"binary_sensor","ds":1,"pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3300","n":"Turbidity Calibration Value Tub 1","d":"sensor","ds":2,"vt":"{{ value | int(base=16) }}"}
 {"i":"3401","n":"Tub 1 Operating Mode","d":"sensor","ds":1,"dc":"enum","vt":"{{ {'00': 'Low Power', '01': 'Power Up', '02': 'Standby', '03': 'Delay Start', '04': 'Pause', '05': 'Run', '06': 'EOC', '07': 'Download Mode', '08': 'Sensor Check Mode', '09': 'Load Activation Mode', '0b': 'MC Only Mode', '0c': 'User Alert Mode', '0d': 'Lock', '0e': 'CSM', '0f': 'Wifi Binding', '10': 'Rinse Aid Level Selection', '11': 'Sabbath Mode', '12': 'Delay Pause'}.get(value[:2], 'Unknown') }}"}
@@ -586,7 +586,7 @@
 {"i":"3449","n":"Tub 1 Fan 1 Speed Percentage","d":"sensor","ds":1,"u":"%","vt":"{{ value | int(base=16) }}"}
 {"i":"3483","n":"Tub 1 Hue Score","d":"sensor","ds":2,"sc":"measurement","vt":"{{ value | int(base=16) }}"}
 {"i":"3487","n":"Tub 1 Remote Start Enable","d":"binary_sensor","ds":1,"pon":"01","poff":"00","son":"01","soff":"00"}
-{"i":"3489","n":"Control Lock Tub 1 Request","d":"switch","ds":1,"vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"3489","n":"Control Lock Tub 1 Request","d":"switch","ds":1,"vt":"{{ value[0:2] }}","ct":"{{ value }}","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"348a","n":"Control Lock Tub 1 Option State","d":"binary_sensor","ds":1,"pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"3600","n":"Tub 1 Dish Feature Configuration","d":"sensor","ds":15,"sc":"measurement","vt":"{{ value[0:2] | int(base=16) }}"}
 {"i":"3600","n":"Tub 1 Dish Feature Configuration - displayInHoursAndMinutes","d":"binary_sensor","ds":15,"vt":"{{ '01' if ((value[22:24] | int(base=16)) // 1) % 2 else '00' }}","fi":"displayinhoursandminutes","pon":"01","poff":"00","son":"01","soff":"00"}

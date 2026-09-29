@@ -133,6 +133,13 @@ OVERRIDES = {
     "0x3084": {"unit_of_measurement": "mmH\u2082O", "state_class": "measurement"},
     # --- 4 Way Valve Position: read-only sensor, not select ---
     "0x7902": {"ha_domain": "sensor"},
+    # --- Binary enums not keyed 0/1: switch/binary_sensor encode state as
+    #     '00'/'01', which can't represent these values. Use select/sensor
+    #     so the enum labels map to the real values. ---
+    "0x0004": {"ha_domain": "select"},    # 1=UI Locked, 2=UI Not Locked
+    "0x209d": {"ha_domain": "select"},    # 0=Start command, 255=Normal State
+    "0x4223": {"ha_domain": "select"},    # 1=Open, 2=Closed
+    "0x7968:12": {"ha_domain": "sensor"}, # 0=Inactive, 255=Active
     # --- Setpoint limit requests: pair request ERD with allowed setpoint ERD ---
     # Each request ERD (single field) pairs with the matching field in the
     # allowed setpoint ERD (multi-field). Per-field overrides handle the
