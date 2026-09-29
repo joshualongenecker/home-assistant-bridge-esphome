@@ -714,9 +714,13 @@ def _strip_pair_role_word(name: str) -> str:
     Examples:
         'Fan Configuration in Cooling Status'  -> 'Fan Configuration in Cooling'
         'Freeze Sentinel Request'               -> 'Freeze Sentinel'
+        'Boost Mode State - Requested/Desired'  -> 'Boost Mode State'
     """
+    # Compound suffix form, e.g. ' - Requested/Desired' / ' - Status/Actual'
+    result = re.sub(r'\s*[-–—:]?\s*(?:requested|request|status)\s*/\s*(?:desired|actual)\s*$',
+                    '', name, flags=re.IGNORECASE)
     # Strip the word wherever it appears as a complete word (word boundaries)
-    result = re.sub(r'\b(?:Status|Request)\b', '', name, flags=re.IGNORECASE)
+    result = re.sub(r'\b(?:Status|Request)\b', '', result, flags=re.IGNORECASE)
     # Collapse multiple spaces and strip surrounding whitespace
     result = re.sub(r'\s+', ' ', result).strip()
     return result

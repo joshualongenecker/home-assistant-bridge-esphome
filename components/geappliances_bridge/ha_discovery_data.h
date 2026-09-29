@@ -57,7 +57,7 @@ extern const uint8_t ha_discovery_data_dishwasher[];
 // waterheater.jsonl chunks
 extern const ha_discovery_chunk_t ha_discovery_chunk_waterheater[];
 
-// waterheater.jsonl compressed data (5296 bytes from 29251 bytes)
+// waterheater.jsonl compressed data (5287 bytes from 29211 bytes)
 extern const uint8_t ha_discovery_data_waterheater[];
 
 // range.jsonl chunks
@@ -97,6 +97,6 @@ extern const uint16_t ha_discovery_category_count;
 
 // FNV-1a hash of all discovery data for change detection.
 // Changes when discovery definitions are updated.
-#define HA_DISCOVERY_DATA_HASH 0x905aaf42u
+#define HA_DISCOVERY_DATA_HASH 0xec1df3c8u
 
 #endif

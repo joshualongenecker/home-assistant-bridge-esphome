@@ -135,7 +135,7 @@
 {"i":"4105","n":"Missed flow off fault counter","d":"sensor","ds":2,"sc":"measurement","vt":"{{ value | int(base=16) }}"}
 {"i":"411d","n":"Water Heater Dad Mode Delay In Minutes","d":"number","ds":1,"u":"min","mn":0.0,"mx":255.0,"st":1.0,"vt":"{{ value | int(base=16) }}","ct":"{{ '%02x' % (value | int) }}","m":"box"}
 {"i":"4125","n":"Water Heater Current Cost Of Power","d":"sensor","ds":1,"dc":"enum","vt":"{{ {'00': 'Unknown cost', '01': 'Cost lower than average', '02': 'Average cost', '03': 'Cost higher than average'}.get(value[:2], 'Unknown') }}"}
-{"i":"4221","n":"Water Heater Boost Mode State - Requested/Desired","d":"switch","ds":1,"p":"4220","r":"request","vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"4221","n":"Water Heater Boost Mode State","d":"switch","ds":1,"p":"4220","r":"request","vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"4222","n":"Shutoff Water Valve Position/State","d":"sensor","ds":1,"dc":"enum","vt":"{{ {'00': 'Not fitted', '01': 'Open', '02': 'Closed', '03': 'Transition'}.get(value[:2], 'Unknown') }}"}
 {"i":"4223","n":"Requested Water Valve Position","d":"select","ds":1,"vt":"{{ {'01': 'Open', '02': 'Closed'}.get(value[:2], 'Unknown') }}","ct":"{{ {'Open': '01', 'Closed': '02'}[value] }}","o":"[\"Open\", \"Closed\"]"}
-{"i":"4226","n":"Water Heater Active State - Requested/Desired","d":"switch","ds":1,"p":"4225","r":"request","vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
+{"i":"4226","n":"Water Heater Active State","d":"switch","ds":1,"p":"4225","r":"request","vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
