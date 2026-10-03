@@ -4,7 +4,6 @@
 #include "esphome_time_source.h"
 #include "geappliances_bridge_log.h"
 #include <inttypes.h>
-#include "ha_discovery_data.h"
 
 #ifndef USE_ESP_IDF
 #error "This component requires ESPHome with framework: type: esp-idf"
@@ -26,15 +25,6 @@ GEA_TAG(TAG) = "ota_cleanup_manager";
 // the availability topic to every payload. Older records are republished once.
 static const uint32_t DISCOVERY_HASH_VERSION = 4;
 
-static uint32_t discovery_data_hash(const ha_discovery_manager_t* manager)
-{
-  // Mix the optional custom-profile hash with the built-in discovery hash.
-  // A profile change therefore follows the same cleanup/republish path.
-  uint32_t custom = manager->custom_data_hash;
-  if (custom == 0) return HA_DISCOVERY_DATA_HASH;
-  return HA_DISCOVERY_DATA_HASH ^ (custom + 0x9e3779b9u +
-      (HA_DISCOVERY_DATA_HASH << 6) + (HA_DISCOVERY_DATA_HASH >> 2));
-}
 
 // Reuse ESPHome's own birth/LWT availability (default "<topic_prefix>/status")
 // so HA marks appliance entities unavailable when the bridge drops offline.
@@ -134,6 +124,11 @@ void OtaCleanupManager::check_discovery_changes(const char* current_device_id) {
     return;
   }
 
+  // Refresh the availability topic before hashing: the manager's buffers are
+  // only guaranteed populated at publish time, and the hash must reflect the
+  // current LWT topic so a topic_prefix/node-name change triggers a republish.
+  apply_mqtt_availability(this->ha_discovery_manager_);
+
   static const uint32_t DISCOVERY_NVS_KEY = 0x64697363u; // "disc"
   auto pref = global_preferences->make_preference<DiscoveryNVS>(DISCOVERY_NVS_KEY);
   DiscoveryNVS stored{};
@@ -150,7 +145,7 @@ void OtaCleanupManager::check_discovery_changes(const char* current_device_id) {
     return;
   }
 
-  bool hash_changed = (stored.hash != discovery_data_hash(this->ha_discovery_manager_));
+  bool hash_changed = (stored.hash != ha_discovery_manager_data_hash(this->ha_discovery_manager_));
   bool device_id_changed = (stored.device_id[0] != '\0' &&
                             strcmp(stored.device_id, current_device_id) != 0);
   bool api_parsing_changed = (stored.appliance_api_parsing != this->appliance_api_parsing_);
@@ -319,7 +314,7 @@ void OtaCleanupManager::loop() {
           auto pref = global_preferences->make_preference<DiscoveryNVS>(DISCOVERY_NVS_KEY);
           DiscoveryNVS state{};
           state.version = DISCOVERY_HASH_VERSION;
-          state.hash = discovery_data_hash(this->ha_discovery_manager_);
+          state.hash = ha_discovery_manager_data_hash(this->ha_discovery_manager_);
           strncpy(state.device_id,
                   this->device_identity_manager_->get_device_id(),
                   sizeof(state.device_id) - 1);

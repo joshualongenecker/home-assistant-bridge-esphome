@@ -121,9 +121,13 @@ availability (`global_mqtt_client->get_availability()`, default `<topic_prefix>/
 
 - Values are copied into fixed buffers (topic 128 B, payloads 32 B each).
 - NULL payloads mean the HA defaults (`online` / `offline`).
-- A NULL or empty topic disables availability (birth/will disabled in the `mqtt:` config).
+- A NULL or empty topic disables availability (birth/will disabled in the `mqtt:` config) and clears all
+  three buffers.
 - A value that would be truncated, or that contains `"`, `\` or a control character, disables availability
   and logs a warning. A wrong topic would leave every entity permanently unavailable.
+- The topic and payloads are mixed into `ha_discovery_manager_data_hash()`, so a change to the LWT topic
+  (e.g. `mqtt: topic_prefix` or node name) or to the payloads triggers the standard cleanup/republish path.
+  With availability unset the hash is unchanged, so those installs do not republish.
 
 ### 3.3 Start
 

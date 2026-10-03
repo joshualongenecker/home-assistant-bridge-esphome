@@ -3,6 +3,8 @@
 #include <cstring>
 
 #include "ha_discovery_manager.h"
+#include "ha_discovery_data.h"
+
 
 #include "CppUTest/TestHarness.h"
 
@@ -122,4 +124,89 @@ TEST(ha_discovery_manager_availability, rejects_topic_that_needs_json_escaping)
     ha_discovery_manager_set_availability(&manager, "bad\"topic/status", NULL, NULL);
 
     CHECK(strstr(build(SENSOR_LINE), "avty_t") == NULL);
+}
+
+TEST_GROUP(ha_discovery_manager_data_hash)
+{
+    ha_discovery_manager_t manager;
+
+    void setup()
+    {
+        memset(&manager, 0, sizeof(manager));
+        ha_discovery_manager_init(&manager);
+    }
+
+    void teardown()
+    {
+        ha_discovery_manager_cleanup(&manager);
+    }
+};
+
+TEST(ha_discovery_manager_data_hash, baseline_without_availability)
+{
+    LONGS_EQUAL(HA_DISCOVERY_DATA_HASH, ha_discovery_manager_data_hash(&manager));
+}
+
+TEST(ha_discovery_manager_data_hash, custom_profile_matches_legacy_formula)
+{
+    const uint32_t custom = 0x12345678u;
+    ha_discovery_manager_set_custom_data(&manager, NULL, NULL, 0, 0, custom);
+
+    const uint32_t expected = HA_DISCOVERY_DATA_HASH ^
+        (custom + 0x9e3779b9u + (HA_DISCOVERY_DATA_HASH << 6) + (HA_DISCOVERY_DATA_HASH >> 2));
+    LONGS_EQUAL(expected, ha_discovery_manager_data_hash(&manager));
+}
+
+TEST(ha_discovery_manager_data_hash, availability_topic_changes_hash)
+{
+    const uint32_t baseline = ha_discovery_manager_data_hash(&manager);
+
+    ha_discovery_manager_set_availability(&manager, "ge-range-gea/status", NULL, NULL);
+    const uint32_t with_topic = ha_discovery_manager_data_hash(&manager);
+
+    CHECK(with_topic != baseline);
+    LONGS_EQUAL(with_topic, ha_discovery_manager_data_hash(&manager));
+}
+
+TEST(ha_discovery_manager_data_hash, different_topics_produce_different_hashes)
+{
+    ha_discovery_manager_set_availability(&manager, "ge-range-gea/status", NULL, NULL);
+    const uint32_t h1 = ha_discovery_manager_data_hash(&manager);
+
+    ha_discovery_manager_set_availability(&manager, "my-range/status", NULL, NULL);
+    const uint32_t h2 = ha_discovery_manager_data_hash(&manager);
+
+    CHECK(h1 != h2);
+}
+
+TEST(ha_discovery_manager_data_hash, availability_payload_changes_hash)
+{
+    ha_discovery_manager_set_availability(&manager, "bridge/status", "online", "offline");
+    const uint32_t h1 = ha_discovery_manager_data_hash(&manager);
+
+    ha_discovery_manager_set_availability(&manager, "bridge/status", "up", "down");
+    const uint32_t h2 = ha_discovery_manager_data_hash(&manager);
+
+    CHECK(h1 != h2);
+}
+
+TEST(ha_discovery_manager_data_hash, empty_topic_clears_availability_state)
+{
+    ha_discovery_manager_set_availability(&manager, "ge-range-gea/status", "up", "down");
+    ha_discovery_manager_set_availability(&manager, "", NULL, NULL);
+
+    LONGS_EQUAL(HA_DISCOVERY_DATA_HASH, ha_discovery_manager_data_hash(&manager));
+}
+
+TEST(ha_discovery_manager_data_hash, custom_and_availability_combine)
+{
+    const uint32_t custom = 0x12345678u;
+    ha_discovery_manager_set_custom_data(&manager, NULL, NULL, 0, 0, custom);
+    const uint32_t custom_only = ha_discovery_manager_data_hash(&manager);
+
+    ha_discovery_manager_set_availability(&manager, "ge-range-gea/status", NULL, NULL);
+    const uint32_t both = ha_discovery_manager_data_hash(&manager);
+
+    CHECK(both != custom_only);
+    CHECK(both != HA_DISCOVERY_DATA_HASH);
 }

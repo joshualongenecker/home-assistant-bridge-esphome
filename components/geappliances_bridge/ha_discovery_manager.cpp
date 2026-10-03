@@ -1106,7 +1106,11 @@ void ha_discovery_manager_set_availability(
     const char* payload_available,
     const char* payload_not_available)
 {
+    /* Clear all three first: an empty topic means availability is fully off,
+     * and stale payload bytes must not linger (they feed the data hash). */
     self->availability_topic_buf[0] = '\0';
+    self->payload_available_buf[0] = '\0';
+    self->payload_not_available_buf[0] = '\0';
     if (topic == NULL || topic[0] == '\0') return;
 
     /* A truncated or malformed topic would leave every entity permanently
@@ -1119,6 +1123,46 @@ void ha_discovery_manager_set_availability(
         self->availability_topic_buf[0] = '\0';
         ESP_LOGW(TAG, "Availability topic or payload too long or not JSON-safe; availability disabled");
     }
+}
+
+/* FNV-1a over a NUL-terminated string. */
+static uint32_t fnv1a_str(const char* s)
+{
+    uint32_t h = 2166136261u;
+    for (; *s != '\0'; ++s) {
+        h ^= (uint8_t)*s;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+/* boost::hash_combine-style mix of `value` into `seed`. */
+static uint32_t discovery_hash_combine(uint32_t seed, uint32_t value)
+{
+    return seed ^ (value + 0x9e3779b9u + (seed << 6) + (seed >> 2));
+}
+
+uint32_t ha_discovery_manager_data_hash(const ha_discovery_manager_t* self)
+{
+    uint32_t h = HA_DISCOVERY_DATA_HASH;
+    if (self->custom_data_hash != 0) {
+        h = discovery_hash_combine(h, self->custom_data_hash);
+    }
+    /* Availability is injected into every payload at runtime, so it must
+     * participate in the fingerprint: a topic_prefix/node-name change (which
+     * changes the LWT status topic) must trigger a republish. Empty buffers
+     * mix nothing, so an install with birth/will disabled keeps the
+     * pre-availability hash and gets no spurious republish. */
+    if (self->availability_topic_buf[0] != '\0') {
+        h = discovery_hash_combine(h, fnv1a_str(self->availability_topic_buf));
+    }
+    if (self->payload_available_buf[0] != '\0') {
+        h = discovery_hash_combine(h, fnv1a_str(self->payload_available_buf));
+    }
+    if (self->payload_not_available_buf[0] != '\0') {
+        h = discovery_hash_combine(h, fnv1a_str(self->payload_not_available_buf));
+    }
+    return h;
 }
 
 void ha_discovery_manager_start(ha_discovery_manager_t* self)
