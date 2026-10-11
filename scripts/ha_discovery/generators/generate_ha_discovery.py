@@ -858,6 +858,7 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
     """Handle classification == 'single'. Returns True if an entry was collected."""
     vt, ct, opts = '', '', ''
     min_val, max_val, step_val = 0.0, 0.0, 1.0
+    cb = 0  # bytes the command renders (for the partial-write demotion pass)
 
     if ha_domain == 'sensor':
         # Detect enum from either device_class or data field type.
@@ -889,10 +890,15 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
             # single byte, so expose them read-only instead.
             if data_size == 1:
                 ct = '{{ value }}'
+                cb = 1
             else:
                 # Keep the first-byte slice VT so '01'/'00' state matching
                 # still works for the wider payload.
                 ha_domain = 'binary_sensor'
+        else:
+            # Paired switch: the bridge emits command_topic with the
+            # '01'/'00' payloads (set below); the command is one byte.
+            cb = 1
     elif ha_domain == 'select':
         ev, fs = _get_first_enum_field_info(erd_data)
         if ev:
@@ -905,6 +911,7 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
                     if paired and paired.get('values'):
                         ev = paired['values']
             opts, vt, ct = _select_options_and_templates(ev, fs)
+            cb = fs
         else:
             # No enum values to populate options; skip rather than emit
             # a broken select entity.
@@ -924,6 +931,7 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
             signed = _is_signed_type(_get_primary_data_type(erd_data))
             vt = _compute_sensor_value_template(scaling_factor, data_size, signed)
         ct = _number_command_template(data_size, scaling_factor, signed)
+        cb = data_size
         # Compute min/max/step for number entities
         if pf:
             n_type = pf.get('type', 'u8')
@@ -957,7 +965,7 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
             pair_role, vt, ct, opts, '',
             'box' if ha_domain == 'number' else '',
             p_on, p_off, s_on, s_off,
-            min_val, max_val, step_val)
+            min_val, max_val, step_val, command_bytes=cb)
     return True
 
 
@@ -996,6 +1004,7 @@ def _handle_byte_offset_erd(erd_by_id: Dict[str, Dict], collect,
         # command_topic is emitted and HA would reject the entity outright.
         # Expose it read-only instead, matching _handle_bitfield_erd.
         bin_payloads = f_ha_domain == 'switch'
+        f_cb = 0
         if not f_paired_id and f_ha_domain in ('switch', 'number'):
             if f_ha_domain == 'switch':
                 f_ha_domain = 'binary_sensor'
@@ -1017,6 +1026,7 @@ def _handle_byte_offset_erd(erd_by_id: Dict[str, Dict], collect,
             enum_vals = field.get('values', {})
             if enum_vals:
                 opts, vt, ct = _select_options_and_templates(enum_vals, field_size)
+                f_cb = field_size
             else:
                 # No enum values; fall back to sensor-style VT
                 vt = _enum_sensor_value_template(enum_vals, field_size)
@@ -1024,6 +1034,7 @@ def _handle_byte_offset_erd(erd_by_id: Dict[str, Dict], collect,
         else:
             if f_ha_domain == 'switch':
                 vt = _paired_switch_vt(field, f_paired_erd, f_pair_role, erd_by_id)
+                f_cb = 1  # '01'/'00' payloads
             else:
                 vt = _paired_field_vt(field, f_paired_erd, f_pair_role, erd_by_id, f_scaling)
             opts, ct = '', ''
@@ -1031,6 +1042,7 @@ def _handle_byte_offset_erd(erd_by_id: Dict[str, Dict], collect,
                 field_size = field.get('size', 1)
                 signed = _is_signed_type(f_type)
                 ct = _number_command_template(field_size, f_scaling, signed)
+                f_cb = field_size
         # Compute min/max/step for number sub-fields
         f_min, f_max, f_step = 0.0, 0.0, 1.0
         if f_ha_domain == 'number':
@@ -1042,7 +1054,7 @@ def _handle_byte_offset_erd(erd_by_id: Dict[str, Dict], collect,
                 '00' if bin_payloads else '',
                 '01' if bin_payloads else '',
                 '00' if bin_payloads else '',
-                f_min, f_max, f_step)
+                f_min, f_max, f_step, command_bytes=f_cb)
 
 
 def _handle_bitfield_erd(collect, erd_id_int: int, display_name: str,
@@ -1072,9 +1084,17 @@ def _handle_bitfield_erd(collect, erd_id_int: int, display_name: str,
         b_s_off = '00' if sub_domain in ('binary_sensor', 'switch') else ''
         f_scaling = int(field.get('scaling_factor') or scaling_factor)
         f_bf_dc = field.get('device_class') or ''
+        # A switch sub-field's '01'/'00' command sets the whole payload, so
+        # it is only a full-payload write when the bit starts at payload bit
+        # 0; the demotion pass checks bit_start. Multi-bit (number/select)
+        # sub-fields have no command template, so command_bytes stays 0 and
+        # they are demoted when the ERD is paired.
+        f_cb = 1 if sub_domain == 'switch' else 0
+        f_bit_start = field.get('offset', 0) * 8 + field.get('bits', {}).get('offset', 0)
         collect(erd_id_int, f'{display_name} - {leaf}', sub_domain, '', f_bf_dc,
                 '', f_scaling, data_size, f_paired_id, f_pair_role,
-                vt, '', '', fid, '', b_p_on, b_p_off, b_s_on, b_s_off)
+                vt, '', '', fid, '', b_p_on, b_p_off, b_s_on, b_s_off,
+                command_bytes=f_cb, bit_start=f_bit_start)
 
 
 def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
@@ -1121,6 +1141,7 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
             p_demoted = True
 
         if not skip_primary:
+            p_cb = 0
             if p_demoted:
                 if p_bin_payloads:
                     p_dev_cls = ''
@@ -1138,6 +1159,7 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
                 if p_ha_domain == 'switch':
                     p_vt = _paired_switch_vt(primary, p_paired_erd, p_pair_role, erd_by_id)
                     p_ct = ''
+                    p_cb = 1  # '01'/'00' payloads
                 else:
                     p_vt = _paired_field_vt(primary, p_paired_erd, p_pair_role, erd_by_id, p_scaling)
                     p_ct = ''
@@ -1145,6 +1167,7 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
                         p_field_size = primary.get('size', 1)
                         p_signed = _is_signed_type(p_type)
                         p_ct = _number_command_template(p_field_size, p_scaling, p_signed)
+                        p_cb = p_field_size
             # Compute min/max/step for number primary fields
             p_min, p_max, p_step = 0.0, 0.0, 1.0
             if p_ha_domain == 'number':
@@ -1158,7 +1181,7 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
                     '00' if p_bin_payloads else '',
                     '01' if p_bin_payloads else '',
                     '00' if p_bin_payloads else '',
-                    p_min, p_max, p_step)
+                    p_min, p_max, p_step, command_bytes=p_cb)
 
     for field in [d for d in erd_data
                   if _has_bits(d) and not _is_reserved_field(d.get('name', ''))]:
@@ -1183,9 +1206,12 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
         b_s_off = '00' if sub_domain in ('binary_sensor', 'switch') else ''
         f_scaling = int(field.get('scaling_factor') or scaling_factor)
         f_bf_dc = field.get('device_class') or ''
+        f_cb = 1 if sub_domain == 'switch' else 0
+        f_bit_start = field.get('offset', 0) * 8 + field.get('bits', {}).get('offset', 0)
         collect(erd_id_int, f'{display_name} - {leaf}', sub_domain, '', f_bf_dc,
                 '', f_scaling, data_size, f_paired_id, f_pair_role,
-                vt, '', '', fid, '', b_p_on, b_p_off, b_s_on, b_s_off)
+                vt, '', '', fid, '', b_p_on, b_p_off, b_s_on, b_s_off,
+                command_bytes=f_cb, bit_start=f_bit_start)
 
 
 def _handle_version_erd(collect, erd_id_int: int, display_name: str,
@@ -1229,12 +1255,78 @@ def _handle_multi_board_version_erd(collect, erd_id_int: int, display_name: str,
                         pair_role, p_vt, '', '', param_fid, '', '', '', '', '')
 
 
+# ---------------------------------------------------------------------------
+# Partial-write demotion
+# ---------------------------------------------------------------------------
+
+def _demote_partial_write_entities(entries: List[Dict],
+                                   erd_by_id: Dict[str, Dict]) -> List[Dict]:
+    """Demote controllable entities whose command would not write the full
+    target ERD payload.
+
+    The bridge writes MQTT payloads verbatim to the ERD — there is no
+    read-modify-write. A switch/number/select whose command renders fewer
+    bytes than the target ERD, or that shares the target ERD with another
+    writer, would clobber or mis-address sibling fields, so it is exposed
+    read-only instead. An entity stays writable only if all hold:
+
+      - its rendered command covers the target ERD's full data size;
+      - it is the sole controllable writer of that ERD;
+      - a bit-field switch starts at payload bit 0 (its '01'/'00' command
+        sets the whole payload, so a bit elsewhere would be mis-addressed).
+
+    The target ERD is the entity's own ERD, or its paired request ERD when
+    the entity has pair_role 'status'. Buttons are excluded: their one-shot
+    '1' payload decodes to a 0-byte write that clobbers no state.
+
+    Demotion follows the unpaired multi-field demotion: switch ->
+    binary_sensor, number/select -> sensor. The value template and state
+    payloads are kept; the command template and options are cleared.
+    Returns the list of demoted entries.
+    """
+    writers: Dict[int, List[Dict]] = {}
+    for e in entries:
+        if e['domain'] not in ('switch', 'number', 'select'):
+            continue
+        # The bridge emits a command topic when the entity has a command
+        # template or a paired ERD; anything else is already read-only.
+        if not (e['command_template'] or e['paired_erd_id']):
+            continue
+        target = e['paired_erd_id'] if e['pair_role'] == 'status' else e['erd_id']
+        writers.setdefault(target, []).append(e)
+
+    demoted = []
+    for target, group in writers.items():
+        target_hex = f'0x{target:04x}'
+        if target_hex in erd_by_id:
+            target_ds = get_erd_byte_size(erd_by_id[target_hex].get('data', [])) or 1
+        else:
+            target_ds = 1
+        for e in group:
+            safe = (e['command_bytes'] == target_ds
+                    and len(group) == 1
+                    and (e['bit_start'] is None or e['bit_start'] == 0))
+            if safe:
+                continue
+            e['domain'] = 'binary_sensor' if e['domain'] == 'switch' else 'sensor'
+            e['command_template'] = ''
+            e['options_json'] = ''
+            e['command_bytes'] = 0
+            demoted.append(e)
+    return demoted
+
+
+
 def _collect_ha_discovery_entries(erds: List[Dict]) -> List[Dict]:
     """Process all ERDs with ha_domain metadata and return a list of entry dicts.
 
     Each dict has the keys: erd_id, name, domain, unit, device_class,
     state_class, scaling_factor, data_size, paired_erd_id, pair_role,
     value_template, command_template, options_json, field_id.
+
+    After per-ERD collection, _demote_partial_write_entities() demotes any
+    controllable entity whose command would write only part of its target
+    ERD (or share the target with another writer) to read-only.
 
     This is the single source of truth for ha-discovery data; both the C header
     generator and the JSONL generator call this function.
@@ -1264,7 +1356,16 @@ def _collect_ha_discovery_entries(erds: List[Dict]) -> List[Dict]:
                 opts: str, field_id: str, mode: str = '',
                 payload_on: str = '', payload_off: str = '',
                 state_on: str = '', state_off: str = '',
-                min_val: float = 0.0, max_val: float = 0.0, step_val: float = 1.0) -> None:
+                min_val: float = 0.0, max_val: float = 0.0, step_val: float = 1.0,
+                command_bytes: int = 0, bit_start: int = None) -> None:
+        """Collect one entity.
+
+        command_bytes is the number of bytes the entity's command renders
+        (0 = no deterministic command). bit_start is the absolute bit
+        position of a bit-field sub-field within the payload (None for
+        non-bit-field entities). Both are used by the partial-write
+        demotion pass; they are not emitted to the JSONL.
+        """
         # Skip availability/allowability metadata — not actionable in HA.
         combined = (name + ' ' + field_id).lower()
         # But don't skip real "allowed" values like "Allowed Setpoint".
@@ -1297,6 +1398,8 @@ def _collect_ha_discovery_entries(erds: List[Dict]) -> List[Dict]:
             'min_val': min_val,
             'max_val': max_val,
             'step_val': step_val,
+            'command_bytes': command_bytes,
+            'bit_start': bit_start,
         })
 
     for erd in ha_erds:
@@ -1372,6 +1475,13 @@ def _collect_ha_discovery_entries(erds: List[Dict]) -> List[Dict]:
                                             ha_domain, unit, device_class,
                                             state_class, scaling_factor, data_size,
                                             paired_erd_id, pair_role, erd_data)
+
+    demoted = _demote_partial_write_entities(entries, erd_by_id)
+    if demoted:
+        demoted_erds = sorted({e['erd_id'] for e in demoted})
+        print(f"Demoted {len(demoted)} partial-write entit"
+              f"{'y' if len(demoted) == 1 else 'ies'} to read-only "
+              f"across {len(demoted_erds)} ERD(s)", file=sys.stderr)
     return entries
 
 

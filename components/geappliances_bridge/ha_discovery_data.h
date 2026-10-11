@@ -33,25 +33,25 @@ typedef struct {
 // common.jsonl chunks
 extern const ha_discovery_chunk_t ha_discovery_chunk_common[];
 
-// common.jsonl compressed data (19857 bytes from 135701 bytes)
+// common.jsonl compressed data (19552 bytes from 135361 bytes)
 extern const uint8_t ha_discovery_data_common[];
 
 // refrigeration.jsonl chunks
 extern const ha_discovery_chunk_t ha_discovery_chunk_refrigeration[];
 
-// refrigeration.jsonl compressed data (57893 bytes from 384878 bytes)
+// refrigeration.jsonl compressed data (56090 bytes from 377921 bytes)
 extern const uint8_t ha_discovery_data_refrigeration[];
 
 // laundry.jsonl chunks
 extern const ha_discovery_chunk_t ha_discovery_chunk_laundry[];
 
-// laundry.jsonl compressed data (185927 bytes from 770847 bytes)
+// laundry.jsonl compressed data (163038 bytes from 677000 bytes)
 extern const uint8_t ha_discovery_data_laundry[];
 
 // dishwasher.jsonl chunks
 extern const ha_discovery_chunk_t ha_discovery_chunk_dishwasher[];
 
-// dishwasher.jsonl compressed data (36189 bytes from 191379 bytes)
+// dishwasher.jsonl compressed data (36184 bytes from 191342 bytes)
 extern const uint8_t ha_discovery_data_dishwasher[];
 
 // waterheater.jsonl chunks
@@ -63,13 +63,13 @@ extern const uint8_t ha_discovery_data_waterheater[];
 // range.jsonl chunks
 extern const ha_discovery_chunk_t ha_discovery_chunk_range[];
 
-// range.jsonl compressed data (121178 bytes from 700103 bytes)
+// range.jsonl compressed data (107385 bytes from 631366 bytes)
 extern const uint8_t ha_discovery_data_range[];
 
 // airconditioning.jsonl chunks
 extern const ha_discovery_chunk_t ha_discovery_chunk_airconditioning[];
 
-// airconditioning.jsonl compressed data (27088 bytes from 149701 bytes)
+// airconditioning.jsonl compressed data (27010 bytes from 149424 bytes)
 extern const uint8_t ha_discovery_data_airconditioning[];
 
 // waterfilter.jsonl chunks
@@ -81,13 +81,13 @@ extern const uint8_t ha_discovery_data_waterfilter[];
 // smallappliance.jsonl chunks
 extern const ha_discovery_chunk_t ha_discovery_chunk_smallappliance[];
 
-// smallappliance.jsonl compressed data (42103 bytes from 246247 bytes)
+// smallappliance.jsonl compressed data (40225 bytes from 240459 bytes)
 extern const uint8_t ha_discovery_data_smallappliance[];
 
 // energy.jsonl chunks
 extern const ha_discovery_chunk_t ha_discovery_chunk_energy[];
 
-// energy.jsonl compressed data (16473 bytes from 127076 bytes)
+// energy.jsonl compressed data (15792 bytes from 125599 bytes)
 extern const uint8_t ha_discovery_data_energy[];
 
 /* Category table */
@@ -97,6 +97,6 @@ extern const uint16_t ha_discovery_category_count;
 
 // FNV-1a hash of all discovery data for change detection.
 // Changes when discovery definitions are updated.
-#define HA_DISCOVERY_DATA_HASH 0x9eaeb844u
+#define HA_DISCOVERY_DATA_HASH 0x3e25779fu
 
 #endif

@@ -1026,7 +1026,7 @@ class TestUnpairedMultiFieldDemotion(unittest.TestCase):
     def test_byte_offset_unpaired_number_becomes_sensor(self):
         entries = []
 
-        def collect(*args):
+        def collect(*args, **kwargs):
             entries.append(args)
 
         erd_data = [
@@ -1043,7 +1043,7 @@ class TestUnpairedMultiFieldDemotion(unittest.TestCase):
     def test_byte_offset_unpaired_switch_becomes_binary_sensor(self):
         entries = []
 
-        def collect(*args):
+        def collect(*args, **kwargs):
             entries.append(args)
 
         erd_data = [
@@ -1058,6 +1058,180 @@ class TestUnpairedMultiFieldDemotion(unittest.TestCase):
         self.assertEqual(entries[1][16], '00')
         vt = JINJA2_ENV.from_string(entries[1][10])
         self.assertEqual(vt.render(value='0001'), '01')
+
+
+class TestNoPartialWrites(unittest.TestCase):
+    """No controllable entity may write part of an ERD payload.
+
+    The bridge writes MQTT payloads verbatim to the ERD (no read-modify-
+    write), so a switch/number/select is only safe as a command topic when
+    its rendered command covers the target ERD's full data size and it is
+    the sole controllable writer of that ERD. The generator demotes every
+    other controllable entity to read-only; this test fails CI if a future
+    ERD definition or override reintroduces a partial writer.
+    """
+
+    @staticmethod
+    def _rendered_bytes(obj):
+        """Bytes the entity's command renders, per the bridge's hex decode."""
+        ct = obj.get('ct')
+        if ct:
+            m = re.search(r"%0(\d+)x", ct)
+            if m:
+                return int(m.group(1)) // 2
+            if ct.strip() == '{{ value }}':
+                return 1
+            m = re.search(r"'([0-9a-f]{2,})'", ct)
+            if m:
+                return len(m.group(1)) // 2
+            return None
+        pon = obj.get('pon')
+        return len(pon) // 2 if pon else None
+
+    def test_controllable_entities_are_full_payload_sole_writers(self):
+        entities = load_all_entities()
+        erd_ds = {}
+        for obj in entities:
+            erd_ds.setdefault(obj['i'], obj['ds'])
+        writers = {}
+        for obj in entities:
+            if obj['d'] not in ('switch', 'number', 'select'):
+                continue
+            if not (obj.get('ct') or obj.get('p')):
+                continue
+            target = obj['p'] if obj.get('r') == 'status' else obj['i']
+            writers.setdefault(target, []).append(obj)
+        for target, group in writers.items():
+            tds = erd_ds.get(target)
+            for obj in group:
+                with self.subTest(entity=obj['n'], erd=obj['i'], field=obj.get('fi', '')):
+                    rb = self._rendered_bytes(obj)
+                    self.assertIsNotNone(
+                        rb,
+                        f'{obj["n"]} ({obj["i"]}) has a command topic but no '
+                        f'deterministic command width')
+                    if tds is not None:
+                        self.assertEqual(
+                            rb, tds,
+                            f'{obj["n"]} ({obj["i"]}) renders {rb} bytes but '
+                            f'target ERD 0x{target} is {tds} bytes')
+                    self.assertEqual(
+                        len(group), 1,
+                        f'{obj["n"]} ({obj["i"]}) shares target ERD 0x{target} '
+                        f'with {len(group) - 1} other writer(s)')
+
+
+class TestPartialWriteDemotion(unittest.TestCase):
+    """The partial-write demotion pass demotes unsafe writers to read-only."""
+
+    @staticmethod
+    def _entry(erd_id, domain, cb=0, bit_start=None, paired=0, role='', ct=''):
+        return {
+            'erd_id': erd_id, 'name': f'test {erd_id:x} {domain}', 'domain': domain,
+            'unit': '', 'device_class': '', 'state_class': '', 'scaling_factor': 1,
+            'data_size': 1, 'paired_erd_id': paired, 'pair_role': role,
+            'value_template': '', 'command_template': ct, 'options_json': '',
+            'field_id': '', 'mode': '', 'payload_on': '', 'payload_off': '',
+            'state_on': '', 'state_off': '', 'min_val': 0.0, 'max_val': 0.0,
+            'step_val': 1.0, 'command_bytes': cb, 'bit_start': bit_start,
+        }
+
+    @staticmethod
+    def _erd_by_id(sizes):
+        return {f'0x{k:04x}': {'id': f'0x{k:04x}',
+                               'data': [{'offset': 0, 'size': v}]}
+                for k, v in sizes.items()}
+
+    def test_paired_multi_writer_switches_demoted(self):
+        entries = [self._entry(0x1000, 'switch', cb=1, paired=0x1001, role='request'),
+                   self._entry(0x1000, 'switch', cb=1, paired=0x1001, role='request')]
+        demoted = gen._demote_partial_write_entities(
+            entries, self._erd_by_id({0x1000: 1, 0x1001: 1}))
+        self.assertEqual(len(demoted), 2)
+        self.assertEqual([e['domain'] for e in entries],
+                         ['binary_sensor', 'binary_sensor'])
+        self.assertEqual(entries[0]['command_template'], '')
+
+    def test_short_write_select_demoted(self):
+        # 0xd023 shape: 2-byte enum in a 4-byte ERD (enum + reserved padding)
+        entries = [self._entry(0x1000, 'select', cb=2, paired=0x1001,
+                               role='request', ct='ct')]
+        demoted = gen._demote_partial_write_entities(
+            entries, self._erd_by_id({0x1000: 4, 0x1001: 4}))
+        self.assertEqual(len(demoted), 1)
+        self.assertEqual(entries[0]['domain'], 'sensor')
+
+    def test_full_payload_sole_writer_stays(self):
+        entries = [self._entry(0x1000, 'number', cb=4, ct='ct')]
+        demoted = gen._demote_partial_write_entities(
+            entries, self._erd_by_id({0x1000: 4}))
+        self.assertEqual(demoted, [])
+        self.assertEqual(entries[0]['domain'], 'number')
+
+    def test_bitfield_switch_at_nonzero_bit_demoted(self):
+        entries = [self._entry(0x1000, 'switch', cb=1, bit_start=3,
+                               paired=0x1001, role='request')]
+        demoted = gen._demote_partial_write_entities(
+            entries, self._erd_by_id({0x1000: 1, 0x1001: 1}))
+        self.assertEqual(len(demoted), 1)
+        self.assertEqual(entries[0]['domain'], 'binary_sensor')
+
+    def test_bitfield_switch_at_bit_zero_stays(self):
+        entries = [self._entry(0x1000, 'switch', cb=1, bit_start=0,
+                               paired=0x1001, role='request')]
+        demoted = gen._demote_partial_write_entities(
+            entries, self._erd_by_id({0x1000: 1, 0x1001: 1}))
+        self.assertEqual(demoted, [])
+        self.assertEqual(entries[0]['domain'], 'switch')
+
+    def test_status_role_writer_targets_paired_request_erd(self):
+        entries = [self._entry(0x1001, 'number', cb=2, paired=0x1000,
+                               role='status', ct='ct'),
+                   self._entry(0x1000, 'number', cb=4, paired=0x1001,
+                               role='request', ct='ct')]
+        demoted = gen._demote_partial_write_entities(
+            entries, self._erd_by_id({0x1000: 4, 0x1001: 2}))
+        # Both target 0x1000: the status writer renders 2 of 4 bytes and the
+        # request writer shares the target, so both are demoted.
+        self.assertEqual(len(demoted), 2)
+        self.assertEqual([e['domain'] for e in entries], ['sensor', 'sensor'])
+
+    def test_paired_byte_offset_numbers_demoted_end_to_end(self):
+        entries = []
+
+        def collect(erd_id_int, name, domain, unit, dev_cls, state_cls,
+                    scaling, d_size, paired_id, role, val_tmpl, cmd_tmpl,
+                    opts, field_id, mode='', payload_on='', payload_off='',
+                    state_on='', state_off='', min_val=0.0, max_val=0.0,
+                    step_val=1.0, command_bytes=0, bit_start=None):
+            entries.append({
+                'erd_id': erd_id_int, 'name': name, 'domain': domain,
+                'unit': unit, 'device_class': dev_cls, 'state_class': state_cls,
+                'scaling_factor': scaling, 'data_size': d_size,
+                'paired_erd_id': paired_id, 'pair_role': role,
+                'value_template': val_tmpl, 'command_template': cmd_tmpl,
+                'options_json': opts, 'field_id': field_id, 'mode': mode,
+                'payload_on': payload_on, 'payload_off': payload_off,
+                'state_on': state_on, 'state_off': state_off,
+                'min_val': min_val, 'max_val': max_val, 'step_val': step_val,
+                'command_bytes': command_bytes, 'bit_start': bit_start,
+            })
+
+        erd_data = [
+            {'name': 'Price[0]', 'type': 'u16', 'offset': 0, 'size': 2},
+            {'name': 'Price[1]', 'type': 'u16', 'offset': 2, 'size': 2},
+        ]
+        gen._handle_byte_offset_erd({}, collect, 0x2164, 'Cycle Pricing',
+                                    'number', '', '', 1, 4, 'request', '0x2165',
+                                    erd_data)
+        erd_by_id = {'0x2164': {'id': '0x2164', 'data': erd_data},
+                     '0x2165': {'id': '0x2165', 'data': erd_data}}
+        demoted = gen._demote_partial_write_entities(entries, erd_by_id)
+        self.assertEqual(len(demoted), 2)
+        self.assertEqual([e['domain'] for e in entries], ['sensor', 'sensor'])
+        self.assertEqual([e['command_template'] for e in entries], ['', ''])
+
+
 
 
 if __name__ == '__main__':
