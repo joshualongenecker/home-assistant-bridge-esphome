@@ -1243,14 +1243,16 @@ class TestPartialWriteDemotion(unittest.TestCase):
         self.assertEqual(entries[0]['domain'], 'switch')
 
     def test_unknown_target_erd_fails_closed(self):
-        # A status-role writer whose paired request ERD is not in the
-        # definitions cannot be verified, so it is demoted.
-        entries = [self._entry(0x1001, 'number', cb=4, paired=0x9999,
-                               role='status', ct='ct')]
+        # A 1-byte writer whose target ERD is not in the definitions cannot
+        # be verified, so it is demoted. cb=1 is the distinguishing case:
+        # with the old fail-open default (target_ds=1) this entity would
+        # have been kept as a switch.
+        entries = [self._entry(0x1001, 'switch', cb=1, paired=0x9999,
+                               role='status')]
         demoted = gen._demote_partial_write_entities(
-            entries, self._erd_by_id({0x1001: 4}))
+            entries, self._erd_by_id({0x1001: 1}))
         self.assertEqual(len(demoted), 1)
-        self.assertEqual(entries[0]['domain'], 'sensor')
+        self.assertEqual(entries[0]['domain'], 'binary_sensor')
 
 
     def test_paired_byte_offset_numbers_demoted_end_to_end(self):
