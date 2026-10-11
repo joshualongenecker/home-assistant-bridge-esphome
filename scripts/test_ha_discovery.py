@@ -1196,6 +1196,63 @@ class TestPartialWriteDemotion(unittest.TestCase):
         self.assertEqual(len(demoted), 2)
         self.assertEqual([e['domain'] for e in entries], ['sensor', 'sensor'])
 
+    def test_bitfield_switch_with_readonly_siblings_demoted(self):
+        # Sole controllable writer at bit 0 of a 1-byte ERD, but the ERD
+        # also holds a read-only sibling bit: the '01' command would zero it.
+        entries = [self._entry(0x1000, 'switch', cb=1, bit_start=0,
+                               paired=0x1001, role='request')]
+        erd_by_id = {
+            '0x1000': {'id': '0x1000', 'data': [
+                {'name': 'Mode', 'offset': 0, 'size': 1,
+                 'bits': {'offset': 0, 'size': 1}},
+                {'name': 'Fault', 'offset': 0, 'size': 1,
+                 'bits': {'offset': 1, 'size': 1}},
+            ]},
+            '0x1001': {'id': '0x1001', 'data': [
+                {'name': 'Mode', 'offset': 0, 'size': 1,
+                 'bits': {'offset': 0, 'size': 1}},
+                {'name': 'Fault', 'offset': 0, 'size': 1,
+                 'bits': {'offset': 1, 'size': 1}},
+            ]},
+        }
+        demoted = gen._demote_partial_write_entities(entries, erd_by_id)
+        self.assertEqual(len(demoted), 1)
+        self.assertEqual(entries[0]['domain'], 'binary_sensor')
+
+    def test_bitfield_switch_sole_non_reserved_field_stays(self):
+        # Bit 0 switch that is the only non-reserved field of the target
+        # ERD: the 1-byte command cannot clobber anything.
+        entries = [self._entry(0x1000, 'switch', cb=1, bit_start=0,
+                               paired=0x1001, role='request')]
+        erd_by_id = {
+            '0x1000': {'id': '0x1000', 'data': [
+                {'name': 'Mode', 'offset': 0, 'size': 1,
+                 'bits': {'offset': 0, 'size': 1}},
+                {'name': 'Reserved', 'offset': 0, 'size': 1,
+                 'bits': {'offset': 1, 'size': 7}},
+            ]},
+            '0x1001': {'id': '0x1001', 'data': [
+                {'name': 'Mode', 'offset': 0, 'size': 1,
+                 'bits': {'offset': 0, 'size': 1}},
+                {'name': 'Reserved', 'offset': 0, 'size': 1,
+                 'bits': {'offset': 1, 'size': 7}},
+            ]},
+        }
+        demoted = gen._demote_partial_write_entities(entries, erd_by_id)
+        self.assertEqual(demoted, [])
+        self.assertEqual(entries[0]['domain'], 'switch')
+
+    def test_unknown_target_erd_fails_closed(self):
+        # A status-role writer whose paired request ERD is not in the
+        # definitions cannot be verified, so it is demoted.
+        entries = [self._entry(0x1001, 'number', cb=4, paired=0x9999,
+                               role='status', ct='ct')]
+        demoted = gen._demote_partial_write_entities(
+            entries, self._erd_by_id({0x1001: 4}))
+        self.assertEqual(len(demoted), 1)
+        self.assertEqual(entries[0]['domain'], 'sensor')
+
+
     def test_paired_byte_offset_numbers_demoted_end_to_end(self):
         entries = []
 

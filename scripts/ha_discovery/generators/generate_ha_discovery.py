@@ -1273,7 +1273,10 @@ def _demote_partial_write_entities(entries: List[Dict],
       - its rendered command covers the target ERD's full data size;
       - it is the sole controllable writer of that ERD;
       - a bit-field switch starts at payload bit 0 (its '01'/'00' command
-        sets the whole payload, so a bit elsewhere would be mis-addressed).
+        sets the whole payload, so a bit elsewhere would be mis-addressed)
+        and is the sole non-reserved field of the target ERD (the 1-byte
+        command would zero any read-only sibling bits);
+      - the target ERD is known (an unknown target fails closed).
 
     The target ERD is the entity's own ERD, or its paired request ERD when
     the entity has pair_role 'status'. Buttons are excluded: their one-shot
@@ -1298,14 +1301,24 @@ def _demote_partial_write_entities(entries: List[Dict],
     demoted = []
     for target, group in writers.items():
         target_hex = f'0x{target:04x}'
-        if target_hex in erd_by_id:
-            target_ds = get_erd_byte_size(erd_by_id[target_hex].get('data', [])) or 1
+        target_erd = erd_by_id.get(target_hex)
+        target_non_reserved = 0
+        if target_erd is None:
+            # Unknown target ERD: the write width cannot be verified, so
+            # fail closed and demote the whole group.
+            target_ds = None
         else:
-            target_ds = 1
+            target_ds = get_erd_byte_size(target_erd.get('data', [])) or 1
+            target_non_reserved = sum(
+                1 for f in target_erd.get('data', [])
+                if not _is_reserved_field(f.get('name', '')))
         for e in group:
-            safe = (e['command_bytes'] == target_ds
+            safe = (target_ds is not None
+                    and e['command_bytes'] == target_ds
                     and len(group) == 1
                     and (e['bit_start'] is None or e['bit_start'] == 0))
+            if safe and e['bit_start'] is not None:
+                safe = target_non_reserved == 1
             if safe:
                 continue
             e['domain'] = 'binary_sensor' if e['domain'] == 'switch' else 'sensor'
