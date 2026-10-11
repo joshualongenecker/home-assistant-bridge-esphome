@@ -1080,10 +1080,11 @@ class TestNoPartialWrites(unittest.TestCase):
             if m:
                 hex_chars = int(m.group(1))
                 # Scaled templates render round(value * sf); values near
-                # the range limit can overflow the format width.
+                # the range limit can overflow the format width. Signed
+                # templates (mn < 0) apply a modulo and cannot.
                 sf = obj.get('sf', 1)
                 mn, mx = obj.get('mn'), obj.get('mx')
-                if sf > 1 and mn is not None and mx is not None:
+                if sf > 1 and mn is not None and mx is not None and mn >= 0:
                     worst = max(abs(round(mn * sf)), abs(round(mx * sf)))
                     hex_chars = max(hex_chars, len(format(worst, 'x')))
                 return (hex_chars + 1) // 2
