@@ -1078,7 +1078,15 @@ class TestNoPartialWrites(unittest.TestCase):
         if ct:
             m = re.search(r"%0(\d+)x", ct)
             if m:
-                return int(m.group(1)) // 2
+                hex_chars = int(m.group(1))
+                # Scaled templates render round(value * sf); values near
+                # the range limit can overflow the format width.
+                sf = obj.get('sf', 1)
+                mn, mx = obj.get('mn'), obj.get('mx')
+                if sf > 1 and mn is not None and mx is not None:
+                    worst = max(abs(round(mn * sf)), abs(round(mx * sf)))
+                    hex_chars = max(hex_chars, len(format(worst, 'x')))
+                return (hex_chars + 1) // 2
             if ct.strip() == '{{ value }}':
                 return 1
             m = re.search(r"'([0-9a-f]{2,})'", ct)
@@ -1254,7 +1262,6 @@ class TestPartialWriteDemotion(unittest.TestCase):
         self.assertEqual(len(demoted), 1)
         self.assertEqual(entries[0]['domain'], 'binary_sensor')
 
-
     def test_paired_byte_offset_numbers_demoted_end_to_end(self):
         entries = []
 
@@ -1289,8 +1296,6 @@ class TestPartialWriteDemotion(unittest.TestCase):
         self.assertEqual(len(demoted), 2)
         self.assertEqual([e['domain'] for e in entries], ['sensor', 'sensor'])
         self.assertEqual([e['command_template'] for e in entries], ['', ''])
-
-
 
 
 if __name__ == '__main__':

@@ -748,6 +748,24 @@ def _number_command_template(data_size: int, scaling_factor: int, signed: bool =
     return f"{{{{ '%0{hex_chars}x' % (value | int) }}}}"
 
 
+def _number_command_bytes(data_size: int, scaling_factor: int, signed: bool,
+                          min_val: float, max_val: float) -> int:
+    """Worst-case bytes the number's command renders across its range.
+
+    The command template renders round(value * scaling_factor) as at
+    least data_size*2 hex chars. Signed templates apply a modulo, so
+    they never exceed the format width; unsigned scaled values can
+    overflow it (e.g. 255 * 9 = 0x8f7 needs 3 chars in a %02x field),
+    in which case the rendered command is longer than data_size bytes.
+    """
+    hex_chars = data_size * 2
+    if not signed and scaling_factor > 1:
+        worst = max(abs(round(min_val * scaling_factor)),
+                    abs(round(max_val * scaling_factor)))
+        hex_chars = max(hex_chars, len(format(worst, 'x')))
+    return (hex_chars + 1) // 2
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers for HA-discovery data collection
 # ---------------------------------------------------------------------------
@@ -931,7 +949,6 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
             signed = _is_signed_type(_get_primary_data_type(erd_data))
             vt = _compute_sensor_value_template(scaling_factor, data_size, signed)
         ct = _number_command_template(data_size, scaling_factor, signed)
-        cb = data_size
         # Compute min/max/step for number entities
         if pf:
             n_type = pf.get('type', 'u8')
@@ -943,6 +960,8 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
             n_type = _get_primary_data_type(erd_data)
             n_scale = scaling_factor
         min_val, max_val, step_val = _compute_number_range(n_type, n_scale)
+        cb = _number_command_bytes(data_size, scaling_factor, signed,
+                                   min_val, max_val)
     # button: no templates
 
     # Allow overrides to supply a custom value_template that bypasses
@@ -1042,11 +1061,13 @@ def _handle_byte_offset_erd(erd_by_id: Dict[str, Dict], collect,
                 field_size = field.get('size', 1)
                 signed = _is_signed_type(f_type)
                 ct = _number_command_template(field_size, f_scaling, signed)
-                f_cb = field_size
         # Compute min/max/step for number sub-fields
         f_min, f_max, f_step = 0.0, 0.0, 1.0
         if f_ha_domain == 'number':
             f_min, f_max, f_step = _compute_number_range(f_type, f_scaling)
+            if f_pair_role == 'request':
+                f_cb = _number_command_bytes(field_size, f_scaling, signed,
+                                             f_min, f_max)
         collect(erd_id_int, entity_name, f_ha_domain, f_unit, f_dev_cls,
                 f_state_cls, f_scaling, data_size, f_paired_id,
                 f_pair_role, vt, ct, opts, fid, '',
@@ -1167,11 +1188,13 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
                         p_field_size = primary.get('size', 1)
                         p_signed = _is_signed_type(p_type)
                         p_ct = _number_command_template(p_field_size, p_scaling, p_signed)
-                        p_cb = p_field_size
             # Compute min/max/step for number primary fields
             p_min, p_max, p_step = 0.0, 0.0, 1.0
             if p_ha_domain == 'number':
                 p_min, p_max, p_step = _compute_number_range(p_type, p_scaling)
+                if p_pair_role == 'request':
+                    p_cb = _number_command_bytes(p_field_size, p_scaling, p_signed,
+                                                 p_min, p_max)
             p_unit = primary.get('unit_of_measurement') or unit
             collect(erd_id_int, display_name, p_ha_domain, p_unit, p_dev_cls,
                     primary.get('state_class') or state_class, p_scaling, data_size, p_paired_id,
@@ -1370,7 +1393,7 @@ def _collect_ha_discovery_entries(erds: List[Dict]) -> List[Dict]:
                 payload_on: str = '', payload_off: str = '',
                 state_on: str = '', state_off: str = '',
                 min_val: float = 0.0, max_val: float = 0.0, step_val: float = 1.0,
-                command_bytes: int = 0, bit_start: int = None) -> None:
+                command_bytes: int = 0, bit_start: Optional[int] = None) -> None:
         """Collect one entity.
 
         command_bytes is the number of bytes the entity's command renders
@@ -1570,7 +1593,7 @@ def generate_ha_discovery_jsonl_by_category(erds: List[Dict]) -> Dict[str, str]:
             if e['command_template']:             obj['ct'] = e['command_template']
             if e['options_json']:                 obj['o']  = e['options_json']
             if e['field_id']:                     obj['fi'] = e['field_id']
-            if e['mode']:                         obj['m']  = e['mode']
+            if domain == 'number' and e['mode']: obj['m']  = e['mode']
             if e['payload_on']:                   obj['pon'] = e['payload_on']
             if e['payload_off']:                  obj['poff'] = e['payload_off']
             if e['state_on']:                     obj['son'] = e['state_on']
