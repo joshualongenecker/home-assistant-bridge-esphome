@@ -1108,6 +1108,12 @@ class TestNoPartialWrites(unittest.TestCase):
                 continue
             if not (obj.get('ct') or obj.get('p')):
                 continue
+            # RMW-enabled entities (fw field) write via the field-write topic;
+            # the bridge reads the base, patches the field, and writes the full
+            # payload, so they are safe even though the command renders a
+            # partial payload. They are covered by TestRMWTable instead.
+            if obj.get('fw'):
+                continue
             target = obj['p'] if obj.get('r') == 'status' else obj['i']
             writers.setdefault(target, []).append(obj)
         for target, group in writers.items():
@@ -1270,7 +1276,8 @@ class TestPartialWriteDemotion(unittest.TestCase):
                     scaling, d_size, paired_id, role, val_tmpl, cmd_tmpl,
                     opts, field_id, mode='', payload_on='', payload_off='',
                     state_on='', state_off='', min_val=0.0, max_val=0.0,
-                    step_val=1.0, command_bytes=0, bit_start=None):
+                    step_val=1.0, command_bytes=0, bit_start=None,
+                    byte_offset=0, byte_size=0, bit_offset=0, bit_size=0):
             entries.append({
                 'erd_id': erd_id_int, 'name': name, 'domain': domain,
                 'unit': unit, 'device_class': dev_cls, 'state_class': state_cls,
@@ -1297,6 +1304,186 @@ class TestPartialWriteDemotion(unittest.TestCase):
         self.assertEqual(len(demoted), 2)
         self.assertEqual([e['domain'] for e in entries], ['sensor', 'sensor'])
         self.assertEqual([e['command_template'] for e in entries], ['', ''])
+
+
+class TestRMWTable(unittest.TestCase):
+    """Field-level RMW: matched-pair request ERDs stay writable with an fw
+    field and an RMW-table row; divergent/standalone ERDs stay demoted."""
+
+    @staticmethod
+    def _entry(erd_id, domain, cb=0, paired=0, role='', ct='',
+               byte_offset=0, byte_size=0, bit_offset=0, bit_size=0,
+               bit_start=None):
+        return {
+            'erd_id': erd_id, 'name': f'test {erd_id:x} {domain}', 'domain': domain,
+            'unit': '', 'device_class': '', 'state_class': '', 'scaling_factor': 1,
+            'data_size': 1, 'paired_erd_id': paired, 'pair_role': role,
+            'value_template': '', 'command_template': ct, 'options_json': '',
+            'field_id': '', 'mode': '', 'payload_on': '', 'payload_off': '',
+            'state_on': '', 'state_off': '', 'min_val': 0.0, 'max_val': 0.0,
+            'step_val': 1.0, 'command_bytes': cb, 'bit_start': bit_start,
+            'byte_offset': byte_offset, 'byte_size': byte_size,
+            'bit_offset': bit_offset, 'bit_size': bit_size,
+        }
+
+    @staticmethod
+    def _bitfield_erd(erd_id, role, paired, bit_off=2, size=1):
+        # Each non-reserved field carries its per-field pairing to the base;
+        # the RMW gate requires every field to be individually paired.
+        data = [{'name': 'Field', 'offset': 0, 'size': size,
+                 'bits': {'offset': bit_off, 'size': 1}, 'type': 'u8',
+                 'paired_erd': paired}]
+        return {'id': erd_id, 'pair_role': role, 'paired_erd': paired, 'data': data}
+
+    def test_matched_pair_stays_writable_with_fw(self):
+        entries = [self._entry(0x7051, 'switch', cb=1, paired=0x7053,
+                               role='request', ct='ct',
+                               byte_offset=0, byte_size=1, bit_offset=2, bit_size=1)]
+        erd_by_id = {
+            '0x7051': self._bitfield_erd('0x7051', 'request', '0x7053'),
+            '0x7053': self._bitfield_erd('0x7053', 'status', '0x7051'),
+        }
+        demoted = gen._demote_partial_write_entities(entries, erd_by_id)
+        self.assertEqual(demoted, [], 'matched pair must not be demoted')
+        self.assertEqual(entries[0]['domain'], 'switch')
+        self.assertEqual(entries[0]['fw'], '0/1/2/1')
+
+    def test_matched_pair_multibit_bitfield_no_ct_demoted(self):
+        # A multi-bit (number/select) bitfield sub-field in a matched pair has
+        # no command_template, so a raw HA value would not hex-decode to the
+        # field value. The gate must fail closed: demote it (read-only)
+        # instead of making it writable-but-broken.
+        def _multibit_erd(erd_id, role, paired):
+            data = [{'name': 'Field', 'offset': 0, 'size': 2,
+                     'bits': {'offset': 5, 'size': 3}, 'type': 'u8',
+                     'paired_erd': paired}]
+            return {'id': erd_id, 'pair_role': role, 'paired_erd': paired,
+                    'data': data}
+        entries = [self._entry(0x7051, 'number', cb=0, paired=0x7053,
+                               role='request', ct='',
+                               byte_offset=0, byte_size=2, bit_offset=5, bit_size=3)]
+        erd_by_id = {
+            '0x7051': _multibit_erd('0x7051', 'request', '0x7053'),
+            '0x7053': _multibit_erd('0x7053', 'status', '0x7051'),
+        }
+        demoted = gen._demote_partial_write_entities(entries, erd_by_id)
+        self.assertEqual(len(demoted), 1, 'multi-bit bitfield without ct must be demoted')
+        self.assertEqual(entries[0]['domain'], 'sensor')
+        self.assertNotIn('fw', entries[0])
+
+    def test_matched_pair_multibyte_aligned_switch_demoted(self):
+        # A byte-aligned multi-byte switch sub-field renders a 1-byte '01'/'00'
+        # command, which would fail the memcpy size check (value_size <
+        # byte_size). The gate must fail closed: demote it (read-only) instead
+        # of making it writable-but-broken.
+        def _aligned_erd(erd_id, role, paired):
+            data = [{'name': 'Field', 'offset': 0, 'size': 2,
+                     'type': 'u16', 'paired_erd': paired}]
+            return {'id': erd_id, 'pair_role': role, 'paired_erd': paired,
+                    'data': data}
+        entries = [self._entry(0x7051, 'switch', cb=1, paired=0x7053,
+                               role='request', ct='',
+                               byte_offset=0, byte_size=2, bit_offset=0, bit_size=16)]
+        erd_by_id = {
+            '0x7051': _aligned_erd('0x7051', 'request', '0x7053'),
+            '0x7053': _aligned_erd('0x7053', 'status', '0x7051'),
+        }
+        demoted = gen._demote_partial_write_entities(entries, erd_by_id)
+        self.assertEqual(len(demoted), 1, 'multi-byte aligned switch must be demoted')
+        self.assertEqual(entries[0]['domain'], 'binary_sensor')
+        self.assertNotIn('fw', entries[0])
+
+    def test_matched_pair_rmw_rows(self):
+        entries = [self._entry(0x7051, 'switch', cb=1, paired=0x7053,
+                               role='request', ct='ct',
+                               byte_offset=0, byte_size=1, bit_offset=2, bit_size=1)]
+        erd_by_id = {
+            '0x7051': self._bitfield_erd('0x7051', 'request', '0x7053'),
+            '0x7053': self._bitfield_erd('0x7053', 'status', '0x7051'),
+        }
+        gen._demote_partial_write_entities(entries, erd_by_id)
+        rows = gen._rmw_rows_from_entries(entries)
+        self.assertEqual(rows, [(0x7051, 0x7053, 1)])
+
+    def test_divergent_pair_stays_demoted(self):
+        # Status ERD has a different layout (2-byte u16) -> not a matched pair.
+        entries = [self._entry(0x7051, 'switch', cb=1, paired=0x7053,
+                               role='request', ct='ct',
+                               byte_offset=0, byte_size=1, bit_offset=2, bit_size=1,
+                               bit_start=2)]
+        erd_by_id = {
+            '0x7051': self._bitfield_erd('0x7051', 'request', '0x7053'),
+            '0x7053': {'id': '0x7053', 'pair_role': 'status', 'paired_erd': '0x7051',
+                       'data': [{'name': 'Field', 'offset': 0, 'size': 2, 'type': 'u16'}]},
+        }
+        demoted = gen._demote_partial_write_entities(entries, erd_by_id)
+        self.assertEqual(len(demoted), 1, 'divergent pair must be demoted')
+        self.assertEqual(entries[0]['domain'], 'binary_sensor')
+        self.assertNotIn('fw', entries[0])
+
+    def test_standalone_request_stays_demoted(self):
+        # No paired status ERD -> not a matched pair.
+        entries = [self._entry(0x7051, 'switch', cb=1, paired=0,
+                               role='request', ct='ct',
+                               byte_offset=0, byte_size=1, bit_offset=2, bit_size=1,
+                               bit_start=2)]
+        erd_by_id = {
+            '0x7051': self._bitfield_erd('0x7051', 'request', ''),
+        }
+        demoted = gen._demote_partial_write_entities(entries, erd_by_id)
+        self.assertEqual(len(demoted), 1, 'standalone request must be demoted')
+        self.assertEqual(entries[0]['domain'], 'binary_sensor')
+        self.assertNotIn('fw', entries[0])
+
+    def test_unpaired_field_not_enabled(self):
+        # Identical layout + equal size, but one request field has NO per-field
+        # pairing to the base. The gate must fail closed: a byte with no
+        # verified semantic correspondence is not safe for RMW.
+        entries = [self._entry(0x7051, 'switch', cb=1, paired=0x7053,
+                               role='request', ct='ct',
+                               byte_offset=0, byte_size=1, bit_offset=2, bit_size=1,
+                               bit_start=2)]
+        # Request field lacks 'paired_erd'; status field is paired. Layouts and
+        # sizes are otherwise identical.
+        req_data = [{'name': 'Field', 'offset': 0, 'size': 1,
+                     'bits': {'offset': 2, 'size': 1}, 'type': 'u8'}]
+        status_data = [{'name': 'Field', 'offset': 0, 'size': 1,
+                        'bits': {'offset': 2, 'size': 1}, 'type': 'u8',
+                        'paired_erd': '0x7051'}]
+        erd_by_id = {
+            '0x7051': {'id': '0x7051', 'pair_role': 'request', 'paired_erd': '0x7053',
+                       'data': req_data},
+            '0x7053': {'id': '0x7053', 'pair_role': 'status', 'paired_erd': '0x7051',
+                       'data': status_data},
+        }
+        demoted = gen._demote_partial_write_entities(entries, erd_by_id)
+        self.assertEqual(len(demoted), 1, 'unpaired field must be demoted')
+        self.assertEqual(entries[0]['domain'], 'binary_sensor')
+        self.assertNotIn('fw', entries[0])
+
+    def test_field_paired_to_wrong_erd_not_enabled(self):
+        # Identical layout + equal size, but the request field is paired to a
+        # DIFFERENT ERD than the base. The gate must fail closed.
+        entries = [self._entry(0x7051, 'switch', cb=1, paired=0x7053,
+                               role='request', ct='ct',
+                               byte_offset=0, byte_size=1, bit_offset=2, bit_size=1,
+                               bit_start=2)]
+        req_data = [{'name': 'Field', 'offset': 0, 'size': 1,
+                     'bits': {'offset': 2, 'size': 1}, 'type': 'u8',
+                     'paired_erd': '0x9999'}]  # paired to the wrong ERD
+        status_data = [{'name': 'Field', 'offset': 0, 'size': 1,
+                        'bits': {'offset': 2, 'size': 1}, 'type': 'u8',
+                        'paired_erd': '0x7051'}]
+        erd_by_id = {
+            '0x7051': {'id': '0x7051', 'pair_role': 'request', 'paired_erd': '0x7053',
+                       'data': req_data},
+            '0x7053': {'id': '0x7053', 'pair_role': 'status', 'paired_erd': '0x7051',
+                       'data': status_data},
+        }
+        demoted = gen._demote_partial_write_entities(entries, erd_by_id)
+        self.assertEqual(len(demoted), 1, 'wrong-ERD pairing must be demoted')
+        self.assertEqual(entries[0]['domain'], 'binary_sensor')
+        self.assertNotIn('fw', entries[0])
 
 
 if __name__ == '__main__':

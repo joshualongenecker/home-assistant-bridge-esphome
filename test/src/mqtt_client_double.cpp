@@ -78,7 +78,40 @@ void mqtt_client_double_trigger_write_request(
   uint8_t size,
   const void* value)
 {
-  mqtt_client_on_write_request_args_t args = { erd, board_address, size, value };
+  mqtt_client_on_write_request_args_t args;
+  args.erd = erd;
+  args.board_address = board_address;
+  args.size = size;
+  args.value = value;
+  args.is_field_write = false;
+  args.byte_offset = 0;
+  args.byte_size = 0;
+  args.bit_offset = 0;
+  args.bit_size = 0;
+  tiny_event_publish(&self->on_write_request, &args);
+}
+
+void mqtt_client_double_trigger_field_write_request(
+  mqtt_client_double_t* self,
+  tiny_erd_t erd,
+  uint8_t board_address,
+  uint8_t size,
+  const void* value,
+  uint16_t byte_offset,
+  uint8_t byte_size,
+  uint8_t bit_offset,
+  uint8_t bit_size)
+{
+  mqtt_client_on_write_request_args_t args;
+  args.erd = erd;
+  args.board_address = board_address;
+  args.size = size;
+  args.value = value;
+  args.is_field_write = true;
+  args.byte_offset = byte_offset;
+  args.byte_size = byte_size;
+  args.bit_offset = bit_offset;
+  args.bit_size = bit_size;
   tiny_event_publish(&self->on_write_request, &args);
 }
 

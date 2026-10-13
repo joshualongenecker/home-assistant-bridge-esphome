@@ -17,6 +17,66 @@ static tiny_hsm_result_t write_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t sign
 static tiny_hsm_result_t state_ready(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
 static tiny_hsm_result_t state_writing(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
 
+/* Look up the generated RMW table for a request ERD. Returns the row (with
+ * the base ERD and payload size) or nullptr if the ERD is not an RMW target. */
+static const rmw_erd_t* rmw_find(tiny_erd_t request_erd)
+{
+  for (uint16_t i = 0; i < rmw_erd_count; i++) {
+    if (rmw_erds[i].request_erd == request_erd) {
+      return &rmw_erds[i];
+    }
+  }
+  return nullptr;
+}
+
+/* Patch a single field into a full-payload buffer. Byte-aligned fields
+ * (bit_offset 0, bit_size == byte_size*8) are a plain memcpy; otherwise each
+ * target bit is set/cleared from the value's corresponding bit. The rendered
+ * value is big-endian (MSB first), so field bit i (0 = LSB) is
+ * (value[value_size - 1 - i/8] >> (i%8)) & 1; see the bit branch below for
+ * the matching big-endian payload placement.
+ *
+ * Returns false (and patches nothing) when the command value is not exactly
+ * byte_size bytes for a byte-aligned field: too short would read
+ * uninitialized stack bytes, and too long would silently MSB-truncate (copy
+ * the high-order bytes and discard the low-order ones), writing a wrong
+ * value. The bit-field branch is always safe (missing value bits read as 0).
+ */
+static bool rmw_patch_field(uint8_t* buffer, uint16_t byte_offset, uint8_t byte_size,
+                            uint8_t bit_offset, uint8_t bit_size,
+                            const uint8_t* value, uint8_t value_size)
+{
+  if (bit_offset == 0 && bit_size == byte_size * 8) {
+    if (value_size != byte_size) {
+      return false;
+    }
+    memcpy(buffer + byte_offset, value, byte_size);
+    return true;
+  }
+  // The command renders the field value big-endian (MSB first), and the
+  // appliance/VT reads the field as a big-endian integer of byte_size bytes.
+  // Field bit i (0 = LSB) is therefore bit (bit_offset + i) of that integer:
+  //   - in the rendered value: byte (value_size - 1 - i/8), bit (i%8);
+  //   - in the payload: byte (byte_offset + byte_size - 1 - (bit_offset+i)/8),
+  //     bit ((bit_offset+i)%8).
+  // For byte_size == 1 (all current RMW rows) this reduces to the naive
+  // little-endian placement, so existing behavior is unchanged.
+  for (uint8_t i = 0; i < bit_size; i++) {
+    uint8_t vbit = (i / 8 < value_size)
+        ? ((value[value_size - 1 - i / 8] >> (i % 8)) & 1) : 0;
+    uint32_t b = (uint32_t)bit_offset + i;
+    uint32_t abs_bit = ((uint32_t)byte_offset + (uint32_t)byte_size - 1 - b / 8) * 8 + (b % 8);
+    uint8_t* byte = &buffer[abs_bit / 8];
+    uint8_t mask = (uint8_t)(1u << (abs_bit % 8));
+    if (vbit) {
+      *byte |= mask;
+    } else {
+      *byte &= (uint8_t)~mask;
+    }
+  }
+  return true;
+}
+
 static tiny_hsm_result_t write_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data)
 {
   (void)hsm;
@@ -45,9 +105,68 @@ static tiny_hsm_result_t state_ready(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, 
       // the parsed address.
       uint8_t target_address = (args->board_address != tiny_gea_broadcast_address) ? args->board_address : self->erd_host_address;
 
+      // The payload and size to write. For a full write this is the command
+      // value verbatim; for a field write it is the full RMW payload (the
+      // snapshotted base with the target field patched).
+      const void* write_value = args->value;
+      uint8_t write_size = args->size;
+      // Declared outside the field-write block: write_value points into it and
+      // is used by tiny_gea3_erd_client_write() after the block, so it must
+      // stay in scope (a 248-byte stack cost on the full-write path is a minor
+      // inefficiency, not a correctness issue).
+      uint8_t rmw_buffer[ERD_CACHE_MAX_DATA_SIZE];
+
+      if (args->is_field_write) {
+        const rmw_erd_t* rmw = rmw_find(args->erd);
+        if (rmw == nullptr) {
+          ESP_LOGW(TAG, "Field write for ERD 0x%04x dropped: not an RMW target", args->erd);
+          mqtt_client_update_erd_write_result(self->mqtt_client, args->erd, args->board_address, false,
+            tiny_gea3_erd_client_write_failure_reason_not_supported);
+          break;
+        }
+        // The field must fit within the base's actual payload. The adapter only
+        // bounds the geometry to the 248-byte ERD max; a rogue topic whose field
+        // extends past this base's payload_size would patch bytes that are never
+        // sent (write_size is payload_size), silently truncating the write.
+        if (args->byte_offset + args->byte_size > rmw->payload_size) {
+          ESP_LOGW(TAG, "Field write for ERD 0x%04x dropped: field (off %u size %u) exceeds payload %u",
+            args->erd, args->byte_offset, args->byte_size, rmw->payload_size);
+          mqtt_client_update_erd_write_result(self->mqtt_client, args->erd, args->board_address, false,
+            tiny_gea3_erd_client_write_failure_reason_incorrect_size);
+          break;
+        }
+        if (self->cache == nullptr) {
+          ESP_LOGW(TAG, "Field write for ERD 0x%04x dropped: no ERD cache", args->erd);
+          mqtt_client_update_erd_write_result(self->mqtt_client, args->erd, args->board_address, false,
+            tiny_gea3_erd_client_write_failure_reason_not_supported);
+          break;
+        }
+        // Snapshot the base (the paired status ERD) out of the cache. The lock
+        // is held only for the short copy, never across the slow write below.
+        uint8_t base_size = 0;
+        if (!erd_cache_snapshot_entry(self->cache, rmw->base_erd, target_address, rmw_buffer, &base_size)
+            || base_size != rmw->payload_size) {
+          ESP_LOGW(TAG, "Field write for ERD 0x%04x dropped: base 0x%04x not cached (size %u, expected %u)",
+            args->erd, rmw->base_erd, base_size, rmw->payload_size);
+          mqtt_client_update_erd_write_result(self->mqtt_client, args->erd, args->board_address, false,
+            tiny_gea3_erd_client_write_failure_reason_incorrect_size);
+          break;
+        }
+        if (!rmw_patch_field(rmw_buffer, args->byte_offset, args->byte_size, args->bit_offset, args->bit_size,
+                             (const uint8_t*)args->value, args->size)) {
+          ESP_LOGW(TAG, "Field write for ERD 0x%04x dropped: value too short for field (size %u)",
+            args->erd, args->size);
+          mqtt_client_update_erd_write_result(self->mqtt_client, args->erd, args->board_address, false,
+            tiny_gea3_erd_client_write_failure_reason_incorrect_size);
+          break;
+        }
+        write_value = rmw_buffer;
+        write_size = rmw->payload_size;
+      }
+
       tiny_gea3_erd_client_request_id_t request_id;
       if(!tiny_gea3_erd_client_write(self->erd_client, &request_id, target_address,
-         args->erd, args->value, args->size)) {
+         args->erd, write_value, write_size)) {
         ESP_LOGW(TAG, "Write request for ERD 0x%04x failed to queue", args->erd);
         mqtt_client_update_erd_write_result(self->mqtt_client, args->erd, args->board_address, false,
           tiny_gea3_erd_client_write_failure_reason_retries_exhausted);
@@ -122,11 +241,13 @@ void erd_write_bridge_init(
   tiny_timer_group_t* timer_group,
   i_tiny_gea3_erd_client_t* erd_client,
   i_mqtt_client_t* mqtt_client,
+  erd_cache_t* cache,
   uint8_t host_address)
 {
   self->timer_group = timer_group;
   self->erd_client = erd_client;
   self->mqtt_client = mqtt_client;
+  self->cache = cache;
   self->erd_host_address = host_address;
   self->pending_request_id = 0;
   self->pending_erd = 0;

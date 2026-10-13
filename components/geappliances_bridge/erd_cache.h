@@ -112,6 +112,16 @@ bool erd_cache_snapshot_next_updated(erd_cache_t* self, uint16_t* iterator,
                                      tiny_erd_t* erd_out, uint8_t* addr_out,
                                      uint8_t* data_out, uint8_t* size_out);
 
+/* Find the entry for (erd, board_address) and copy its payload out of the
+ * arena in one lock hold. data_out must have capacity >=
+ * ERD_CACHE_MAX_DATA_SIZE. Returns true and fills data_out/size_out if the
+ * entry was found and valid; false otherwise (missing or not valid). The lock
+ * is held only for the short lookup + copy, never across slow I/O. This is
+ * the RMW base-read path: the write bridge snapshots the paired status ERD
+ * before patching a field. */
+bool erd_cache_snapshot_entry(erd_cache_t* self, tiny_erd_t erd, uint8_t board_address,
+                              uint8_t* data_out, uint8_t* size_out);
+
 /* Returns the number of valid entries currently in the cache. */
 uint16_t erd_cache_get_count(erd_cache_t* self);
 /* Returns the next valid entry in the cache, iterating all entries.

@@ -424,6 +424,7 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
     self->min_buf[0] = '\0';
     self->max_buf[0] = '\0';
     self->step_buf[0] = '\0';
+    self->fw_buf[0] = '\0';
 
     if (json_get_str(line, "fi", &val, &len)) json_unescape(val, len, self->field_id_buf, sizeof(self->field_id_buf));
     if (json_get_str(line, "a", &val, &len)) json_unescape(val, len, self->board_address_buf, sizeof(self->board_address_buf));
@@ -443,6 +444,7 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
     if (json_get_str(line, "mn", &val, &len)) json_unescape(val, len, self->min_buf, sizeof(self->min_buf));
     if (json_get_str(line, "mx", &val, &len)) json_unescape(val, len, self->max_buf, sizeof(self->max_buf));
     if (json_get_str(line, "st", &val, &len)) json_unescape(val, len, self->step_buf, sizeof(self->step_buf));
+    if (json_get_str(line, "fw", &val, &len)) json_unescape(val, len, self->fw_buf, sizeof(self->fw_buf));
 
     /* Board addresses are emitted as two hexadecimal digits by the custom
      * profile generator. Reject malformed optional data before it reaches a
@@ -503,6 +505,22 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
     } else {
         snprintf(self->actual_state_topic_buf, sizeof(self->actual_state_topic_buf), "%s", self->state_topic_buf);
         snprintf(self->actual_command_topic_buf, sizeof(self->actual_command_topic_buf), "%s", self->command_topic_buf);
+    }
+
+    /* RMW field-write entities carry the field geometry (fw) as a command-topic
+     * suffix: …/write/{off}/{size}/{bitoff}/{bitsize}. The adapter parses the
+     * four decimal segments and the write bridge performs the read-modify-write.
+     * Non-RMW entities have an empty fw and are emitted unchanged. */
+    if (self->fw_buf[0]) {
+        size_t cur = strlen(self->actual_command_topic_buf);
+        size_t need = strlen(self->fw_buf) + 2; /* "/fw\0" */
+        if (cur + need < sizeof(self->actual_command_topic_buf)) {
+            snprintf(self->actual_command_topic_buf + cur,
+                     sizeof(self->actual_command_topic_buf) - cur, "/%s", self->fw_buf);
+        } else {
+            self->total_filtered++;
+            return false;
+        }
     }
 
     /* Build topic using pre-computed domain prefix if available.

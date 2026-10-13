@@ -15,6 +15,7 @@
 #       -> components/geappliances_bridge/appliance_type_map.h
 #   scripts/ha_discovery/run_pipeline.py
 #       -> components/geappliances_bridge/ha_discovery_data.{h,cpp}
+#       -> components/geappliances_bridge/rmw_table.{h,cpp}
 #       -> ha_discovery/*.jsonl
 #       -> scripts/ha_discovery/appliance_api_erd_definitions_processed.json
 #
@@ -41,6 +42,8 @@ GENERATED=(
   components/geappliances_bridge/appliance_type_map.h
   components/geappliances_bridge/ha_discovery_data.h
   components/geappliances_bridge/ha_discovery_data.cpp
+  components/geappliances_bridge/rmw_table.h
+  components/geappliances_bridge/rmw_table.cpp
   scripts/ha_discovery/appliance_api_erd_definitions_processed.json
 )
 # ha_discovery/*.jsonl are generated too; resolve the set from the index.

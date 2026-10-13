@@ -367,10 +367,10 @@
 {"i":"913b","n":"Sanitize Indication Elapsed Time","d":"sensor","ds":2,"sc":"measurement","vt":"{{ value | int(base=16) }}"}
 {"i":"913c","n":"Total Compressor Runtime","d":"sensor","ds":2,"u":"h","sc":"measurement","vt":"{{ value | int(base=16) }}"}
 {"i":"913d","n":"Time To Descale","d":"sensor","ds":2,"u":"%","sc":"measurement","vt":"{{ value | int(base=16) }}"}
-{"i":"913f","n":"Light Color - Intensity Percentage","d":"sensor","ds":4,"u":"%","p":"913e","r":"request","vt":"{{ value[0:2] | int(base=16) }}"}
-{"i":"913f","n":"Light Color - Red","d":"sensor","ds":4,"u":"%","p":"913e","r":"request","vt":"{{ value[2:4] | int(base=16) }}","fi":"red"}
-{"i":"913f","n":"Light Color - Green","d":"sensor","ds":4,"u":"%","p":"913e","r":"request","vt":"{{ value[4:6] | int(base=16) }}","fi":"green"}
-{"i":"913f","n":"Light Color - Blue","d":"sensor","ds":4,"u":"%","p":"913e","r":"request","vt":"{{ value[6:8] | int(base=16) }}","fi":"blue"}
+{"i":"913f","n":"Light Color - Intensity Percentage","d":"number","ds":4,"u":"%","mn":0.0,"mx":255.0,"st":1.0,"p":"913e","r":"request","vt":"{{ value[0:2] | int(base=16) }}","ct":"{{ '%02x' % (value | int) }}","fw":"0/1/0/8"}
+{"i":"913f","n":"Light Color - Red","d":"number","ds":4,"u":"%","mn":0.0,"mx":255.0,"st":1.0,"p":"913e","r":"request","vt":"{{ value[2:4] | int(base=16) }}","ct":"{{ '%02x' % (value | int) }}","fi":"red","fw":"1/1/0/8"}
+{"i":"913f","n":"Light Color - Green","d":"number","ds":4,"u":"%","mn":0.0,"mx":255.0,"st":1.0,"p":"913e","r":"request","vt":"{{ value[4:6] | int(base=16) }}","ct":"{{ '%02x' % (value | int) }}","fi":"green","fw":"2/1/0/8"}
+{"i":"913f","n":"Light Color - Blue","d":"number","ds":4,"u":"%","mn":0.0,"mx":255.0,"st":1.0,"p":"913e","r":"request","vt":"{{ value[6:8] | int(base=16) }}","ct":"{{ '%02x' % (value | int) }}","fi":"blue","fw":"3/1/0/8"}
 {"i":"9140","n":"Water Level Tone Setting Current State","d":"binary_sensor","ds":1,"pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"9141","n":"Water Level Tone Setting Requested State","d":"switch","ds":1,"vt":"{{ value[0:2] }}","ct":"{{ value }}","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"9200","n":"Toaster Oven Supported Cook Modes - Air Fry Supported","d":"binary_sensor","ds":4,"vt":"{{ '01' if ((value[0:8] | int(base=16)) // 16777216) % 2 else '00' }}","fi":"air_fry_supported","pon":"01","poff":"00","son":"01","soff":"00"}

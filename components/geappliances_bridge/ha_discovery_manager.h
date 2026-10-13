@@ -133,6 +133,9 @@ typedef struct {
   char command_topic_buf[128];
   char actual_state_topic_buf[128];
   char actual_command_topic_buf[128];
+  /* Field-write geometry suffix ("{off}/{size}/{bitoff}/{bitsize}") for RMW
+   * entities; empty for non-RMW entities. Appended to the command topic. */
+  char fw_buf[32];
 
   uint16_t current_category;
   uint16_t current_chunk;

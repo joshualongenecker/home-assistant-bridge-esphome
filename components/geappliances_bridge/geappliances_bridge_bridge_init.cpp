@@ -230,6 +230,7 @@ void GeappliancesBridge::initialize_erd_bridge_()
     &this->timer_group_,
     this->autodiscovery_manager_.get_active_erd_client(),
     &this->mqtt_client_adapter_.interface,
+    &this->erd_cache_,
     host_addr);
   this->write_bridge_initialized_ = true;
   esphome_mqtt_client_adapter_subscribe_write_topic(&this->mqtt_client_adapter_);

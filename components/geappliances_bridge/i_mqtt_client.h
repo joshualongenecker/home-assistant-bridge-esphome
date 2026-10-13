@@ -18,6 +18,16 @@ typedef struct {
   uint8_t board_address;
   uint8_t size;
   const void* value;
+  /* Field-level read-modify-write. When is_field_write is true, the four
+   * geometry fields describe the sub-field the command targets (parsed from
+   * the …/write/{off}/{size}/{bitoff}/{bitsize} topic suffix); the bridge
+   * reads the RMW base, patches only that field, and writes the full payload.
+   * Full writes leave is_field_write false and the geometry unused. */
+  bool is_field_write;
+  uint16_t byte_offset;
+  uint8_t byte_size;
+  uint8_t bit_offset;
+  uint8_t bit_size;
 } mqtt_client_on_write_request_args_t;
 
 struct i_mqtt_client_api_t;

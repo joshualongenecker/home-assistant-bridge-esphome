@@ -222,6 +222,59 @@ def _get_non_reserved_fields(erd_data: List[Dict]) -> List[Dict]:
     """Return data fields whose names do not indicate reserved/padding content."""
     return [d for d in erd_data if not _is_reserved_field(d.get('name', ''))]
 
+def _field_layout_signature(erd_data: List[Dict]) -> list:
+    """Canonical signature of an ERD's non-reserved fields for layout comparison.
+
+    Two ERDs have an identical field layout when their non-reserved fields
+    match on (byte offset, byte size, bit offset, bit size, type) in order.
+    Reserved/padding fields are ignored so cosmetic padding differences do not
+    break the match.
+    """
+    sig = []
+    for f in _get_non_reserved_fields(erd_data):
+        bits = f.get('bits')
+        bit_key = (bits.get('offset', 0), bits.get('size', 1)) if bits else None
+        sig.append((f.get('offset', 0), f.get('size', 1), bit_key, f.get('type', '')))
+    return sig
+
+
+def _matched_base_erd(erd: Dict, erd_by_id: Dict[str, Dict]) -> Optional[str]:
+    """Return the paired status ERD id if `erd` is a request ERD whose status
+    ERD is a valid full-payload source for field-level read-modify-write.
+
+    A pair is safe for RMW only when patching a field in a copy of the status
+    payload yields a correct request payload. That requires ALL of:
+      - `erd` is a request ERD with a paired status ERD;
+      - the non-reserved field layouts are identical (bytes line up);
+      - the payload sizes are equal;
+      - every non-reserved request field is individually paired to the status
+        ERD (per-field `paired_erd`), so no byte is left to a field whose
+        meaning is unverified. The layout signature alone is name-ignoring and
+        cannot catch two fields at the same position with different semantics;
+        the per-field pairing is the authoritative semantic signal.
+
+    Returns None when any condition fails (fail closed: the ERD stays
+    read-only).
+    """
+    if erd.get('pair_role') != 'request':
+        return None
+    paired = erd.get('paired_erd') or ''
+    if not paired or paired not in erd_by_id:
+        return None
+    status = erd_by_id[paired]
+    if _field_layout_signature(erd.get('data', [])) != _field_layout_signature(status.get('data', [])):
+        return None
+    if get_erd_byte_size(erd.get('data', [])) != get_erd_byte_size(status.get('data', [])):
+        return None
+    # Every non-reserved request field must be individually paired to the base.
+    # A field with no per-field pairing (or paired to a different ERD) means a
+    # byte of the payload has no verified semantic correspondence, so the pair
+    # is not safe for RMW.
+    for f in _get_non_reserved_fields(erd.get('data', [])):
+        if f.get('paired_erd') != paired:
+            return None
+    return paired
+
 
 def _is_version_field(name: str) -> bool:
     """Return True if a field name matches a version component pattern.
@@ -1075,7 +1128,9 @@ def _handle_byte_offset_erd(erd_by_id: Dict[str, Dict], collect,
                 '00' if bin_payloads else '',
                 '01' if bin_payloads else '',
                 '00' if bin_payloads else '',
-                f_min, f_max, f_step, command_bytes=f_cb)
+                f_min, f_max, f_step, command_bytes=f_cb,
+                byte_offset=field.get('offset', 0), byte_size=field.get('size', 1),
+                bit_offset=0, bit_size=field.get('size', 1) * 8)
 
 
 def _handle_bitfield_erd(collect, erd_id_int: int, display_name: str,
@@ -1115,7 +1170,10 @@ def _handle_bitfield_erd(collect, erd_id_int: int, display_name: str,
         collect(erd_id_int, f'{display_name} - {leaf}', sub_domain, '', f_bf_dc,
                 '', f_scaling, data_size, f_paired_id, f_pair_role,
                 vt, '', '', fid, '', b_p_on, b_p_off, b_s_on, b_s_off,
-                command_bytes=f_cb, bit_start=f_bit_start)
+                command_bytes=f_cb, bit_start=f_bit_start,
+                byte_offset=field.get('offset', 0), byte_size=field.get('size', 1),
+                bit_offset=field.get('bits', {}).get('offset', 0),
+                bit_size=field.get('bits', {}).get('size', 1))
 
 
 def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
@@ -1204,7 +1262,9 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
                     '00' if p_bin_payloads else '',
                     '01' if p_bin_payloads else '',
                     '00' if p_bin_payloads else '',
-                    p_min, p_max, p_step, command_bytes=p_cb)
+                    p_min, p_max, p_step, command_bytes=p_cb,
+                    byte_offset=primary.get('offset', 0), byte_size=primary.get('size', 1),
+                    bit_offset=0, bit_size=primary.get('size', 1) * 8)
 
     for field in [d for d in erd_data
                   if _has_bits(d) and not _is_reserved_field(d.get('name', ''))]:
@@ -1234,7 +1294,10 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
         collect(erd_id_int, f'{display_name} - {leaf}', sub_domain, '', f_bf_dc,
                 '', f_scaling, data_size, f_paired_id, f_pair_role,
                 vt, '', '', fid, '', b_p_on, b_p_off, b_s_on, b_s_off,
-                command_bytes=f_cb, bit_start=f_bit_start)
+                command_bytes=f_cb, bit_start=f_bit_start,
+                byte_offset=field.get('offset', 0), byte_size=field.get('size', 1),
+                bit_offset=field.get('bits', {}).get('offset', 0),
+                bit_size=field.get('bits', {}).get('size', 1))
 
 
 def _handle_version_erd(collect, erd_id_int: int, display_name: str,
@@ -1288,7 +1351,11 @@ def _demote_partial_write_entities(entries: List[Dict],
     target ERD payload.
 
     The bridge writes MQTT payloads verbatim to the ERD — there is no
-    read-modify-write. A switch/number/select whose command renders fewer
+    read-modify-write, with one exception: a matched-pair request ERD (whose
+    paired status ERD has an identical non-reserved field layout and equal
+    payload size) is safe for field-level RMW, so its sub-field entities stay
+    writable and carry the field geometry (fw) instead of being demoted.
+    Otherwise, a switch/number/select whose command renders fewer
     bytes than the target ERD, or that shares the target ERD with another
     writer, would clobber or mis-address sibling fields, so it is exposed
     read-only instead. An entity stays writable only if all hold:
@@ -1335,7 +1402,40 @@ def _demote_partial_write_entities(entries: List[Dict],
             target_non_reserved = sum(
                 1 for f in target_erd.get('data', [])
                 if not _is_reserved_field(f.get('name', '')))
+        # A matched-pair request ERD is safe for field-level RMW: the bridge
+        # reads the paired status ERD, patches this field's bytes/bits, and
+        # writes the full payload. Such entities stay writable and carry the
+        # field geometry (fw) instead of being demoted.
+        matched_base = _matched_base_erd(target_erd, erd_by_id) if target_erd else None
         for e in group:
+            if matched_base is not None:
+                # A sub-field can use the field-write topic only if it can
+                # render a valid payload: a switch (1-byte '01'/'00' — valid
+                # only for a single-bit field or a byte-aligned 1-byte field)
+                # or a number/select with a hex command_template. A multi-bit
+                # bitfield number/select sub-field has no command_template, and
+                # a byte-aligned multi-byte switch would fail the memcpy size
+                # check; demote both (read-only) instead of making them
+                # writable-but-broken. A single-classification matched-pair
+                # entity is a full-payload writer (byte_size == 0); it keeps
+                # the plain .../write topic, so leave fw empty for it.
+                if e['byte_size'] > 0:
+                    if e['domain'] == 'switch':
+                        can_write = (e['bit_size'] == 1
+                                     or (e['bit_offset'] == 0 and e['byte_size'] == 1))
+                    else:
+                        can_write = bool(e['command_template'])
+                    if can_write:
+                        e['fw'] = (f"{e['byte_offset']}/{e['byte_size']}/"
+                                   f"{e['bit_offset']}/{e['bit_size']}")
+                        continue
+                    e['domain'] = 'binary_sensor' if e['domain'] == 'switch' else 'sensor'
+                    e['command_template'] = ''
+                    e['options_json'] = ''
+                    e['command_bytes'] = 0
+                    demoted.append(e)
+                    continue
+                continue
             safe = (target_ds is not None
                     and e['command_bytes'] == target_ds
                     and len(group) == 1
@@ -1393,7 +1493,9 @@ def _collect_ha_discovery_entries(erds: List[Dict]) -> List[Dict]:
                 payload_on: str = '', payload_off: str = '',
                 state_on: str = '', state_off: str = '',
                 min_val: float = 0.0, max_val: float = 0.0, step_val: float = 1.0,
-                command_bytes: int = 0, bit_start: Optional[int] = None) -> None:
+                command_bytes: int = 0, bit_start: Optional[int] = None,
+                byte_offset: int = 0, byte_size: int = 0,
+                bit_offset: int = 0, bit_size: int = 0) -> None:
         """Collect one entity.
 
         command_bytes is the number of bytes the entity's command renders
@@ -1436,6 +1538,10 @@ def _collect_ha_discovery_entries(erds: List[Dict]) -> List[Dict]:
             'step_val': step_val,
             'command_bytes': command_bytes,
             'bit_start': bit_start,
+            'byte_offset': byte_offset,
+            'byte_size': byte_size,
+            'bit_offset': bit_offset,
+            'bit_size': bit_size,
         })
 
     for erd in ha_erds:
@@ -1525,15 +1631,20 @@ def _collect_ha_discovery_entries(erds: List[Dict]) -> List[Dict]:
 # JSONL generation
 # ---------------------------------------------------------------------------
 
-def generate_ha_discovery_jsonl_by_category(erds: List[Dict]) -> Dict[str, str]:
+def generate_ha_discovery_jsonl_by_category(erds: List[Dict],
+                                            entries: Optional[List[Dict]] = None) -> Dict[str, str]:
     """Generate compact JSONL content grouped by appliance category.
 
     Returns a dict mapping category name -> JSONL string content.
     Each JSONL line is a compact JSON object with the pre-computed ha-discovery
     fields for one entity.  Fields that equal their default value are omitted to
     reduce file size.
+
+    entries may be passed in (already collected) to avoid re-running the
+    collection pass; when omitted it is computed from erds.
     """
-    entries = _collect_ha_discovery_entries(erds)
+    if entries is None:
+        entries = _collect_ha_discovery_entries(erds)
 
     categorized: Dict[str, list] = {cat: [] for cat in CATEGORIES}
     uncategorized = []
@@ -1598,6 +1709,7 @@ def generate_ha_discovery_jsonl_by_category(erds: List[Dict]) -> Dict[str, str]:
             if e['payload_off']:                  obj['poff'] = e['payload_off']
             if e['state_on']:                     obj['son'] = e['state_on']
             if e['state_off']:                    obj['soff'] = e['state_off']
+            if e.get('fw'):                       obj['fw'] = e['fw']
             lines.append(json.dumps(obj, ensure_ascii=False, separators=(',', ':')))
         result[cat] = '\n'.join(lines) + '\n'
 
@@ -1747,6 +1859,107 @@ def _build_erds_from_flat_list(flat_entries: List[Dict]) -> List[Dict]:
 
 
 # ---------------------------------------------------------------------------
+# RMW table generation
+# ---------------------------------------------------------------------------
+
+def _rmw_rows_from_entries(entries: List[Dict]) -> List[Tuple[int, int, int]]:
+    """Return (request_erd, base_erd, payload_size) rows for every entity the
+    demotion pass marked RMW-writable (i.e. that carries an fw field), sorted
+    by request_erd.
+
+    Only matched-pair request ERDs whose sub-fields were actually demoted get
+    an fw field, so this yields exactly the Phase 1 RMW targets — not every
+    layout-matched pair (many of which are single-field or already writable
+    and need no RMW). The base is the paired status ERD; the bridge reads it,
+    patches the target field, and writes the full payload to the request ERD.
+    """
+    rows: Dict[int, Tuple[int, int, int]] = {}
+    for e in entries:
+        if not e.get('fw'):
+            continue
+        # Mirror the demotion pass's target logic: a status-role entity's
+        # write target is its paired request ERD, so the row is keyed by the
+        # request ERD with the status ERD as the base.
+        request_erd = e['paired_erd_id'] if e['pair_role'] == 'status' else e['erd_id']
+        base_erd = e['erd_id'] if e['pair_role'] == 'status' else e['paired_erd_id']
+        rows[request_erd] = (request_erd, base_erd, e['data_size'])
+    return [rows[k] for k in sorted(rows)]
+
+
+def _rmw_table_header_content(rows: List[Tuple[int, int, int]]) -> str:
+    """Generate the rmw_table.h content (declaration)."""
+    lines = [
+        '// AUTO-GENERATED by scripts/ha_discovery/generators/generate_ha_discovery.py',
+        '// Do not edit by hand. Regenerate with:',
+        '//   python3 scripts/ha_discovery/run_pipeline.py',
+        '',
+        '#ifndef rmw_table_h',
+        '#define rmw_table_h',
+        '',
+        '#include <stdint.h>',
+        '#include "tiny_erd.h"',
+        '',
+        '#ifdef __cplusplus',
+        'extern "C" {',
+        '#endif',
+        '',
+        'typedef struct {',
+        '  tiny_erd_t request_erd;',
+        '  tiny_erd_t base_erd;',
+        '  uint8_t payload_size;',
+        '} rmw_erd_t;',
+        '',
+        'extern const rmw_erd_t rmw_erds[];',
+        'extern const uint16_t rmw_erd_count;',
+        '',
+        '#ifdef __cplusplus',
+        '}',
+        '#endif',
+        '',
+        '#endif',
+        '',
+    ]
+    return '\n'.join(lines)
+
+
+def _rmw_table_cpp_content(rows: List[Tuple[int, int, int]]) -> str:
+    """Generate the rmw_table.cpp content (definition)."""
+    lines = [
+        '// AUTO-GENERATED by scripts/ha_discovery/generators/generate_ha_discovery.py',
+        '// Do not edit by hand. Regenerate with:',
+        '//   python3 scripts/ha_discovery/run_pipeline.py',
+        '',
+        '#include "rmw_table.h"',
+        '',
+        'const rmw_erd_t rmw_erds[] = {',
+    ]
+    for request_erd, base_erd, payload_size in rows:
+        lines.append(f'  {{ 0x{request_erd:04x}, 0x{base_erd:04x}, {payload_size} }},')
+    lines += [
+        '};',
+        '',
+        f'const uint16_t rmw_erd_count = {len(rows)};',
+        '',
+    ]
+    return '\n'.join(lines)
+
+
+def generate_rmw_table(entries: List[Dict], output_dir: Path) -> int:
+    """Generate the RMW table C header and source in output_dir.
+
+    Returns the number of RMW rows.
+    """
+    rows = _rmw_rows_from_entries(entries)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with open(output_dir / 'rmw_table.h', 'w') as f:
+        f.write(_rmw_table_header_content(rows))
+    with open(output_dir / 'rmw_table.cpp', 'w') as f:
+        f.write(_rmw_table_cpp_content(rows))
+    print(f"  RMW table: {len(rows)} matched pairs -> rmw_table.h/.cpp", file=sys.stderr)
+    return len(rows)
+
+
+# ---------------------------------------------------------------------------
 # File discovery and main
 # ---------------------------------------------------------------------------
 def main():
@@ -1804,8 +2017,12 @@ def main():
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Collect entries once; shared by the JSONL writer and the RMW table so
+    # the demotion pass (which marks RMW-writable entities) runs a single time.
+    entries = _collect_ha_discovery_entries(erds)
+
     # Generate JSONL by category
-    jsonl_by_cat = generate_ha_discovery_jsonl_by_category(erds)
+    jsonl_by_cat = generate_ha_discovery_jsonl_by_category(erds, entries)
     total_entries = 0
     for cat, content in jsonl_by_cat.items():
         outfile = output_dir / f'{cat}.jsonl'
@@ -1814,6 +2031,10 @@ def main():
         n = content.count('\n')
         total_entries += n
         print(f"  {cat}: {n} entities -> {cat}.jsonl ({len(content):,} bytes)", file=sys.stderr)
+
+    # Generate the RMW table (matched-pair request ERDs) for the write bridge.
+    components_dir = script_dir.parent.parent.parent / 'components' / 'geappliances_bridge'
+    generate_rmw_table(entries, components_dir)
 
     print(f"\nTotal entities generated: {total_entries}", file=sys.stderr)
     print(f"Output directory: {output_dir}", file=sys.stderr)

@@ -80,6 +80,7 @@ TEST_GROUP(write_flow_integration)
       &timer_group.timer_group,
       &erd_client.interface,
       &adapter.interface,
+      nullptr,
       host_address);
 
     esphome_mqtt_client_adapter_subscribe_write_topic(&adapter);
@@ -91,6 +92,35 @@ TEST_GROUP(write_flow_integration)
   {
     char topic[128];
     snprintf(topic, sizeof(topic), "geappliances/test_device/erd/0x%04x/write", erd);
+    mqtt_double.simulate_message(topic, payload);
+  }
+
+  void init_all_with_cache(uint8_t host_address)
+  {
+    mock().disable();
+
+    esphome_mqtt_client_adapter_init(&adapter, "test_device");
+    esphome_mqtt_client_adapter_set_erd_registry(&adapter, &erd_registry);
+
+    erd_write_bridge_init(
+      &write_bridge,
+      &timer_group.timer_group,
+      &erd_client.interface,
+      &adapter.interface,
+      &test_cache,
+      host_address);
+
+    esphome_mqtt_client_adapter_subscribe_write_topic(&adapter);
+
+    mock().enable();
+  }
+
+  void when_home_assistant_publishes_field_write(tiny_erd_t erd, const std::string& payload,
+    const std::string& field_suffix)
+  {
+    char topic[160];
+    snprintf(topic, sizeof(topic), "geappliances/test_device/erd/0x%04x/write/%s",
+      erd, field_suffix.c_str());
     mqtt_double.simulate_message(topic, payload);
   }
 };
@@ -276,4 +306,124 @@ TEST(write_flow_integration, should_route_secondary_board_write_to_secondary_add
     .withParameter("retain", true);
 
   tiny_gea3_erd_client_double_trigger_activity_event(&erd_client, &args);
+}
+
+// --- Field-write topic parsing (adapter -> write bridge RMW) ---
+// Uses the generated RMW table's 0x7051 -> 0x7053 (1-byte) matched pair.
+
+TEST(write_flow_integration, should_parse_field_write_topic_and_rmw)
+{
+  uint8_t host = 0xC0;
+  init_all_with_cache(host);
+
+  // Cache the base (0x7053) with a known value.
+  uint8_t base = 0x00;
+  erd_cache_update(&test_cache, 0x7053, host, &base, sizeof(base));
+
+  tiny_gea3_erd_client_request_id_t mock_request_id{1};
+  // Field: byte 0, bit 2, 1 bit. Value 0x01 (set) -> 0x00 | (1<<2) = 0x04.
+  uint8_t expected = 0x04;
+  mock()
+    .expectOneCall("write")
+    .onObject(&erd_client)
+    .withParameter("address", host)
+    .withParameter("erd", 0x7051)
+    .withMemoryBufferParameter("data", &expected, 1)
+    .withOutputParameterReturning("request_id", &mock_request_id, sizeof(mock_request_id))
+    .andReturnValue(true);
+
+  when_home_assistant_publishes_field_write(0x7051, "01", "0/1/2/1");
+}
+
+TEST(write_flow_integration, should_parse_full_write_topic_unchanged)
+{
+  uint8_t host = 0xC0;
+  init_all_with_cache(host);
+
+  uint8_t value = 0x42;
+  tiny_gea3_erd_client_request_id_t mock_request_id{1};
+  mock()
+    .expectOneCall("write")
+    .onObject(&erd_client)
+    .withParameter("address", host)
+    .withParameter("erd", 0x7701)
+    .withMemoryBufferParameter("data", &value, 1)
+    .withOutputParameterReturning("request_id", &mock_request_id, sizeof(mock_request_id))
+    .andReturnValue(true);
+
+  // A full-write topic (no field suffix) is forwarded verbatim.
+  when_home_assistant_publishes_write(0x7701, "42");
+}
+
+TEST(write_flow_integration, should_drop_malformed_field_write_topic)
+{
+  uint8_t host = 0xC0;
+  init_all_with_cache(host);
+
+  // Cache the base so that IF the adapter failed to drop the topic, the write
+  // bridge would proceed and call erd_client.write() — an unexpected mock call
+  // that fails the test. With the adapter correct, no write is queued.
+  uint8_t base = 0x00;
+  erd_cache_update(&test_cache, 0x7053, host, &base, sizeof(base));
+
+  // Three segments (not four) -> malformed, dropped. No write, no result.
+  mqtt_double.simulate_message(
+    "geappliances/test_device/erd/0x7051/write/0/1/2", "01");
+}
+
+TEST(write_flow_integration, should_drop_out_of_range_field_write_topic)
+{
+  uint8_t host = 0xC0;
+  init_all_with_cache(host);
+
+  // Cache the base so a regression that lets the topic through would queue a
+  // write (unexpected mock call -> test failure).
+  uint8_t base = 0x00;
+  erd_cache_update(&test_cache, 0x7053, host, &base, sizeof(base));
+
+  // byte_offset (300) exceeds the max payload size -> dropped by the adapter.
+  mqtt_double.simulate_message(
+    "geappliances/test_device/erd/0x7051/write/300/1/0/8", "01");
+}
+
+TEST(write_flow_integration, should_drop_overflow_field_write_topic)
+{
+  uint8_t host = 0xC0;
+  init_all_with_cache(host);
+
+  // Cache the base so a regression that lets the topic through would queue a
+  // write (unexpected mock call -> test failure).
+  uint8_t base = 0x00;
+  erd_cache_update(&test_cache, 0x7053, host, &base, sizeof(base));
+
+  // byte_offset huge enough to overflow the int range check (sscanf clamps to
+  // INT_MAX; off + size wraps negative). Must be dropped, not written OOB.
+  mqtt_double.simulate_message(
+    "geappliances/test_device/erd/0x7051/write/99999999999999/1/0/8", "01");
+}
+
+TEST(write_flow_integration, should_parse_secondary_board_field_write)
+{
+  uint8_t host = 0xC0;
+  uint8_t secondary = 0xA1;
+  init_all_with_cache(host);
+
+  // Cache the base on the secondary board.
+  uint8_t base = 0x00;
+  erd_cache_update(&test_cache, 0x7053, secondary, &base, sizeof(base));
+
+  tiny_gea3_erd_client_request_id_t mock_request_id{1};
+  uint8_t expected = 0x04;
+  mock()
+    .expectOneCall("write")
+    .onObject(&erd_client)
+    .withParameter("address", secondary)
+    .withParameter("erd", 0x7051)
+    .withMemoryBufferParameter("data", &expected, 1)
+    .withOutputParameterReturning("request_id", &mock_request_id, sizeof(mock_request_id))
+    .andReturnValue(true);
+
+  char topic[160];
+  snprintf(topic, sizeof(topic), "geappliances/test_device/erd/0x%02x_0x7051/write/0/1/2/1", secondary);
+  mqtt_double.simulate_message(topic, "01");
 }

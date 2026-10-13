@@ -35,6 +35,20 @@ void mqtt_client_double_trigger_write_request(
   const void* value);
 
 /*!
+ * Trigger a field-level read-modify-write via the on_write_request event.
+ */
+void mqtt_client_double_trigger_field_write_request(
+  mqtt_client_double_t* self,
+  tiny_erd_t erd,
+  uint8_t board_address,
+  uint8_t size,
+  const void* value,
+  uint16_t byte_offset,
+  uint8_t byte_size,
+  uint8_t bit_offset,
+  uint8_t bit_size);
+
+/*!
  * Trigger publication via the on_mqtt_disconnect event.
  */
 void mqtt_client_double_trigger_mqtt_disconnect(

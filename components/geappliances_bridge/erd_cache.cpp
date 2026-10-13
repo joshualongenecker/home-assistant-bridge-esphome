@@ -255,6 +255,23 @@ bool erd_cache_snapshot_next_updated(erd_cache_t* self, uint16_t* iterator,
   return true;
 }
 
+bool erd_cache_snapshot_entry(erd_cache_t* self, tiny_erd_t erd, uint8_t board_address,
+                              uint8_t* data_out, uint8_t* size_out)
+{
+  erd_cache_lock(self);
+  erd_cache_entry_t* entry = erd_cache_find(self, erd, board_address);
+  if (entry == NULL) {
+    erd_cache_unlock(self);
+    return false;
+  }
+  if (data_out != NULL) {
+    memcpy(data_out, &self->arena[entry->data_offset], entry->data_size);
+  }
+  if (size_out != NULL) *size_out = entry->data_size;
+  erd_cache_unlock(self);
+  return true;
+}
+
 uint16_t erd_cache_get_count(erd_cache_t* self)
 {
   erd_cache_lock(self);

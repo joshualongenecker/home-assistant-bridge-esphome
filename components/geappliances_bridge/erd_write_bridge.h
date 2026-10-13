@@ -4,6 +4,8 @@
 
 #include "i_mqtt_client.h"
 #include "i_tiny_gea3_erd_client.h"
+#include "erd_cache.h"
+#include "rmw_table.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,6 +19,9 @@ typedef struct {
   tiny_timer_group_t* timer_group;
   i_tiny_gea3_erd_client_t* erd_client;
   i_mqtt_client_t* mqtt_client;
+  /* Shared ERD cache used to snapshot the RMW base (the paired status ERD)
+   * before patching a field. NULL disables field writes (full writes only). */
+  erd_cache_t* cache;
   uint8_t erd_host_address;
   tiny_hsm_t hsm;
   tiny_event_subscription_t mqtt_write_request_subscription;
@@ -34,6 +39,7 @@ void erd_write_bridge_init(
   tiny_timer_group_t* timer_group,
   i_tiny_gea3_erd_client_t* erd_client,
   i_mqtt_client_t* mqtt_client,
+  erd_cache_t* cache,
   uint8_t host_address);
 
 void erd_write_bridge_destroy(

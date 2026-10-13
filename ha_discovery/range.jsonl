@@ -58,10 +58,10 @@
 {"i":"5022","n":"Mis-use Push Notifications - Probe Installed During Broil Cavity 2","d":"binary_sensor","ds":6,"vt":"{{ '01' if ((value[0:12] | int(base=16)) // 16777216) % 2 else '00' }}","fi":"probe_installed_during_broil_cavity_2","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"5022","n":"Mis-use Push Notifications - Door Open During Bake Cavity 2","d":"binary_sensor","ds":6,"vt":"{{ '01' if ((value[0:12] | int(base=16)) // 33554432) % 2 else '00' }}","fi":"door_open_during_bake_cavity_2","pon":"01","poff":"00","son":"01","soff":"00"}
 {"i":"5022","n":"Mis-use Push Notifications - Door Open During Bake and Elements Deactivated Cavity 2","d":"binary_sensor","ds":6,"vt":"{{ '01' if ((value[0:12] | int(base=16)) // 67108864) % 2 else '00' }}","fi":"door_open_during_bake_and_elements_deactivated_cavity_2","pon":"01","poff":"00","son":"01","soff":"00"}
-{"i":"5023","n":"Accent Lighting - Custom Color Active","d":"binary_sensor","ds":12,"p":"5024","r":"request","vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00"}
-{"i":"5023","n":"Accent Lighting - Brightness","d":"sensor","ds":12,"p":"5024","r":"request","vt":"{{ value[2:4] | int(base=16) }}","fi":"brightness"}
-{"i":"5023","n":"Accent Lighting - Temperature","d":"sensor","ds":12,"u":"°F","dc":"temperature","p":"5024","r":"request","vt":"{{ value[4:8] | int(base=16) }}","fi":"temperature"}
-{"i":"5023","n":"Accent Lighting - Custom Color Code","d":"sensor","ds":12,"p":"5024","r":"request","vt":"{{ value[8:16] | int(base=16) }}","fi":"custom_color_code"}
+{"i":"5023","n":"Accent Lighting - Custom Color Active","d":"switch","ds":12,"p":"5024","r":"request","vt":"{{ value[0:2] }}","pon":"01","poff":"00","son":"01","soff":"00","fw":"0/1/0/8"}
+{"i":"5023","n":"Accent Lighting - Brightness","d":"number","ds":12,"mn":0.0,"mx":255.0,"st":1.0,"p":"5024","r":"request","vt":"{{ value[2:4] | int(base=16) }}","ct":"{{ '%02x' % (value | int) }}","fi":"brightness","fw":"1/1/0/8"}
+{"i":"5023","n":"Accent Lighting - Temperature","d":"number","ds":12,"u":"°F","dc":"temperature","mn":0.0,"mx":65535.0,"st":1.0,"p":"5024","r":"request","vt":"{{ value[4:8] | int(base=16) }}","ct":"{{ '%04x' % (value | int) }}","fi":"temperature","fw":"2/2/0/16"}
+{"i":"5023","n":"Accent Lighting - Custom Color Code","d":"number","ds":12,"mn":0.0,"mx":4294967295.0,"st":1.0,"p":"5024","r":"request","vt":"{{ value[8:16] | int(base=16) }}","ct":"{{ '%08x' % (value | int) }}","fi":"custom_color_code","fw":"4/4/0/32"}
 {"i":"5025","n":"Accent Lighting Supported Settings - Brightness Min","d":"sensor","ds":16,"vt":"{{ value[0:2] | int(base=16) }}"}
 {"i":"5025","n":"Accent Lighting Supported Settings - Brightness Max","d":"sensor","ds":16,"vt":"{{ value[2:4] | int(base=16) }}","fi":"brightness_max"}
 {"i":"5025","n":"Accent Lighting Supported Settings - Color Temperature Min","d":"sensor","ds":16,"u":"°F","vt":"{{ value[4:8] | int(base=16) }}","fi":"color_temperature_min"}

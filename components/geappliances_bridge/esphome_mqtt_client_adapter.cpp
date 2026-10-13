@@ -142,7 +142,10 @@ extern "C" void esphome_mqtt_client_adapter_subscribe_write_topic(
   if (mqtt_client == nullptr) return;
 
   char topic[128];
-  snprintf(topic, sizeof(topic), "geappliances/%s/erd/+/write",
+  /* "#" matches zero or more trailing levels, so this single filter catches
+   * both the full-write topic (…/write) and the field-write topic
+   * (…/write/{off}/{size}/{bitoff}/{bitsize}). */
+  snprintf(topic, sizeof(topic), "geappliances/%s/erd/+/write/#",
           self->device_id);
   strncpy(self->write_topic_, topic, sizeof(self->write_topic_) - 1);
   self->write_topic_[sizeof(self->write_topic_) - 1] = '\0';
@@ -173,6 +176,43 @@ extern "C" void esphome_mqtt_client_adapter_subscribe_write_topic(
       if (sscanf(segment, "%x", &erd) != 1) return;
     }
 
+    // After the ERD segment comes "/write" (full write) or
+    // "/write/{off}/{size}/{bitoff}/{bitsize}" (field write). Any other
+    // trailing shape is malformed and dropped. The four field segments are
+    // decimal; the geometry is validated so an out-of-range field can never
+    // reach the write bridge.
+    bool is_field_write = false;
+    uint16_t byte_offset = 0;
+    uint8_t byte_size = 0;
+    uint8_t bit_offset = 0;
+    uint8_t bit_size = 0;
+    const char* slash = strchr(segment, '/');
+    if (slash == nullptr || strncmp(slash, "/write", 6) != 0) return;
+    const char* after_write = slash + 6;
+    if (after_write[0] != '\0') {
+      int slashes = 0;
+      for (const char* q = after_write; *q; q++) {
+        if (*q == '/') slashes++;
+      }
+      if (slashes != 4) return;
+      int off = 0, size = 0, bitoff = 0, bitsize = 0;
+      if (sscanf(after_write, "/%d/%d/%d/%d", &off, &size, &bitoff, &bitsize) != 4) return;
+      // Validate each segment against its own bound BEFORE any arithmetic so a
+      // huge value (sscanf clamps %d to INT_MAX) can't overflow the range
+      // checks below and slip an out-of-bounds offset into the write bridge.
+      if (off < 0 || off > ERD_CACHE_MAX_DATA_SIZE) return;
+      if (size <= 0 || size > ERD_CACHE_MAX_DATA_SIZE) return;
+      if (bitoff < 0 || bitoff > 7) return;
+      if (bitsize <= 0 || bitsize > 255) return; // bit_size is stored in a uint8_t
+      if (off + size > ERD_CACHE_MAX_DATA_SIZE) return;
+      if (bitoff + bitsize > size * 8) return;
+      is_field_write = true;
+      byte_offset = static_cast<uint16_t>(off);
+      byte_size = static_cast<uint8_t>(size);
+      bit_offset = static_cast<uint8_t>(bitoff);
+      bit_size = static_cast<uint8_t>(bitsize);
+    }
+
     // Decode hex payload to a local stack buffer to avoid race condition:
     // if a new MQTT message arrives before tiny_event_publish() delivers
     // this one, the local buffer is already consumed by the event handler.
@@ -193,6 +233,11 @@ extern "C" void esphome_mqtt_client_adapter_subscribe_write_topic(
     args.board_address = board_address;
     args.size = local_size;
     args.value = local_buffer;
+    args.is_field_write = is_field_write;
+    args.byte_offset = byte_offset;
+    args.byte_size = byte_size;
+    args.bit_offset = bit_offset;
+    args.bit_size = bit_size;
 
     // tiny_event_publish() is synchronous (subscriber callback runs to
     // completion before return), so the stack buffer is valid for the
