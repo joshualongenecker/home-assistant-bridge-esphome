@@ -135,3 +135,5 @@ docs/                              # Documentation
 ## Contributing
 
 See [CONTRIBUTING.md](../../CONTRIBUTING.md) for the PR process and code style.
+
+For the full feature lifecycle (triage → spec → implement → review → device verify → PR), see [Software Factory](../factory.md).

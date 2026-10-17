@@ -1,5 +1,9 @@
 # Contributing
 
+## Software Factory
+
+Features and bugs flow through a staged lifecycle: issue → triage → grill → spec → tickets → implement → review → device verify → PR. See [docs/factory.md](./docs/factory.md) for the full lifecycle and [skills/](./skills/) for the stage skills.
+
 ## Development Workflow
 
 ### Prerequisites

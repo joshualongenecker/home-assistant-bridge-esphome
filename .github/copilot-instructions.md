@@ -124,3 +124,13 @@ The regular `test` target runs 440 unit tests on CI (the full 537-test suite min
 
 - **Generated files must not be hand-edited.**
   `erd_lists.{h,cpp}`, `appliance_api_feature_lists.{h,cpp}`, `appliance_type_map.h`, `ha_discovery_data.{h,cpp}`, `ha_discovery/*.jsonl`, and `appliance_api_erd_definitions_processed.json` are produced by `scripts/generate_erd_lists.py` and `scripts/ha_discovery/run_pipeline.py`. CI enforces this via `scripts/check_generated_sync.sh` (run `make check-generated` locally).
+
+## Software Factory
+
+Features and bugs flow through a staged lifecycle: issue → triage → grill → spec → tickets → implement → review (five sub-agent axes) → device verify → PR. The lifecycle source of truth is `docs/factory.md`; the stage skills are in `skills/` (`grilling`, `grill-with-docs`, `triage`, `to-spec`, `to-tickets`, `implement`, `code-review`, `tdd`, `diagnosing-bugs`, `pr`, `domain-modeling`, `factory`).
+
+- When working a factory stage, read and follow `skills/<stage>/SKILL.md` — the skills are agent-agnostic markdown; Copilot follows them directly from the files.
+- Use the terminology from `docs/GLOSSARY.md` in all code, specs, issues, and PRs. When code and glossary disagree, the code wins — fix the glossary.
+- Record hard-to-reverse decisions as ADRs in `docs/adr/` (see `docs/adr/README.md` for when to write one).
+- Firmware-facing changes (diff touches `components/` or `lib/`) require test-bench device verification before the PR; the loop is in the `device-verify` skill (workstation-local).
+- The agent never merges PRs and never answers its own design decisions — decisions go to the user.
