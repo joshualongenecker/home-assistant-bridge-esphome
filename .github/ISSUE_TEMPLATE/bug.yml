@@ -1,0 +1,44 @@
+name: Bug report
+description: Something isn't working as specified
+title: "[bug] "
+labels: [bug, needs-triage]
+body:
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: The observed behavior. Quote the spec or ADR it violates, if you know one.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Steps to reproduce, or the appliance type/model and ERD(s) involved. Include MQTT topics and payloads if relevant.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / evidence
+      description: Bridge log excerpt (logger level DEBUG), MQTT capture, or HA entity state showing the failure.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - ha-discovery
+        - erd-cache
+        - mqtt
+        - write-path
+        - startup
+        - pipeline
+        - ci
+        - docs
+        - other
+    validations:
+      required: true

@@ -100,3 +100,12 @@ Detailed behavioral contracts for each module. Each spec covers purpose, interfa
 |---|---|
 | [Style Guide](./style-guide.md) | Formatting conventions, spec template, review checklist |
 | [Review Checklist](./review-checklist.md) | Pre-commit quality checklist |
+
+## Process
+How work moves through the repo, the shared vocabulary, and the decisions behind it.
+
+| Document | Description |
+|---|---|
+| [Software Factory](./factory.md) | Feature/bug lifecycle: triage → grill → spec → tickets → implement → review → device verify → PR |
+| [Glossary](./GLOSSARY.md) | Shared language: protocol, data path, discovery, and factory terms |
+| [Architecture Decision Records](./adr/) | Hard-to-reverse decisions: context, decision, consequences |
