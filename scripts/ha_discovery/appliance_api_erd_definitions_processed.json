@@ -106535,7 +106535,7 @@
     "field_values": {
       "0": "FanSpeed_Off",
       "1": "FanSpeed_SuperLow",
-      "2": "FanSpeed_On",
+      "2": "FanSpeed_Low",
       "3": "FanSpeed_Medium",
       "4": "FanSpeed_High",
       "5": "FanSpeed_SuperHigh",
@@ -264614,7 +264614,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -265511,7 +265511,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -266408,7 +266408,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -267305,7 +267305,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -268202,7 +268202,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -269099,7 +269099,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -269996,7 +269996,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -270893,7 +270893,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -271790,7 +271790,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -272687,7 +272687,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -284274,7 +284274,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -285081,7 +285081,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -285888,7 +285888,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -286695,7 +286695,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -287502,7 +287502,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -288309,7 +288309,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -289116,7 +289116,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -289923,7 +289923,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -290730,7 +290730,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -291537,7 +291537,7 @@
       "46": "CycleNames_Heavy_Duty_Dry",
       "47": "CycleNames_Everyday_Dry_On",
       "48": "CycleNames_Everyday_Dry_Off",
-      "49": "CycleNames_45_Minute_Wash"
+      "49": "CycleNames_45_Min_Express"
     },
     "field_bits": null,
     "review": {
@@ -523172,7 +523172,7 @@
   {
     "erd_id": "0x7458",
     "erd_name": "Constant Fan Status",
-    "erd_description": "The device will publish the Constant Fan Status",
+    "erd_description": "This read-only status reports the current constant fan configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7459 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -523216,7 +523216,7 @@
   {
     "erd_id": "0x7458",
     "erd_name": "Constant Fan Status",
-    "erd_description": "The device will publish the Constant Fan Status",
+    "erd_description": "This read-only status reports the current constant fan configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7459 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -523258,7 +523258,7 @@
   {
     "erd_id": "0x7458",
     "erd_name": "Constant Fan Status",
-    "erd_description": "The device will publish the Constant Fan Status",
+    "erd_description": "This read-only status reports the current constant fan configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7459 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -523300,7 +523300,7 @@
   {
     "erd_id": "0x7458",
     "erd_name": "Constant Fan Status",
-    "erd_description": "The device will publish the Constant Fan Status",
+    "erd_description": "This read-only status reports the current constant fan configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7459 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -523342,7 +523342,7 @@
   {
     "erd_id": "0x7458",
     "erd_name": "Constant Fan Status",
-    "erd_description": "The device will publish the Constant Fan Status",
+    "erd_description": "This read-only status reports the current constant fan configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7459 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -523384,7 +523384,7 @@
   {
     "erd_id": "0x7458",
     "erd_name": "Constant Fan Status",
-    "erd_description": "The device will publish the Constant Fan Status",
+    "erd_description": "This read-only status reports the current constant fan configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7459 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -523426,7 +523426,7 @@
   {
     "erd_id": "0x7458",
     "erd_name": "Constant Fan Status",
-    "erd_description": "The device will publish the Constant Fan Status",
+    "erd_description": "This read-only status reports the current constant fan configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7459 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -523468,7 +523468,7 @@
   {
     "erd_id": "0x7458",
     "erd_name": "Constant Fan Status",
-    "erd_description": "The device will publish the Constant Fan Status",
+    "erd_description": "This read-only status reports the current constant fan configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7459 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -523510,7 +523510,7 @@
   {
     "erd_id": "0x7459",
     "erd_name": "Constant Fan Request",
-    "erd_description": "The client will request a change to the Constant Fan status",
+    "erd_description": "This read/write request lets clients remotely change the constant fan configuration.\n\nInvalid requests, as defined by the Allowed Selections bitmap in status ERD 0x7458, are rejected.\n\nConfirm the outcome from status ERD 0x7458, not by reading back this request.\nRequest Consumed (255) is a consumed-request marker, not a selectable configuration.",
     "erd_operations": [
       "read",
       "write",
@@ -526789,7 +526789,7 @@
   {
     "erd_id": "0x746e",
     "erd_name": "Heat Pump Lockout Temperature Status",
-    "erd_description": "The device will publish the current Heat Pump Lockout Temperature and the limits for this value",
+    "erd_description": "This read-only status reports the current heat pump lockout temperature and the unit's allowed minimum and maximum temperatures.\n\nClients write requested changes to request ERD 0x746F and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -526824,7 +526824,7 @@
   {
     "erd_id": "0x746e",
     "erd_name": "Heat Pump Lockout Temperature Status",
-    "erd_description": "The device will publish the current Heat Pump Lockout Temperature and the limits for this value",
+    "erd_description": "This read-only status reports the current heat pump lockout temperature and the unit's allowed minimum and maximum temperatures.\n\nClients write requested changes to request ERD 0x746F and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -526859,7 +526859,7 @@
   {
     "erd_id": "0x746e",
     "erd_name": "Heat Pump Lockout Temperature Status",
-    "erd_description": "The device will publish the current Heat Pump Lockout Temperature and the limits for this value",
+    "erd_description": "This read-only status reports the current heat pump lockout temperature and the unit's allowed minimum and maximum temperatures.\n\nClients write requested changes to request ERD 0x746F and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -526894,7 +526894,7 @@
   {
     "erd_id": "0x746f",
     "erd_name": "Heat Pump Lockout Temperature Request",
-    "erd_description": "The device will publish the current Heat Pump Lockout Temperature and the limits for this value",
+    "erd_description": "This read/write request lets clients remotely change the heat pump lockout temperature.\n\nRequests outside the minimum and maximum temperatures reported by status ERD 0x746E are rejected.\n\nConfirm the outcome from status ERD 0x746E, not by reading back this request.",
     "erd_operations": [
       "read",
       "write",
@@ -526929,7 +526929,7 @@
   {
     "erd_id": "0x7470",
     "erd_name": "Input Current Limiting Status",
-    "erd_description": "The device will publish the Input Current Limiting feature status.",
+    "erd_description": "This read-only status reports the configured and resolved input current limits and the unit's allowed minimum, maximum, and step size.\nResolved Input Current Limiting Status can differ from User Set Input Current Limiting Status.\n\nClients write requested changes to request ERD 0x7471 and confirm the resulting configuration from User Set Input Current Limiting Status.",
     "erd_operations": [
       "read",
       "publish",
@@ -526968,7 +526968,7 @@
   {
     "erd_id": "0x7470",
     "erd_name": "Input Current Limiting Status",
-    "erd_description": "The device will publish the Input Current Limiting feature status.",
+    "erd_description": "This read-only status reports the configured and resolved input current limits and the unit's allowed minimum, maximum, and step size.\nResolved Input Current Limiting Status can differ from User Set Input Current Limiting Status.\n\nClients write requested changes to request ERD 0x7471 and confirm the resulting configuration from User Set Input Current Limiting Status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527007,7 +527007,7 @@
   {
     "erd_id": "0x7470",
     "erd_name": "Input Current Limiting Status",
-    "erd_description": "The device will publish the Input Current Limiting feature status.",
+    "erd_description": "This read-only status reports the configured and resolved input current limits and the unit's allowed minimum, maximum, and step size.\nResolved Input Current Limiting Status can differ from User Set Input Current Limiting Status.\n\nClients write requested changes to request ERD 0x7471 and confirm the resulting configuration from User Set Input Current Limiting Status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527047,7 +527047,7 @@
   {
     "erd_id": "0x7470",
     "erd_name": "Input Current Limiting Status",
-    "erd_description": "The device will publish the Input Current Limiting feature status.",
+    "erd_description": "This read-only status reports the configured and resolved input current limits and the unit's allowed minimum, maximum, and step size.\nResolved Input Current Limiting Status can differ from User Set Input Current Limiting Status.\n\nClients write requested changes to request ERD 0x7471 and confirm the resulting configuration from User Set Input Current Limiting Status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527087,7 +527087,7 @@
   {
     "erd_id": "0x7470",
     "erd_name": "Input Current Limiting Status",
-    "erd_description": "The device will publish the Input Current Limiting feature status.",
+    "erd_description": "This read-only status reports the configured and resolved input current limits and the unit's allowed minimum, maximum, and step size.\nResolved Input Current Limiting Status can differ from User Set Input Current Limiting Status.\n\nClients write requested changes to request ERD 0x7471 and confirm the resulting configuration from User Set Input Current Limiting Status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527127,7 +527127,7 @@
   {
     "erd_id": "0x7470",
     "erd_name": "Input Current Limiting Status",
-    "erd_description": "The device will publish the Input Current Limiting feature status.",
+    "erd_description": "This read-only status reports the configured and resolved input current limits and the unit's allowed minimum, maximum, and step size.\nResolved Input Current Limiting Status can differ from User Set Input Current Limiting Status.\n\nClients write requested changes to request ERD 0x7471 and confirm the resulting configuration from User Set Input Current Limiting Status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527166,7 +527166,7 @@
   {
     "erd_id": "0x7471",
     "erd_name": "Input Current Limiting Request",
-    "erd_description": "The client will request a change to the Input Current Limiting status.",
+    "erd_description": "This read/write request lets clients remotely change the configured input current limit.\n\nInvalid requests, as defined by the minimum, maximum, and step size in status ERD 0x7470, are rejected.\n\nConfirm the outcome from User Set Input Current Limiting Status in ERD 0x7470, not by reading back this request.",
     "erd_operations": [
       "read",
       "write",
@@ -527206,7 +527206,7 @@
   {
     "erd_id": "0x7472",
     "erd_name": "Heat Source Optimization Status",
-    "erd_description": "The device will publish the Heat Source Optimization feature status.",
+    "erd_description": "This read-only status reports the current heat source optimization configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7473 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527248,7 +527248,7 @@
   {
     "erd_id": "0x7472",
     "erd_name": "Heat Source Optimization Status",
-    "erd_description": "The device will publish the Heat Source Optimization feature status.",
+    "erd_description": "This read-only status reports the current heat source optimization configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7473 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527290,7 +527290,7 @@
   {
     "erd_id": "0x7472",
     "erd_name": "Heat Source Optimization Status",
-    "erd_description": "The device will publish the Heat Source Optimization feature status.",
+    "erd_description": "This read-only status reports the current heat source optimization configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7473 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527332,7 +527332,7 @@
   {
     "erd_id": "0x7472",
     "erd_name": "Heat Source Optimization Status",
-    "erd_description": "The device will publish the Heat Source Optimization feature status.",
+    "erd_description": "This read-only status reports the current heat source optimization configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7473 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527374,7 +527374,7 @@
   {
     "erd_id": "0x7472",
     "erd_name": "Heat Source Optimization Status",
-    "erd_description": "The device will publish the Heat Source Optimization feature status.",
+    "erd_description": "This read-only status reports the current heat source optimization configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7473 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527416,7 +527416,7 @@
   {
     "erd_id": "0x7472",
     "erd_name": "Heat Source Optimization Status",
-    "erd_description": "The device will publish the Heat Source Optimization feature status.",
+    "erd_description": "This read-only status reports the current heat source optimization configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7473 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527458,7 +527458,7 @@
   {
     "erd_id": "0x7472",
     "erd_name": "Heat Source Optimization Status",
-    "erd_description": "The device will publish the Heat Source Optimization feature status.",
+    "erd_description": "This read-only status reports the current heat source optimization configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7473 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527500,7 +527500,7 @@
   {
     "erd_id": "0x7473",
     "erd_name": "Heat Source Optimization Request",
-    "erd_description": "The client will request a change to the Heat Source Optimization status.",
+    "erd_description": "This read/write request lets clients remotely change the heat source optimization configuration.\n\nInvalid requests, as defined by the Allowed Selections bitmap in status ERD 0x7472, are rejected.\n\nConfirm the outcome from status ERD 0x7472, not by reading back this request.\nRequest Consumed (255) is a consumed-request marker, not a selectable configuration.",
     "erd_operations": [
       "read",
       "write",
@@ -527544,7 +527544,7 @@
   {
     "erd_id": "0x7474",
     "erd_name": "24V Auxiliary Output Mode Status",
-    "erd_description": "The device will publish the 24V Auxiliary Output Mode feature status.",
+    "erd_description": "This read-only status reports the current 24V auxiliary output mode and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7475 and confirm the resulting mode from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527587,7 +527587,7 @@
   {
     "erd_id": "0x7474",
     "erd_name": "24V Auxiliary Output Mode Status",
-    "erd_description": "The device will publish the 24V Auxiliary Output Mode feature status.",
+    "erd_description": "This read-only status reports the current 24V auxiliary output mode and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7475 and confirm the resulting mode from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527629,7 +527629,7 @@
   {
     "erd_id": "0x7474",
     "erd_name": "24V Auxiliary Output Mode Status",
-    "erd_description": "The device will publish the 24V Auxiliary Output Mode feature status.",
+    "erd_description": "This read-only status reports the current 24V auxiliary output mode and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7475 and confirm the resulting mode from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527671,7 +527671,7 @@
   {
     "erd_id": "0x7474",
     "erd_name": "24V Auxiliary Output Mode Status",
-    "erd_description": "The device will publish the 24V Auxiliary Output Mode feature status.",
+    "erd_description": "This read-only status reports the current 24V auxiliary output mode and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7475 and confirm the resulting mode from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527713,7 +527713,7 @@
   {
     "erd_id": "0x7474",
     "erd_name": "24V Auxiliary Output Mode Status",
-    "erd_description": "The device will publish the 24V Auxiliary Output Mode feature status.",
+    "erd_description": "This read-only status reports the current 24V auxiliary output mode and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7475 and confirm the resulting mode from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527755,7 +527755,7 @@
   {
     "erd_id": "0x7474",
     "erd_name": "24V Auxiliary Output Mode Status",
-    "erd_description": "The device will publish the 24V Auxiliary Output Mode feature status.",
+    "erd_description": "This read-only status reports the current 24V auxiliary output mode and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7475 and confirm the resulting mode from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527797,7 +527797,7 @@
   {
     "erd_id": "0x7474",
     "erd_name": "24V Auxiliary Output Mode Status",
-    "erd_description": "The device will publish the 24V Auxiliary Output Mode feature status.",
+    "erd_description": "This read-only status reports the current 24V auxiliary output mode and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7475 and confirm the resulting mode from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527839,7 +527839,7 @@
   {
     "erd_id": "0x7475",
     "erd_name": "24V Auxiliary Output Mode Request",
-    "erd_description": "The client will request a change to the 24V Auxiliary Output Mode status.",
+    "erd_description": "This read/write request lets clients remotely change the 24V auxiliary output mode.\n\nInvalid requests, as defined by the Allowed Selections bitmap in status ERD 0x7474, are rejected.\n\nConfirm the outcome from status ERD 0x7474, not by reading back this request.\nRequest Consumed (255) is a consumed-request marker, not a selectable configuration.",
     "erd_operations": [
       "read",
       "write",
@@ -527884,7 +527884,7 @@
   {
     "erd_id": "0x7476",
     "erd_name": "24V Auxiliary Output Type Status",
-    "erd_description": "The device will publish the 24V Auxiliary Output Type feature status.",
+    "erd_description": "This read-only status reports the current 24V auxiliary output type and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7477 and confirm the resulting type from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527927,7 +527927,7 @@
   {
     "erd_id": "0x7476",
     "erd_name": "24V Auxiliary Output Type Status",
-    "erd_description": "The device will publish the 24V Auxiliary Output Type feature status.",
+    "erd_description": "This read-only status reports the current 24V auxiliary output type and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7477 and confirm the resulting type from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -527969,7 +527969,7 @@
   {
     "erd_id": "0x7476",
     "erd_name": "24V Auxiliary Output Type Status",
-    "erd_description": "The device will publish the 24V Auxiliary Output Type feature status.",
+    "erd_description": "This read-only status reports the current 24V auxiliary output type and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7477 and confirm the resulting type from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -528011,7 +528011,7 @@
   {
     "erd_id": "0x7476",
     "erd_name": "24V Auxiliary Output Type Status",
-    "erd_description": "The device will publish the 24V Auxiliary Output Type feature status.",
+    "erd_description": "This read-only status reports the current 24V auxiliary output type and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7477 and confirm the resulting type from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -528053,7 +528053,7 @@
   {
     "erd_id": "0x7476",
     "erd_name": "24V Auxiliary Output Type Status",
-    "erd_description": "The device will publish the 24V Auxiliary Output Type feature status.",
+    "erd_description": "This read-only status reports the current 24V auxiliary output type and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7477 and confirm the resulting type from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -528095,7 +528095,7 @@
   {
     "erd_id": "0x7476",
     "erd_name": "24V Auxiliary Output Type Status",
-    "erd_description": "The device will publish the 24V Auxiliary Output Type feature status.",
+    "erd_description": "This read-only status reports the current 24V auxiliary output type and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7477 and confirm the resulting type from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -528137,7 +528137,7 @@
   {
     "erd_id": "0x7476",
     "erd_name": "24V Auxiliary Output Type Status",
-    "erd_description": "The device will publish the 24V Auxiliary Output Type feature status.",
+    "erd_description": "This read-only status reports the current 24V auxiliary output type and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7477 and confirm the resulting type from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -528179,7 +528179,7 @@
   {
     "erd_id": "0x7477",
     "erd_name": "24V Auxiliary Output Type Request",
-    "erd_description": "The client will request a change to the 24V Auxiliary Output Type status.",
+    "erd_description": "This read/write request lets clients remotely change the 24V auxiliary output type.\n\nInvalid requests, as defined by the Allowed Selections bitmap in status ERD 0x7476, are rejected.\n\nConfirm the outcome from status ERD 0x7476, not by reading back this request.\nRequest Consumed (255) is a consumed-request marker, not a selectable configuration.",
     "erd_operations": [
       "read",
       "write",
@@ -528224,7 +528224,7 @@
   {
     "erd_id": "0x7478",
     "erd_name": "24V Transformer Configuration Status",
-    "erd_description": "The device will publish the 24V Transformer Configuration feature status.",
+    "erd_description": "This read-only status reports the current 24V thermostat transformer configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7479 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -528268,7 +528268,7 @@
   {
     "erd_id": "0x7478",
     "erd_name": "24V Transformer Configuration Status",
-    "erd_description": "The device will publish the 24V Transformer Configuration feature status.",
+    "erd_description": "This read-only status reports the current 24V thermostat transformer configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7479 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -528310,7 +528310,7 @@
   {
     "erd_id": "0x7478",
     "erd_name": "24V Transformer Configuration Status",
-    "erd_description": "The device will publish the 24V Transformer Configuration feature status.",
+    "erd_description": "This read-only status reports the current 24V thermostat transformer configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7479 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -528352,7 +528352,7 @@
   {
     "erd_id": "0x7478",
     "erd_name": "24V Transformer Configuration Status",
-    "erd_description": "The device will publish the 24V Transformer Configuration feature status.",
+    "erd_description": "This read-only status reports the current 24V thermostat transformer configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7479 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -528394,7 +528394,7 @@
   {
     "erd_id": "0x7478",
     "erd_name": "24V Transformer Configuration Status",
-    "erd_description": "The device will publish the 24V Transformer Configuration feature status.",
+    "erd_description": "This read-only status reports the current 24V thermostat transformer configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7479 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -528436,7 +528436,7 @@
   {
     "erd_id": "0x7478",
     "erd_name": "24V Transformer Configuration Status",
-    "erd_description": "The device will publish the 24V Transformer Configuration feature status.",
+    "erd_description": "This read-only status reports the current 24V thermostat transformer configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7479 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -528478,7 +528478,7 @@
   {
     "erd_id": "0x7478",
     "erd_name": "24V Transformer Configuration Status",
-    "erd_description": "The device will publish the 24V Transformer Configuration feature status.",
+    "erd_description": "This read-only status reports the current 24V thermostat transformer configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7479 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -528520,7 +528520,7 @@
   {
     "erd_id": "0x7478",
     "erd_name": "24V Transformer Configuration Status",
-    "erd_description": "The device will publish the 24V Transformer Configuration feature status.",
+    "erd_description": "This read-only status reports the current 24V thermostat transformer configuration and what selections the unit supports.\n\nClients write requested changes to request ERD 0x7479 and confirm the resulting configuration from this status.",
     "erd_operations": [
       "read",
       "publish",
@@ -528562,7 +528562,7 @@
   {
     "erd_id": "0x7479",
     "erd_name": "24V Transformer Configuration Request",
-    "erd_description": "The client will request a change to the 24V Transformer Configuration status.",
+    "erd_description": "This read/write request lets clients remotely change the 24V thermostat transformer configuration.\n\nInvalid requests, as defined by the Allowed Selections bitmap in status ERD 0x7478, are rejected.\n\nConfirm the outcome from status ERD 0x7478, not by reading back this request.\nRequest Consumed (255) is a consumed-request marker, not a selectable configuration.",
     "erd_operations": [
       "read",
       "write",
