@@ -27,6 +27,7 @@ jobs:
         submodules: 'recursive'
 
     - run: make test -j${{ steps.cpu-cores.outputs.count }}
+    - run: make integration-test -j${{ steps.cpu-cores.outputs.count }}
 
   pytest:
     runs-on: ubuntu-latest

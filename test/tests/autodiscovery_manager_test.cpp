@@ -41,6 +41,13 @@ TEST_GROUP(autodiscovery_manager)
   tiny_timer_group_t timer_group;
   bool callback_called;
 
+  /* Completion callback for the function-pointer API: the context pointer
+   * is the test group's callback_called flag. */
+  static void mark_complete(void* context)
+  {
+    *reinterpret_cast<bool*>(context) = true;
+  }
+
   void setup()
   {
     mock().strictOrder();
@@ -70,7 +77,7 @@ TEST_GROUP(autodiscovery_manager)
                  true,     /* has_gea3_uart */
                  true,     /* has_gea2_uart */
                  0xE4,     /* client_address */
-                 [this]() { callback_called = true; });
+                 mark_complete, &callback_called);
   }
 
   void init_gea3_only()
@@ -84,7 +91,7 @@ TEST_GROUP(autodiscovery_manager)
                  true,     /* has_gea3_uart */
                  false,    /* has_gea2_uart */
                  0xE4,     /* client_address */
-                 [this]() { callback_called = true; });
+                 mark_complete, &callback_called);
   }
 
   void init_gea2_only()
@@ -98,7 +105,7 @@ TEST_GROUP(autodiscovery_manager)
                  false,    /* has_gea3_uart */
                  true,     /* has_gea2_uart */
                  0xE4,     /* client_address */
-                 [this]() { callback_called = true; });
+                 mark_complete, &callback_called);
   }
 
   /* Expect the GEA3 client to accept a broadcast read. */
@@ -365,7 +372,8 @@ TEST(autodiscovery_manager, completion_with_null_callback_does_not_crash)
                nullptr,  /* gea2_uart_adapter (not mocked) */
                true, true,
                0xE4,     /* client_address */
-               nullptr);  /* No callback */
+               nullptr,  /* No callback */
+               nullptr);
 
   expect_gea3_broadcast_read();
   manager.start();
@@ -451,7 +459,7 @@ TEST(autodiscovery_manager, non_default_client_address_accepts_response)
                nullptr, nullptr,
                true, true,
                0xE5,     /* client_address — non-default */
-               [this]() { callback_called = true; });
+               mark_complete, &callback_called);
 
   expect_gea3_broadcast_read();
   manager.start();
@@ -477,7 +485,7 @@ TEST(autodiscovery_manager, non_default_client_address_rejects_wrong_destination
                nullptr, nullptr,
                true, true,
                0xE5,     /* client_address */
-               [this]() { callback_called = true; });
+               mark_complete, &callback_called);
 
   expect_gea3_broadcast_read();
   manager.start();

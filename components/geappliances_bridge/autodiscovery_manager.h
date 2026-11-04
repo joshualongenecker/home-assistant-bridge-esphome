@@ -20,7 +20,6 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 
 extern "C" {
 #include "i_tiny_gea3_erd_client.h"
@@ -59,7 +58,8 @@ class AutodiscoveryManager {
             bool has_gea3_uart,
             bool has_gea2_uart,
             uint8_t client_address,
-            std::function<void()> on_complete_cb);
+            void (*on_complete_cb)(void* context),
+            void* on_complete_ctx);
 
   /// Safe to call multiple times.
   void cleanup();
@@ -101,7 +101,8 @@ class AutodiscoveryManager {
   esphome_uart_adapter_t* gea2_uart_adapter_ = nullptr;
   bool has_gea3_uart_ = false;
   bool has_gea2_uart_ = false;
-  std::function<void()> on_complete_cb_;
+  void (*on_complete_cb_)(void* context) = nullptr;
+  void* on_complete_ctx_ = nullptr;
 
   AutodiscoveryState state_ = AUTODISCOVERY_IDLE;
   tiny_timer_t broadcast_window_timer_;

@@ -91,7 +91,7 @@ make test -j4
 make integration-test -j4
 ```
 
-The regular `test` target runs 440 unit tests on CI (the full 537-test suite minus the 97 startup integration tests). The `integration-test` target runs all 537 tests (including the startup integration test suite) locally. The integration tests are excluded from CI because CppUTest's `TestMemoryAllocator` causes false "Memory corruption" detections on GCC/Ubuntu CI with `std::function` members — this is a known limitation. Always verify integration tests pass locally before pushing.
+The regular `test` target runs 454 unit tests. The `integration-test` target runs all 551 tests (including the startup integration test suite). Both run on CI. Historically the integration tests were excluded from CI because CppUTest's `TestMemoryAllocator` reported false "Memory corruption" detections with `std::function` members; the component no longer uses `std::function` (callbacks are function pointer + `void* context`), so the whole suite runs everywhere. Always verify both targets pass locally before pushing.
 
 ## Global Protocol Rules
 

@@ -223,9 +223,11 @@ void GeappliancesBridge::setup() {
       this->uart_ != nullptr,
       this->gea2_uart_ != nullptr,
       this->client_address_,
-      [this]() {
-        tiny_hsm_send_signal(&this->startup_hsm_wrapper_.hsm, signal_autodiscovery_complete, nullptr);
-      });
+      +[](void* context) {
+        auto self = reinterpret_cast<GeappliancesBridge*>(context);
+        tiny_hsm_send_signal(&self->startup_hsm_wrapper_.hsm, signal_autodiscovery_complete, nullptr);
+      },
+      this);
 
   if (this->configured_device_id_[0] != '\0') {
     ESP_LOGI(TAG, "Device ID configured: %s (will be applied after autodiscovery)", this->configured_device_id_);
@@ -248,7 +250,7 @@ void GeappliancesBridge::setup() {
       this->filter_config_topics_,
       this->steady_state_reached_,
       this->mqtt_client_adapter_initialized_,
-      []() { esphome::App.safe_reboot(); });
+      +[]() { esphome::App.safe_reboot(); });
   this->diagnostic_sensor_publisher_.init(
       this->erd_publish_rate_sensor_,
       this->mqtt_publish_rate_sensor_,

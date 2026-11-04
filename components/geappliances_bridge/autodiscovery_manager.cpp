@@ -19,7 +19,8 @@ void AutodiscoveryManager::init(tiny_timer_group_t* timer_group,
                                  bool has_gea3_uart,
                                  bool has_gea2_uart,
                                  uint8_t client_address,
-                                 std::function<void()> on_complete_cb)
+                                 void (*on_complete_cb)(void* context),
+                                 void* on_complete_ctx)
 {
   this->timer_group_          = timer_group;
   this->gea3_erd_client_      = gea3_erd_client;
@@ -30,7 +31,8 @@ void AutodiscoveryManager::init(tiny_timer_group_t* timer_group,
   this->has_gea3_uart_        = has_gea3_uart;
   this->has_gea2_uart_        = has_gea2_uart;
   this->client_address_       = client_address;
-  this->on_complete_cb_       = std::move(on_complete_cb);
+  this->on_complete_cb_       = on_complete_cb;
+  this->on_complete_ctx_      = on_complete_ctx;
   this->state_                = AUTODISCOVERY_IDLE;
   this->host_address_         = 0;
   this->target_address_       = 0;
@@ -92,7 +94,8 @@ void AutodiscoveryManager::cleanup()
   this->gea2_uart_adapter_ = nullptr;
   this->has_gea3_uart_ = false;
   this->has_gea2_uart_ = false;
-  this->on_complete_cb_ = std::function<void()>();
+  this->on_complete_cb_ = nullptr;
+  this->on_complete_ctx_ = nullptr;
   this->state_ = AUTODISCOVERY_IDLE;
   this->host_address_ = 0;
   this->target_address_ = 0;
@@ -133,8 +136,8 @@ void AutodiscoveryManager::timer_callback_(void* context)
              self->gea2_protocol_active_ ? "GEA2" : "GEA3",
              self->host_address_);
     self->state_ = AUTODISCOVERY_COMPLETE;
-    if (self->on_complete_cb_) {
-      self->on_complete_cb_();
+    if (self->on_complete_cb_ != nullptr) {
+      self->on_complete_cb_(self->on_complete_ctx_);
     }
   } else {
     self->gea3_rx_ = discover_rx_t{};

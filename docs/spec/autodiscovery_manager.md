@@ -33,9 +33,13 @@ void init(tiny_timer_group_t* timer_group,
           i_tiny_gea3_erd_client_t* gea3_erd_client,
           i_tiny_gea2_erd_client_t* gea2_erd_client,
           i_tiny_gea3_erd_client_t* gea2_adapter_client,
+          esphome_uart_adapter_t* gea3_uart_adapter,
+          esphome_uart_adapter_t* gea2_uart_adapter,
           bool has_gea3_uart,
           bool has_gea2_uart,
-          std::function<void()> on_complete_cb);
+          uint8_t client_address,
+          void (*on_complete_cb)(void* context),
+          void* on_complete_ctx);
 ```
 
 | Parameter | Description |
@@ -46,7 +50,7 @@ void init(tiny_timer_group_t* timer_group,
 | `gea2_adapter_client` | GEA2 adapter — a GEA3-compatible client wrapping the GEA2 ERD client. Used as the `active_erd_client_` return value when a GEA2 board is discovered. |
 | `has_gea3_uart` | Whether a GEA3 UART is configured. Determines if GEA3 broadcast is attempted. |
 | `has_gea2_uart` | Whether a GEA2 UART is configured. Determines if GEA2 broadcast is attempted. |
-| `on_complete_cb` | Completion callback invoked once when transitioning to `AUTODISCOVERY_COMPLETE`. |
+| `on_complete_cb` | Completion callback invoked once when transitioning to `AUTODISCOVERY_COMPLETE`. Function pointer + `on_complete_ctx`, per the component's no-`std::function` convention. |
 
 **Init behavior:**
 - Subscribes to `tiny_gea3_erd_client_on_activity` on the GEA3 client (if `has_gea3_uart` and client non-null)
@@ -251,7 +255,8 @@ class AutodiscoveryManager {
     i_tiny_gea3_erd_client_t* gea2_adapter_client_;
     bool has_gea3_uart_;
     bool has_gea2_uart_;
-    std::function<void()> on_complete_cb_;
+    void (*on_complete_cb_)(void* context);
+    void* on_complete_ctx_;
 
     AutodiscoveryState state_;
     tiny_timer_t broadcast_window_timer_;
