@@ -65,7 +65,7 @@ Constants:
 
 - **Single wildcard subscription**: Subscribes to `homeassistant/+/{device_id}/#` to catch all discovery topics across all domains in one shot, avoiding per-domain subscribe/unsubscribe cycles.
 - **Callback-to-main-loop decoupling**: The MQTT callback (`cleanup_topic_callback`) only appends the topic string to a ring buffer — it never publishes. Flushing happens in `run()` on the main loop to avoid blocking the ESP-IDF MQTT task's inbound queue.
-- **Critical section in callback**: Shared state (`topic_buf`, `queue_write_pos`, `queue_count`) is protected by `vPortEnterCritical()/vPortExitCritical()`. Safe on single-core ESP32-C3; dual-core ESP32 would require a mutex.
+- **Critical section in callback**: Shared state (`topic_buf`, `queue_write_pos`, `queue_count`) is protected by `taskENTER_CRITICAL(&self->mux)` / `taskEXIT_CRITICAL(&self->mux)` using a per-instance `portMUX_TYPE`. On single-core (C3/C6) this disables interrupts; on dual-core (S3) the `portMUX_TYPE` acts as a spinlock, so the same code is safe on both.
 - **One topic per flush**: Each `run()` call processes one queued topic (`HA_CLEANUP_FLUSH_BATCH = 1`). Each publish allocates a `std::string` on the heap; processing one at a time minimizes peak heap pressure.
 - **Buffer compaction with `memmove`**: Topics are copied to a stack buffer before `memmove` compacts the ring buffer, avoiding pointer invalidation.
 - **Drain wait between passes**: After unsubscribing, the module waits for `HA_CLEANUP_DRAIN_WAIT_MS` of no new callbacks before re-subscribing. This ensures the inbound MQTT event queue is empty, preventing stale callbacks from being attributed to the next pass.
@@ -80,5 +80,5 @@ Constants:
 - `i_mqtt_client` — `i_mqtt_client_t` interface for `mqtt_client_subscribe`, `mqtt_client_unsubscribe`, `mqtt_client_publish_raw`
 - `esp_log` — logging via `ESP_LOGI`, `ESP_LOGW`, `ESP_LOGD`, `ESP_LOGV`
 - `esp_heap_caps` — `heap_caps_get_free_size`, `heap_caps_get_largest_free_block` for heap diagnostics
-- `freertos/FreeRTOS.h` — `vPortEnterCritical`, `vPortExitCritical` for thread safety
+- `freertos/FreeRTOS.h` — `taskENTER_CRITICAL`, `taskEXIT_CRITICAL` with a per-instance `portMUX_TYPE` for thread safety
 - `geappliances_bridge_log.h` — `GEA_TAG` macro for log tag definition

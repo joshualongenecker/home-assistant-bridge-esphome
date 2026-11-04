@@ -291,7 +291,7 @@ Called by the MQTT client when a message arrives on the wildcard subscription. T
 4. **Oversized topic guard:** If `topic_len >= HA_CLEANUP_TOPIC_BUF_SIZE`, increment `dropped_count` and return. Prevents `uint16_t` overflow when casting `topic_len + 1`.
 
 **Queueing:**
-- Enter critical section (`vPortEnterCritical`)
+- Enter critical section (`taskENTER_CRITICAL(&self->mux)`)
 - Increment `pass_received_count`
 - Calculate space needed: `topic_len + 1` (for null terminator)
 - If `queue_write_pos + needed <= HA_CLEANUP_TOPIC_BUF_SIZE`:
@@ -381,7 +381,7 @@ This provides diagnostic visibility into heap pressure during the cleanup proces
 
 ### 9.3 Critical Sections
 
-Both `cleanup_topic_callback()` and `cleanup_flush_queue()` use `vPortEnterCritical()` / `vPortExitCritical()` to protect shared access to `topic_buf`, `queue_write_pos`, `queue_count`, and related fields. The callback runs in the MQTT task context; `flush_queue()` runs in the main loop context. Critical sections prevent data corruption during concurrent access.
+Both `cleanup_topic_callback()` and `cleanup_flush_queue()` use `taskENTER_CRITICAL(&self->mux)` / `taskEXIT_CRITICAL(&self->mux)` — a per-instance `portMUX_TYPE` spinlock — to protect shared access to `topic_buf`, `queue_write_pos`, `queue_count`, and related fields. The callback runs in the MQTT task context; `flush_queue()` runs in the main loop context. On single-core (C3/C6) the critical section disables interrupts; on dual-core (S3) the `portMUX_TYPE` is a spinlock, so concurrent access is prevented on both. The mux is initialized in `ha_discovery_cleanup_init()` and re-initialized in `ha_discovery_cleanup_destroy()`, where the `memset()` that zeroes the struct would otherwise leave the embedded spinlock in an invalid state for a late callback.
 
 ---
 
@@ -427,7 +427,7 @@ The cleanup module is independent of the discovery manager's own state and buffe
 3. **Two-pass verification:** Cleanup is not considered complete until two consecutive passes find no topics. This handles the race condition where topics discovered in one pass may not have been fully flushed before the next subscription fires.
 4. **Drain between passes:** After unsubscribing, the module waits for the inbound MQTT event queue to drain before re-subscribing. This prevents stale callbacks from a previous pass contaminating the next pass's results.
 5. **One topic per flush:** `cleanup_flush_queue()` processes exactly one topic per call, minimizing peak heap pressure from the `std::string` allocation inside `mqtt_client_publish_raw()`.
-6. **Critical section safety:** Shared state between the MQTT callback task and the main loop is protected by `vPortEnterCritical()` / `vPortExitCritical()`.
+6. **Critical section safety:** Shared state between the MQTT callback task and the main loop is protected by `taskENTER_CRITICAL(&self->mux)` / `taskEXIT_CRITICAL(&self->mux)` using a per-instance `portMUX_TYPE`.
 7. **Config topics only:** Only topics ending with `/config` are queued for removal. Availability and other non-config topics are ignored.
 8. **Echo suppression:** Topics with empty payloads are skipped — they are the module's own echo from previous clear operations.
 9. **Optimistic drain detection:** The drain wait uses `last_activity_ms` to detect when the inbound queue is truly empty. If a late callback fires after drain started, the timer is reset from the new activity time.
@@ -443,7 +443,7 @@ The cleanup module is independent of the discovery manager's own state and buffe
 | `geappliances_bridge_log.h` | Logging tag definition (`GEA_TAG`) |
 | `esp_log.h` | Logging macros (`ESP_LOGI`, `ESP_LOGW`, `ESP_LOGD`, `ESP_LOGV`) |
 | `esp_heap_caps.h` | Heap diagnostics (`heap_caps_get_free_size`, `heap_caps_get_largest_free_block`) |
-| `freertos/FreeRTOS.h`, `freertos/task.h` | Critical section APIs (`vPortEnterCritical`, `vPortExitCritical`), task delay (`vTaskDelay`) |
+| `freertos/FreeRTOS.h`, `freertos/task.h` | Critical section APIs (`taskENTER_CRITICAL`, `taskEXIT_CRITICAL` with a per-instance `portMUX_TYPE`), task delay (`vTaskDelay`) |
 | `esphome/core/hal.h` | Time source (`esphome::millis`) |
 
 ---
