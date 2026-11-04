@@ -71,6 +71,8 @@ class AutodiscoveryManager {
   bool     is_gea2_protocol()       const { return gea2_protocol_active_; }
   AutodiscoveryState get_state()    const { return state_; }
 
+  /// Test-only byte-injection hook for the autodiscovery frame parser;
+  /// production feeds bytes via the UART adapter callbacks.
   void feed_byte(uint8_t byte, bool is_gea3) { process_byte_(byte, is_gea3); }
 
   /// When set, probes target this address instead of the 0xFF broadcast;

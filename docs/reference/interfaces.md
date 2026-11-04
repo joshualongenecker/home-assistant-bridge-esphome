@@ -11,7 +11,6 @@ Abstract MQTT client interface. Decouples bridge modules from ESPHome's MQTT imp
 
 | Method | Signature | Description |
 |---|---|---|
-| `mqtt_client_register_erd()` | `void(i_mqtt_client_t* self, tiny_erd_t erd)` | Register an ERD for MQTT publishing |
 | `mqtt_client_update_erd_write_result()` | `void(i_mqtt_client_t* self, tiny_erd_t erd, uint8_t board_address, bool success, tiny_gea3_erd_client_write_failure_reason_t failure_reason)` | Report write success/failure to MQTT. `board_address` is 0xFF (broadcast) for the primary board (legacy topic) or the secondary board address (address-prefixed topic). |
 | `mqtt_client_on_write_request()` | `i_tiny_event_t*(i_mqtt_client_t* self)` | Event fired when a write command arrives on a `*/write` topic |
 | `mqtt_client_on_mqtt_disconnect()` | `i_tiny_event_t*(i_mqtt_client_t* self)` | Event fired when the client disconnects from the MQTT broker |

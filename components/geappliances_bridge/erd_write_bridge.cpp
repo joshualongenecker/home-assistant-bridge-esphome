@@ -178,8 +178,3 @@ void erd_write_bridge_destroy(erd_write_bridge_t* self)
       &self->erd_client_activity_subscription);
   }
 }
-
-void erd_write_bridge_set_host_address(erd_write_bridge_t* self, uint8_t host_address)
-{
-  self->erd_host_address = host_address;
-}

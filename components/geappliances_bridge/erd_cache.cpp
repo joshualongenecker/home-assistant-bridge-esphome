@@ -222,14 +222,6 @@ static erd_cache_entry_t* erd_cache_get_next_updated_locked(erd_cache_t* self, u
   return nullptr;
 }
 
-erd_cache_entry_t* erd_cache_get_next_updated(erd_cache_t* self, uint16_t* iterator)
-{
-  erd_cache_lock(self);
-  erd_cache_entry_t* entry = erd_cache_get_next_updated_locked(self, iterator);
-  erd_cache_unlock(self);
-  return entry;
-}
-
 /* Atomically fetch the next update_required entry AND copy its payload out of
  * the arena in one lock hold. The arena slice is copied into data_out while the
  * lock is held, so the main loop cannot overwrite it during the slow MQTT publish. */

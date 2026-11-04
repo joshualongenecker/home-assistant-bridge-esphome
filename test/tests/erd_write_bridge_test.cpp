@@ -212,17 +212,6 @@ TEST(erd_write_bridge, should_drop_second_write_while_first_is_in_progress)
   when_a_write_is_completed(mock_request_id, 0x3001);
 }
 
-TEST(erd_write_bridge, should_enable_writes_after_host_address_update)
-{
-  given_that_the_bridge_has_been_initialized_with_broadcast_address();
-
-  erd_write_bridge_set_host_address(&self, 0xC0);
-
-  uint8_t value = 0x01;
-  expect_write_succeeds();
-  when_a_write_request_is_received(0x3001, &value, sizeof(value));
-}
-
 TEST(erd_write_bridge, should_handle_write_when_erd_client_queue_is_full)
 {
   given_that_the_bridge_has_been_initialized();

@@ -10,6 +10,7 @@ extern "C" {
 }
 
 #include "esphome_mqtt_client_adapter.h"
+#include "double/mqtt_test_double.hpp"
 #include "double/esphome_hal_double.hpp"
 
 #include "CppUTest/TestHarness.h"
@@ -23,6 +24,7 @@ TEST_GROUP(erd_cache_mqtt_publisher_pause)
   erd_cache_mqtt_publisher_t publisher;
   erd_cache_t cache;
   esphome_mqtt_client_adapter_t adapter;
+  esphome::mqtt::MqttTestDouble mqtt_double;
 
   void setup()
   {
@@ -33,6 +35,11 @@ TEST_GROUP(erd_cache_mqtt_publisher_pause)
     memset(&publisher, 0, sizeof(publisher));
     erd_cache_init(&cache);
     esphome_mqtt_client_adapter_init(&adapter, "test_device");
+    /* publish_one() reports only successful publishes; without a live
+     * double every publish would silently fail and the assertions below
+     * would verify nothing. */
+    esphome::mqtt::global_mqtt_client = &mqtt_double;
+    mqtt_double.connected_ = true;
   }
 
   void teardown()
@@ -42,6 +49,8 @@ TEST_GROUP(erd_cache_mqtt_publisher_pause)
     }
     erd_cache_destroy(&cache);
     esphome_mqtt_client_adapter_destroy(&adapter);
+    esphome::mqtt::global_mqtt_client = nullptr;
+    mqtt_double.connected_ = false;
   }
 };
 
@@ -92,13 +101,10 @@ TEST(erd_cache_mqtt_publisher_pause, resume_sets_paused_false)
 }
 
 /* ------------------------------------------------------------------ */
-/* loop() skips publishing when paused (non-ESP-IDF path)              */
-/* The non-ESP-IDF loop() does not check paused; the paused guard
- * lives in the ESP-IDF background task.  We verify the field is set
- * and that first_round_done() reflects the paused state.              */
+/* publish_one() skips publishing when paused                           */
 /* ------------------------------------------------------------------ */
 
-TEST(erd_cache_mqtt_publisher_pause, loop_skips_publishing_when_paused)
+TEST(erd_cache_mqtt_publisher_pause, publish_skips_when_paused)
 {
   erd_cache_mqtt_publisher_init(
     &publisher,
@@ -111,14 +117,16 @@ TEST(erd_cache_mqtt_publisher_pause, loop_skips_publishing_when_paused)
   uint8_t data = 0x42;
   erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
-  /* Pause before loop. */
+  /* Pause before publishing. */
   erd_cache_mqtt_publisher_pause(&publisher);
 
-  /* On non-ESP-IDF, loop() does not check paused (the guard is in the
-   * ESP-IDF background task).  The paused flag is still set, and
-   * first_round_done was reset.  We verify the state is correct. */
   CHECK_TRUE(publisher.paused);
   CHECK_FALSE(publisher.first_round_done);
+
+  /* publish_one() no-ops while paused and counts a missed loop. */
+  CHECK_FALSE(erd_cache_mqtt_publisher_publish_one(&publisher));
+  CHECK(publisher.missed_loops > 0);
+  CHECK_EQUAL(0u, publisher.total_published);
 
   /* Verify that first_round_done() accessor returns false. */
   CHECK_FALSE(erd_cache_mqtt_publisher_first_round_done(&publisher));
@@ -128,7 +136,7 @@ TEST(erd_cache_mqtt_publisher_pause, loop_skips_publishing_when_paused)
 /* loop() resumes publishing after resume()                            */
 /* ------------------------------------------------------------------ */
 
-TEST(erd_cache_mqtt_publisher_pause, loop_resumes_publishing_after_resume)
+TEST(erd_cache_mqtt_publisher_pause, publish_resumes_publishing_after_resume)
 {
   erd_cache_mqtt_publisher_init(
     &publisher,
@@ -148,8 +156,8 @@ TEST(erd_cache_mqtt_publisher_pause, loop_resumes_publishing_after_resume)
   erd_cache_mqtt_publisher_resume(&publisher);
   CHECK_FALSE(publisher.paused);
 
-  /* After resume, loop should be able to publish. */
-  bool published = erd_cache_mqtt_publisher_loop(&publisher);
+  /* After resume, publishing should work. */
+  bool published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_TRUE(published);
 }
 
@@ -178,13 +186,13 @@ TEST(erd_cache_mqtt_publisher_pause, first_round_done_false_after_resume_true_af
 
   CHECK_FALSE(erd_cache_mqtt_publisher_first_round_done(&publisher));
 
-  /* Run loop to publish the ERD, then again to scan the empty cache
+  /* Publish the ERD, then publish again to scan the empty cache
    * and set first_round_done = true. */
-  bool published = erd_cache_mqtt_publisher_loop(&publisher);
+  bool published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_TRUE(published);
 
   /* Second call finds no pending entries, setting first_round_done. */
-  published = erd_cache_mqtt_publisher_loop(&publisher);
+  published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_FALSE(published);
 
   CHECK_TRUE(erd_cache_mqtt_publisher_first_round_done(&publisher));

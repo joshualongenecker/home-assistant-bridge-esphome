@@ -26,7 +26,6 @@ extern "C" {
 #include "double/tiny_gea3_erd_client_double.hpp"
 #include "double/tiny_timer_group_double.hpp"
 #include "double/esphome_hal_double.hpp"
-#include "erd_registry.h"
 
 #include <cstdio>
 #include <string>
@@ -39,7 +38,6 @@ TEST_GROUP(write_flow_integration)
 
   tiny_timer_group_double_t timer_group;
   tiny_gea3_erd_client_double_t erd_client;
-  esphome::geappliances_bridge::ErdRegistry erd_registry;
 
   esphome::mqtt::MqttTestDouble mqtt_double;
 
@@ -73,7 +71,6 @@ TEST_GROUP(write_flow_integration)
     mock().disable();
 
     esphome_mqtt_client_adapter_init(&adapter, "test_device");
-    esphome_mqtt_client_adapter_set_erd_registry(&adapter, &erd_registry);
 
     erd_write_bridge_init(
       &write_bridge,

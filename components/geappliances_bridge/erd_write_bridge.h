@@ -39,10 +39,6 @@ void erd_write_bridge_init(
 void erd_write_bridge_destroy(
   erd_write_bridge_t* self);
 
-void erd_write_bridge_set_host_address(
-  erd_write_bridge_t* self,
-  uint8_t host_address);
-
 #ifdef __cplusplus
 }
 #endif

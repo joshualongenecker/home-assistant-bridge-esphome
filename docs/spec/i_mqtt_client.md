@@ -35,8 +35,6 @@ The handle wraps a pointer to the vtable. Callers interact with the interface th
 
 ```c
 typedef struct i_mqtt_client_api_t {
-  void (*register_erd)(i_mqtt_client_t* self, tiny_erd_t erd);
-
   void (*update_erd_write_result)(i_mqtt_client_t* self, tiny_erd_t erd, uint8_t board_address, bool success, tiny_gea3_erd_client_write_failure_reason_t failure_reason);
 
   i_tiny_event_t* (*on_write_request)(i_mqtt_client_t* self);
@@ -57,14 +55,7 @@ typedef struct i_mqtt_client_api_t {
 
 ## 3. Methods
 
-### 3.1 `mqtt_client_register_erd`
-
-```c
-void mqtt_client_register_erd(i_mqtt_client_t* self, tiny_erd_t erd);
-```
-
-Register a newly discovered ERD.
-### 3.2 `mqtt_client_update_erd_write_result`
+### 3.1 `mqtt_client_update_erd_write_result`
 
 ```c
 void mqtt_client_update_erd_write_result(
@@ -77,28 +68,28 @@ void mqtt_client_update_erd_write_result(
 
 Provide the result for the most recently completed write request to an ERD. `board_address` is 0xFF (broadcast) for the primary board (legacy no-prefix result topic) or the secondary board address (address-prefixed result topic).
 
-### 3.3 `mqtt_client_on_write_request`
+### 3.2 `mqtt_client_on_write_request`
 
 ```c
 i_tiny_event_t* mqtt_client_on_write_request(i_mqtt_client_t* self);
 ```
 
 Event raised when a write request is received from the MQTT broker.
-### 3.4 `mqtt_client_on_mqtt_disconnect`
+### 3.3 `mqtt_client_on_mqtt_disconnect`
 
 ```c
 i_tiny_event_t* mqtt_client_on_mqtt_disconnect(i_mqtt_client_t* self);
 ```
 
 Event raised when the client disconnects from the MQTT broker.
-### 3.5 `mqtt_client_on_mqtt_connect`
+### 3.4 `mqtt_client_on_mqtt_connect`
 
 ```c
 i_tiny_event_t* mqtt_client_on_mqtt_connect(i_mqtt_client_t* self);
 ```
 
 Event raised when the client connects to the MQTT broker.
-### 3.6 `mqtt_client_publish_raw`
+### 3.5 `mqtt_client_publish_raw`
 
 ```c
 void mqtt_client_publish_raw(
@@ -110,7 +101,7 @@ void mqtt_client_publish_raw(
 ```
 
 Publish a raw MQTT message (C-string topic and payload).
-### 3.7 `mqtt_client_subscribe`
+### 3.6 `mqtt_client_subscribe`
 
 ```c
 void mqtt_client_subscribe(
@@ -121,7 +112,7 @@ void mqtt_client_subscribe(
 ```
 
 Subscribe to a topic with a raw C callback.
-### 3.8 `mqtt_client_unsubscribe`
+### 3.7 `mqtt_client_unsubscribe`
 
 ```c
 void mqtt_client_unsubscribe(i_mqtt_client_t* self, const char* topic);
@@ -136,7 +127,6 @@ Each vtable method has a corresponding `static inline` wrapper in the header:
 
 | Wrapper | Vtable Call |
 |---------|-------------|
-| `mqtt_client_register_erd(self, erd)` | `self->api->register_erd(self, erd)` |
 | `mqtt_client_update_erd_write_result(self, erd, board_address, success, failure_reason)` | `self->api->update_erd_write_result(self, erd, board_address, success, failure_reason)` |
 | `mqtt_client_on_write_request(self)` | `self->api->on_write_request(self)` |
 | `mqtt_client_on_mqtt_disconnect(self)` | `self->api->on_mqtt_disconnect(self)` |
