@@ -54,7 +54,7 @@ void OtaCleanupManager::init(
     bool filter_config_topics,
     bool& steady_state_reached,
     bool& mqtt_initialized,
-    std::function<void()> reboot_callback)
+    void (*reboot_callback)())
 {
   this->ha_discovery_manager_ = ha_discovery_manager;
   this->device_identity_manager_ = &device_identity_manager;
@@ -65,7 +65,7 @@ void OtaCleanupManager::init(
   this->filter_config_topics_ = filter_config_topics;
   this->steady_state_reached_ = &steady_state_reached;
   this->mqtt_initialized_ = &mqtt_initialized;
-  this->reboot_callback_ = std::move(reboot_callback);
+  this->reboot_callback_ = reboot_callback;
 }
 
 void OtaCleanupManager::trigger_ota_cleanup() {
@@ -338,7 +338,9 @@ void OtaCleanupManager::loop() {
     if (elapsed >= 5000) {
       ESP_LOGI(TAG, "Rebooting after OTA cleanup + republish...");
       this->ota_reboot_pending_ = false;
-      this->reboot_callback_();
+      if (this->reboot_callback_ != nullptr) {
+        this->reboot_callback_();
+      }
     }
   }
 #endif

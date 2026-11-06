@@ -8,7 +8,6 @@
 // GeappliancesBridge::setup(), not here.
 #pragma once
 
-#include <functional>
 #include <cstdint>
 
 extern "C" {
@@ -34,7 +33,7 @@ class OtaCleanupManager {
       bool filter_config_topics,
       bool& steady_state_reached,
       bool& mqtt_initialized,
-      std::function<void()> reboot_callback);
+      void (*reboot_callback)());
 
   void loop();
 
@@ -82,7 +81,7 @@ private:
   bool* steady_state_reached_{nullptr};
   bool* mqtt_initialized_{nullptr};
 
-  std::function<void()> reboot_callback_;
+  void (*reboot_callback_)() = nullptr;
 };
 
 }  // namespace geappliances_bridge

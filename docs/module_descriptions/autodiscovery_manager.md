@@ -8,7 +8,7 @@ Manages the appliance autodiscovery process on the GEA bus. Fully self-driving: 
 
 | Method | Description |
 |--------|-------------|
-| `init(timer_group, gea3_client, gea2_client, gea2_adapter, has_gea3, has_gea2, on_complete_cb)` | Initialize with timer group, ERD clients, UART availability flags, and completion callback |
+| `init(timer_group, gea3_client, gea2_client, gea2_adapter, gea3_uart_adapter, gea2_uart_adapter, has_gea3, has_gea2, client_address, on_complete_cb, on_complete_ctx)` | Initialize with timer group, ERD clients, UART availability flags, and a function-pointer completion callback with context |
 | `start()` | Begin autodiscovery. Idempotent if already past IDLE. |
 | `get_host_address()` | Returns the discovered appliance address |
 | `get_active_erd_client()` | Returns the ERD client for the discovered protocol |
