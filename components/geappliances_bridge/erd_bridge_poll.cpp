@@ -520,6 +520,12 @@ static void erd_bridge_poll_init_impl(
   self->cycle_count                 = 0;
   self->polling_failure_count     = 0;
   self->cycle_has_failure         = false;
+  /* Time/yield defaults are installed unconditionally — unlike the
+   * on_discovery_complete preservation below.  Nothing on the hardware path
+   * pre-sets them, and erd_bridge_poll_t is a plain (garbage-initialized)
+   * member of GeappliancesBridge, so a preserve-if-non-NULL check here would
+   * read garbage and skip the default install.  Tests inject via the
+   * setters AFTER init. */
   self->get_time_ms = esphome::millis;
   self->yield_fn = poll_default_yield;
   erd_set_init(&self->erd_set);
@@ -568,14 +574,16 @@ void erd_bridge_poll_set_time_fn(
   erd_bridge_poll_t* self,
   uint32_t (*get_time_ms)(void))
 {
-  self->get_time_ms = get_time_ms;
+  /* NULL restores the init default (esphome::millis). */
+  self->get_time_ms = get_time_ms ? get_time_ms : esphome::millis;
 }
 
 void erd_bridge_poll_set_yield_fn(
   erd_bridge_poll_t* self,
   void (*yield_fn)(void))
 {
-  self->yield_fn = yield_fn;
+  /* NULL restores the init default (the delay(0) wrapper). */
+  self->yield_fn = yield_fn ? yield_fn : poll_default_yield;
 }
 
 void erd_bridge_poll_destroy(erd_bridge_poll_t* self)

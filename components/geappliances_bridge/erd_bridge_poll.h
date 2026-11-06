@@ -117,7 +117,11 @@ void erd_bridge_poll_init(
   uint16_t probe_list_count,
   erd_cache_t* cache);
 
-/* Override the time source / yield after init (test seam). */
+/* Override the time source / yield after init (test seam).  MUST be called
+ * after erd_bridge_poll_init(): init installs the HAL defaults
+ * unconditionally (the struct is a garbage-initialized plain member and
+ * nothing on the hardware path pre-sets these fields, so pre-init values
+ * are not preserved).  A NULL argument restores the default. */
 void erd_bridge_poll_set_time_fn(
   erd_bridge_poll_t* self,
   uint32_t (*get_time_ms)(void));

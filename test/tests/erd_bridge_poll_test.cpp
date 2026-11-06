@@ -15,6 +15,7 @@
 #include "CppUTest/TestHarness.h"
 #include "CppUTestExt/MockSupport.h"
 #include "simulation_test_base.h"
+#include "double/esphome_hal_double.hpp"
 
 TEST_GROUP_BASE(erd_bridge_poll, simulation_test_base)
 {
@@ -567,6 +568,21 @@ TEST(erd_bridge_poll, should_not_crash_on_destroy_with_null_erd_client)
 // ============================================================================
 
 static uint32_t s_budgeted_clock_ms = 0;
+static uint32_t s_budgeted_yield_calls = 0;
+
+/* The budgeted-send expectations below are coupled to these constants and
+ * must be updated in lockstep when any of them changes:
+ *   - POLL_YIELD_MS (50): the batch break is checked every 10 ERDs inside
+ *     send_poll_read_requests_bounded.
+ *   - POLL_CYCLE_SEND_BUDGET_MS (100): trips right after the first batch.
+ *   - POLL_CYCLE_RESUME_MS (100): the after(100) that fires the resume
+ *     timer encodes THIS constant (it numerically equals the send budget).
+ *   - polling_interval (1000), the 10 ms/call clock rate, and the 2 clock
+ *     calls per read: 10 reads x 20 ms = 200 ms of send time, so the first
+ *     batch stops at exactly 10 of probe_erd_count (12) ERDs.
+ *
+ * The hardcoded expectations fail loudly (unexpected read calls / CHECK
+ * failures) if any of these drifts, but they will not self-adjust. */
 
 /* Advances 10 ms per call. send_next_poll_read_request calls it twice per
  * read, so the 50 ms batch budget breaks after exactly 10 reads and the
@@ -577,7 +593,12 @@ static uint32_t budgeted_clock_advance_10(void)
   return s_budgeted_clock_ms;
 }
 
-static void budgeted_yield_noop(void) {}
+/* Counting fake: send_cycle_reads yields once per send pass, so the call
+ * count pins the yield_fn() call site — deleting that call fails the test. */
+static void budgeted_yield_count(void)
+{
+  s_budgeted_yield_calls++;
+}
 
 TEST_GROUP_BASE(erd_bridge_poll_budgeted_send, simulation_test_base)
 {
@@ -594,6 +615,7 @@ TEST_GROUP_BASE(erd_bridge_poll_budgeted_send, simulation_test_base)
   {
     simulation_test_base_setup();
     s_budgeted_clock_ms = 0;
+    s_budgeted_yield_calls = 0;
     for (int i = 0; i < probe_erd_count; i++) {
       probe_list[i] = {(tiny_erd_t)(probe_erd_base + i), PROBE_ENTRY_DEFAULT_ADDRESS};
     }
@@ -623,7 +645,7 @@ TEST_GROUP_BASE(erd_bridge_poll_budgeted_send, simulation_test_base)
       trigger_read_completed(0xC0, (tiny_erd_t)(probe_erd_base + i), &probe_val, sizeof(probe_val));
     }
     erd_bridge_poll_set_time_fn(&self, budgeted_clock_advance_10);
-    erd_bridge_poll_set_yield_fn(&self, budgeted_yield_noop);
+    erd_bridge_poll_set_yield_fn(&self, budgeted_yield_count);
     mock().enable();
 
     CHECK_EQUAL(polling_state_polling, self.current_state);
@@ -651,9 +673,10 @@ TEST(erd_bridge_poll_budgeted_send, should_stop_at_send_budget_and_resume_withou
   // 100 ms cycle-send budget trips, and a resume timer is armed.
   should_request_reads(0, 10);
   after(polling_interval);
+  CHECK_EQUAL(1u, s_budgeted_yield_calls);
 
   CHECK_TRUE(self.cycle_sending_in_progress);
-  CHECK_TRUE(self.erd_index == 10);
+  CHECK_EQUAL(self.erd_index, 10);
   CHECK_TRUE(self.polling_timer_armed);
 
   // The resume pass continues from erd_index — it must NOT restart the
@@ -662,7 +685,8 @@ TEST(erd_bridge_poll_budgeted_send, should_stop_at_send_budget_and_resume_withou
   after(100);
 
   CHECK_FALSE(self.cycle_sending_in_progress);
-  CHECK_TRUE(self.erd_index == 12);
+  CHECK_EQUAL(2u, s_budgeted_yield_calls);
+  CHECK_EQUAL(self.erd_index, 12);
 
   // Completing the cycle records health metrics from the injected clock.
   // Against the frozen HAL double these were always 0.
@@ -673,6 +697,59 @@ TEST(erd_bridge_poll_budgeted_send, should_stop_at_send_budget_and_resume_withou
   CHECK_EQUAL(1u, self.cycle_count);
   CHECK_TRUE(self.last_cycle_time_ms > 0);
   mock().checkExpectations();
+}
+
+// ============================================================================
+// default wiring: init installs the HAL defaults unconditionally; the
+// setters only override them and a NULL argument restores the default.
+// ============================================================================
+
+TEST_GROUP_BASE(erd_bridge_poll_default_wiring, simulation_test_base)
+{
+  erd_bridge_poll_t self;
+  const probe_entry_t probe_list[1] = {{0x3001, PROBE_ENTRY_DEFAULT_ADDRESS}};
+
+  void setup()
+  {
+    simulation_test_base_setup();
+  }
+
+  void teardown()
+  {
+    mock().disable();
+    erd_bridge_poll_destroy(&self);
+    simulation_test_base_teardown();
+    mock().enable();
+  }
+};
+
+TEST(erd_bridge_poll_default_wiring, init_installs_hal_defaults_and_null_setter_restores_them)
+{
+  mock().disable();
+  erd_bridge_poll_init(
+    &self,
+    &timer_group.timer_group,
+    &erd_client.interface,
+    1000,
+    0xC0, probe_list, 1,
+    &test_cache);
+
+  uint8_t probe_val = 0x01;
+  trigger_read_completed(0xC0, 0x3001, &probe_val, sizeof(probe_val));
+  mock().enable();
+
+  // Defaults: the exact HAL millis symbol and a non-NULL yield wrapper.
+  POINTERS_EQUAL(esphome::millis, self.get_time_ms);
+  CHECK_TRUE(self.yield_fn != nullptr);
+
+  // Override, then NULL-restore.
+  erd_bridge_poll_set_time_fn(&self, budgeted_clock_advance_10);
+  POINTERS_EQUAL(budgeted_clock_advance_10, self.get_time_ms);
+  erd_bridge_poll_set_time_fn(&self, nullptr);
+  POINTERS_EQUAL(esphome::millis, self.get_time_ms);
+
+  erd_bridge_poll_set_yield_fn(&self, nullptr);
+  CHECK_TRUE(self.yield_fn != nullptr);
 }
 
 // ============================================================================
@@ -740,7 +817,7 @@ TEST(erd_bridge_poll_restart_pending, should_defer_restart_until_cycle_completes
   // Timer fires again while both reads are in flight: defer, don't restart.
   after(polling_interval);
   CHECK_TRUE(self.restart_pending);
-  CHECK_TRUE(self.erd_index == 2);
+  CHECK_EQUAL(self.erd_index, 2);
 
   // The last completion must start the next cycle immediately.
   should_request_read(0xC0, erd_1);
@@ -751,7 +828,7 @@ TEST(erd_bridge_poll_restart_pending, should_defer_restart_until_cycle_completes
   trigger_read_completed(0xC0, erd_2, &b, sizeof(b));
 
   CHECK_FALSE(self.restart_pending);
-  CHECK_TRUE(self.erd_index == 2);
+  CHECK_EQUAL(self.erd_index, 2);
   CHECK_EQUAL(1u, self.cycle_count);
   mock().checkExpectations();
 }
