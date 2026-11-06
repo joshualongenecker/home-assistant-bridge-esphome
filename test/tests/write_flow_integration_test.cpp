@@ -111,6 +111,10 @@ TEST(write_flow_integration, should_route_write_from_mqtt_to_erd_client)
     .andReturnValue(true);
 
   when_home_assistant_publishes_write(erd, "01");
+
+  /* Teardown calls mock().clear(), which silently discards unmet
+   * expectations; fail here instead if the write never reached the client. */
+  mock().checkExpectations();
 }
 
 TEST(write_flow_integration, should_parse_erd_from_topic_path)
@@ -132,6 +136,8 @@ TEST(write_flow_integration, should_parse_erd_from_topic_path)
     .andReturnValue(true);
 
   when_home_assistant_publishes_write(erd, "FF");
+
+  mock().checkExpectations();
 }
 
 TEST(write_flow_integration, should_drop_write_when_host_is_broadcast)
@@ -140,16 +146,16 @@ TEST(write_flow_integration, should_drop_write_when_host_is_broadcast)
 
   tiny_erd_t erd = 0x7701;
 
-  mock()
-    .expectOneCall("update_erd_write_result")
-    .onObject(&adapter.interface)
-    .withParameter("erd", erd)
-    .withParameter("board_address", 0xFF)
-    .withParameter("success", false)
-    .withParameter("failure_reason",
-      tiny_gea3_erd_client_write_failure_reason_not_supported);
-
   when_home_assistant_publishes_write(erd, "01");
+
+  /* The real adapter's update_erd_write_result runs (it is not mocked
+   * here), so assert on the ESPHome MQTT double's recorded publish — a
+   * mock expectation on it would be silently discarded by teardown's
+   * mock().clear(). */
+  STRCMP_EQUAL("geappliances/test_device/erd/0x7701/write_result",
+               mqtt_double.last_published_topic_.c_str());
+  STRCMP_EQUAL("{\"error\":\"not_supported\"}", mqtt_double.last_published_payload_.c_str());
+  CHECK(mqtt_double.last_published_retain_);
 }
 
 TEST(write_flow_integration, should_report_write_result_on_completion)
@@ -182,14 +188,14 @@ TEST(write_flow_integration, should_report_write_result_on_completion)
   args.write_completed.data = &dummy;
   args.write_completed.data_size = 1;
 
-  mock()
-    .expectOneCall("publish_raw")
-    .withParameter("topic", "geappliances/test_device/erd/0x7701/write_result")
-    .withParameterOfType("const char*", "payload", "ok")
-    .withParameter("payload_len", 2)
-    .withParameter("retain", true);
-
   tiny_gea3_erd_client_double_trigger_activity_event(&erd_client, &args);
+
+  STRCMP_EQUAL("geappliances/test_device/erd/0x7701/write_result",
+               mqtt_double.last_published_topic_.c_str());
+  STRCMP_EQUAL("ok", mqtt_double.last_published_payload_.c_str());
+  CHECK(mqtt_double.last_published_retain_);
+
+  mock().checkExpectations();
 }
 
 TEST(write_flow_integration, should_report_write_failure_to_mqtt)
@@ -223,12 +229,14 @@ TEST(write_flow_integration, should_report_write_failure_to_mqtt)
   args.write_failed.data_size = 1;
   args.write_failed.reason = tiny_gea3_erd_client_write_failure_reason_incorrect_size;
 
-  mock()
-    .expectOneCall("publish_raw")
-    .withParameter("topic", "geappliances/test_device/erd/0x7701/write_result")
-    .withParameter("retain", true);
-
   tiny_gea3_erd_client_double_trigger_activity_event(&erd_client, &args);
+
+  STRCMP_EQUAL("geappliances/test_device/erd/0x7701/write_result",
+               mqtt_double.last_published_topic_.c_str());
+  STRCMP_EQUAL("{\"error\":\"incorrect_size\"}", mqtt_double.last_published_payload_.c_str());
+  CHECK(mqtt_double.last_published_retain_);
+
+  mock().checkExpectations();
 }
 
 TEST(write_flow_integration, should_route_secondary_board_write_to_secondary_address)
@@ -265,12 +273,12 @@ TEST(write_flow_integration, should_route_secondary_board_write_to_secondary_add
   args.write_completed.data = &dummy;
   args.write_completed.data_size = 1;
 
-  mock()
-    .expectOneCall("publish_raw")
-    .withParameter("topic", "geappliances/test_device/erd/0xa1_0x7701/write_result")
-    .withParameterOfType("const char*", "payload", "ok")
-    .withParameter("payload_len", 2)
-    .withParameter("retain", true);
-
   tiny_gea3_erd_client_double_trigger_activity_event(&erd_client, &args);
+
+  STRCMP_EQUAL("geappliances/test_device/erd/0xa1_0x7701/write_result",
+               mqtt_double.last_published_topic_.c_str());
+  STRCMP_EQUAL("ok", mqtt_double.last_published_payload_.c_str());
+  CHECK(mqtt_double.last_published_retain_);
+
+  mock().checkExpectations();
 }

@@ -28,6 +28,7 @@ class MqttTestDouble : public MQTTClientComponent {
   bool publish_should_fail_{false};
   std::string last_published_topic_;
   std::string last_published_payload_;
+  bool last_published_retain_{false};
 
   std::function<void(const std::string&, const std::string&)> subscribe_callback_;
   std::function<void(bool)> on_connect_callback_;
@@ -35,16 +36,18 @@ class MqttTestDouble : public MQTTClientComponent {
 
   bool is_connected() override { return connected_; }
   bool publish(const std::string& topic, const std::string& payload,
-               uint8_t /*qos*/, bool /*retain*/) override {
+               uint8_t /*qos*/, bool retain) override {
     last_published_topic_ = topic;
     last_published_payload_ = payload;
+    last_published_retain_ = retain;
     return !publish_should_fail_;
   }
 
   bool publish(const char* topic, const char* payload, size_t payload_length,
-               uint8_t /*qos*/, bool /*retain*/) override {
+               uint8_t /*qos*/, bool retain) override {
     last_published_topic_ = topic;
     last_published_payload_.assign(payload, payload_length);
+    last_published_retain_ = retain;
     return !publish_should_fail_;
   }
 
