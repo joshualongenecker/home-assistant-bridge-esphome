@@ -4,6 +4,7 @@
 
 #include "ha_discovery_manager.h"
 #include "ha_discovery_data.h"
+#include "appliance_type_category.h"
 #include "geappliances_bridge_log.h"
 
 #include <cstdio>
@@ -760,118 +761,6 @@ static bool copy_availability_value(char* destination, size_t destination_size, 
     }
     memcpy(destination, src, len + 1);
     return true;
-}
-
-static bool should_process_category(const char* category, uint8_t appliance_type)
-{
-    if (strcmp(category, "common") == 0) return true;
-
-    /* Appliance type enum (ERD 0x0008):
-     * 0=WaterHeater, 1=ClothesDryer, 2=ClothesWasher, 3=Refrigerator,
-     * 4=Microwave, 5=Advantium, 6=Dishwasher, 7=Oven, 8=ElectricRange,
-     * 9=GasRange, 10=ThermostatRAC, 11=ElectricCooktop, 12=PizzaOven,
-     * 13=GasCooktop, 14=SplitDFSDuctFreeSplitAC, 15=Hood,
-     * 16=PointOfEntryWaterFilter, 17=InductionCooktop, 18=DeliveryBox,
-     * 19=KitchenHubVentHood, 20=ZonelinePTAC, 21=WaterSoftener,
-     * 22=PortableAC, 23=CombinationWasherDryer, 24=DualZoneWineChiller,
-     * 25=BeverageCenter, 26=CoffeeBrewer, 27=OpalNuggetIceMaker,
-     * 28=InHomeGrower, 29=Dehumidifer, 30=UnderCounterIceMaker,
-     * 31=ThroughWallAC, 32=FPDishDrawer, 33=EspressoCoffeeMaker,
-     * 34=ToasterOven, 35=ZonelineVertical, 36=CentralDFSDuctFreeSplitController,
-     * 37=BLEMeshGateway, 38=StandMixer, 39=FPCooktop,
-     * 40=FPCooktopTeppanyaki, 41=FPVentilationDowndraft, 42=SmartPlug,
-     * 43=Smoker, 44=AirHandlerVRF, 45=FabricCareCabinetCloset,
-     * 46=LaundryCenter, 47=Grill, 48=Freezer, 49=WarmingDrawer,
-     * 50=VacuumSealDrawer, 51=WineCabinet, 52=CentralAC, 53=SoftStarter,
-     * 54=HearthPizzaOven, 55=SourdoughStarter, 56=Thermostat
-     */
-
-    /* Dishwasher: 6=Dishwasher, 32=FPDishDrawer */
-    if (appliance_type == 6 || appliance_type == 32) {
-        if (strcmp(category, "dishwasher") == 0) return true;
-        if (strcmp(category, "energy") == 0) return true;
-    }
-
-    /* Refrigeration: 3=Refrigerator, 24=DualZoneWineChiller,
-     * 25=BeverageCenter, 48=Freezer, 51=WineCabinet */
-    if (appliance_type == 3 || appliance_type == 24 ||
-        appliance_type == 25 || appliance_type == 48 ||
-        appliance_type == 51) {
-        if (strcmp(category, "refrigeration") == 0) return true;
-        if (strcmp(category, "energy") == 0) return true;
-    }
-
-    /* Laundry: 1=ClothesDryer, 2=ClothesWasher, 23=CombinationWasherDryer,
-     * 45=FabricCareCabinetCloset, 46=LaundryCenter */
-    if (appliance_type == 1 || appliance_type == 2 ||
-        appliance_type == 23 || appliance_type == 45 ||
-        appliance_type == 46) {
-        if (strcmp(category, "laundry") == 0) return true;
-        if (strcmp(category, "energy") == 0) return true;
-    }
-
-    /* Range/Cooking: 4=Microwave, 5=Advantium, 7=Oven, 8=ElectricRange,
-     * 9=GasRange, 11=ElectricCooktop, 12=PizzaOven, 13=GasCooktop,
-     * 15=Hood, 17=InductionCooktop, 19=KitchenHubVentHood,
-     * 34=ToasterOven, 39=FPCooktop, 40=FPCooktopTeppanyaki,
-     * 41=FPVentilationDowndraft, 43=Smoker, 47=Grill,
-     * 49=WarmingDrawer, 54=HearthPizzaOven */
-    if (appliance_type == 4 || appliance_type == 5 ||
-        appliance_type == 7 || appliance_type == 8 ||
-        appliance_type == 9 || appliance_type == 11 ||
-        appliance_type == 12 || appliance_type == 13 ||
-        appliance_type == 15 || appliance_type == 17 ||
-        appliance_type == 19 || appliance_type == 34 ||
-        appliance_type == 39 || appliance_type == 40 ||
-        appliance_type == 41 || appliance_type == 43 ||
-        appliance_type == 47 || appliance_type == 49 ||
-        appliance_type == 54) {
-        if (strcmp(category, "range") == 0) return true;
-        if (strcmp(category, "energy") == 0) return true;
-    }
-
-    /* Air conditioning: 10=ThermostatRAC, 14=SplitDFSDuctFreeSplitAC,
-     * 20=ZonelinePTAC, 22=PortableAC,
-     * 31=ThroughWallAC, 35=ZonelineVertical, 36=CentralDFSDuctFreeSplitController,
-     * 44=AirHandlerVRF, 52=CentralAC, 56=Thermostat */
-    if (appliance_type == 10 || appliance_type == 14 ||
-        appliance_type == 20 || appliance_type == 22 ||
-        appliance_type == 31 || appliance_type == 35 ||
-        appliance_type == 36 || appliance_type == 44 ||
-        appliance_type == 52 ||
-        appliance_type == 56) {
-        if (strcmp(category, "airconditioning") == 0) return true;
-        if (strcmp(category, "energy") == 0) return true;
-    }
-
-    /* Water heater: 0=WaterHeater */
-    if (appliance_type == 0) {
-        if (strcmp(category, "waterheater") == 0) return true;
-        if (strcmp(category, "energy") == 0) return true;
-    }
-
-    /* Water filter: 16=PointOfEntryWaterFilter, 21=WaterSoftener */
-    if (appliance_type == 16 || appliance_type == 21) {
-        if (strcmp(category, "waterfilter") == 0) return true;
-        if (strcmp(category, "energy") == 0) return true;
-    }
-
-    /* Small appliance: 18=DeliveryBox, 26=CoffeeBrewer, 27=OpalNuggetIceMaker,
-     * 28=InHomeGrower, 29=Dehumidifer, 30=UnderCounterIceMaker, 33=EspressoCoffeeMaker,
-     * 37=BLEMeshGateway, 38=StandMixer, 42=SmartPlug, 50=VacuumSealDrawer,
-     * 53=SoftStarter, 55=SourdoughStarter */
-    if (appliance_type == 18 || appliance_type == 26 ||
-        appliance_type == 27 || appliance_type == 28 ||
-        appliance_type == 29 || appliance_type == 30 ||
-        appliance_type == 33 || appliance_type == 37 ||
-        appliance_type == 38 ||
-        appliance_type == 42 || appliance_type == 50 ||
-        appliance_type == 53 || appliance_type == 55) {
-        if (strcmp(category, "smallappliance") == 0) return true;
-        if (strcmp(category, "energy") == 0) return true;
-    }
-
-    return false;
 }
 
 static void cleanup_resources(ha_discovery_manager_t* self)

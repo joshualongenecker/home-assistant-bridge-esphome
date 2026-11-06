@@ -62,8 +62,11 @@ extern const tiny_erd_t applianceApiFeatureErds[];
 extern const uint16_t applianceApiFeatureErdCount;
 
 typedef struct {
+  // Category-specific ERD list; NULL when the type has no category.
   const tiny_erd_t* erdList;
   uint16_t erdCount;
+  // Discovery category token (matches ha_discovery_categories[].name); NULL when none.
+  const char* category;
 } applianceTypeToErdListAndCount_t;
 
 extern const applianceTypeToErdListAndCount_t applianceTypeToErdGroupTranslation[];

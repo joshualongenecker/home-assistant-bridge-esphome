@@ -10,9 +10,8 @@
 #define APPLIANCE_TYPE_MAP_H
 
 #include <cstdint>
-#include <string>
 
-inline std::string appliance_type_to_string(uint8_t appliance_type) {
+inline const char* appliance_type_to_string(uint8_t appliance_type) {
   switch (appliance_type) {
     case 0: return "WaterHeater";
     case 1: return "ClothesDryer";

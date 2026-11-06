@@ -101,8 +101,12 @@ ErdPollListResult build_erd_poll_list(const ErdPollListConfig& config)
 
     if (config.appliance_type < maximumApplianceType) {
       const auto& group = applianceTypeToErdGroupTranslation[config.appliance_type];
-      result.erds_count = append_standard_erds(result.erds, result.erds_count,
-                                               group.erdList, group.erdCount);
+      // Appliance types with no category-specific ERDs upstream (e.g.
+      // HomeVentilation) have a NULL list and keep only the ERDs above.
+      if (group.erdList != nullptr) {
+        result.erds_count = append_standard_erds(result.erds, result.erds_count,
+                                                 group.erdList, group.erdCount);
+      }
     }
 
     result.erds_count = append_custom_erds(result.erds, result.erds_count,

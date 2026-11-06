@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
+from appliance_type_categories import APPLIANCE_TYPE_CATEGORY, UNKNOWN_APPLIANCE_TYPE
+
 
 
 def parse_erd_id(erd_id_str: str) -> int:
@@ -99,6 +101,70 @@ def format_erd_list(erds: List[int], indent: int = 2) -> str:
     return '\n'.join(lines)
 
 
+# (category_key, array_name, count_name, description). category_key.lower() is
+# the discovery category token shared with the HA pipeline
+# (ha_discovery/<token>.jsonl, pipeline/ha_constants.CATEGORIES) and with
+# scripts/appliance_type_categories.py.
+CATEGORY_INFO = [
+    ('common', 'commonErds', 'commonErdCount', '0x0000 to 0x0FFF: common ERDs (all appliance types)'),
+    ('refrigeration', 'refrigerationErds', 'refrigerationErdCount', '0x1000 to 0x1FFF: refrigeration ERDs'),
+    ('laundry', 'laundryErds', 'laundryErdCount', '0x2000 to 0x2FFF: laundry ERDs'),
+    ('dishWasher', 'dishWasherErds', 'dishWasherErdCount', '0x3000 to 0x3FFF: dishwasher ERDs'),
+    ('waterHeater', 'waterHeaterErds', 'waterHeaterErdCount', '0x4000 to 0x4FFF: waterHeater ERDs'),
+    ('range', 'rangeErds', 'rangeErdCount', '0x5000 to 0x5FFF: range ERDs (stoves, cooktops, ovens, etc)'),
+    ('airConditioning', 'airConditioningErds', 'airConditioningErdCount', '0x7000 to 0x7FFF: air conditioning ERDs (mini split, Zoneline, etc)'),
+    ('waterFilter', 'waterFilterErds', 'waterFilterErdCount', '0x8000 to 0x8FFF: water filter ERDs'),
+    ('smallAppliance', 'smallApplianceErds', 'smallApplianceErdCount', '0x9000 to 0x9FFF: small appliance ERDs (coffee makers, etc)'),
+    ('energy', 'energyErds', 'energyErdCount', '0xD000 to 0xDFFF: energy ERDs (all appliance types)')
+]
+
+# Discovery category token -> (array_name, count_name) C symbols.
+CATEGORY_CPP = {key.lower(): (array_name, count_name)
+                for key, array_name, count_name, _ in CATEGORY_INFO}
+
+
+def get_appliance_type_values(erds: List[Dict]) -> Dict[str, str]:
+    """Return the ERD 0x0008 (Appliance Type) enum: value string -> display name."""
+    erd = next((e for e in erds if e.get('id') == '0x0008'), None)
+    if erd is None:
+        raise ValueError("ERD 0x0008 (Appliance Type) not found in ERD definitions")
+    return erd['data'][0]['values']
+
+
+def build_appliance_group_rows(appliance_type_values: Dict[str, str]):
+    """Rows for applianceTypeToErdGroupTranslation[], one per appliance type.
+
+    The table is indexed by appliance type, so every value from 0 up to the
+    largest enum value needs a category. A type the upstream enum gained but
+    the mapping does not know about is an error rather than a skip: silently
+    dropping it is exactly how appliances stopped getting their category ERDs.
+    """
+    display = {int(k): v for k, v in appliance_type_values.items()
+               if int(k) != UNKNOWN_APPLIANCE_TYPE}
+    if not display:
+        raise ValueError("ERD 0x0008 (Appliance Type) enum has no values")
+    bad_tokens = sorted({t for t in APPLIANCE_TYPE_CATEGORY.values()
+                         if t is not None and t not in CATEGORY_CPP})
+    if bad_tokens:
+        raise ValueError(f"APPLIANCE_TYPE_CATEGORY uses unknown category tokens: {bad_tokens}")
+    rows = []
+    for type_value in range(max(display) + 1):
+        if type_value not in display:
+            raise ValueError(
+                f"appliance type enum has a gap at {type_value}; the generated "
+                "table is indexed by appliance type and cannot skip values")
+        if type_value not in APPLIANCE_TYPE_CATEGORY:
+            raise ValueError(
+                f"appliance type {type_value} ({display[type_value]!r}) is missing from "
+                "APPLIANCE_TYPE_CATEGORY in scripts/appliance_type_categories.py; "
+                "add it (None if it has no category-specific ERDs) and regenerate")
+        rows.append((type_value, display[type_value], APPLIANCE_TYPE_CATEGORY[type_value]))
+    stale = sorted(set(APPLIANCE_TYPE_CATEGORY) - set(display))
+    if stale:
+        print(f"WARNING: APPLIANCE_TYPE_CATEGORY covers types the enum no longer defines: {stale}")
+    return rows
+
+
 def generate_header(categories: Dict[str, List[int]], polling_list_max_size: int) -> str:
     """Generate the erd_lists.h header file with extern const declarations."""
     header = f"""/*!
@@ -121,20 +187,7 @@ def generate_header(categories: Dict[str, List[int]], polling_list_max_size: int
 """
     
     # Generate each category — extern const declarations
-    category_info = [
-        ('common', 'commonErds', 'commonErdCount', '0x0000 to 0x0FFF: common ERDs (all appliance types)'),
-        ('refrigeration', 'refrigerationErds', 'refrigerationErdCount', '0x1000 to 0x1FFF: refrigeration ERDs'),
-        ('laundry', 'laundryErds', 'laundryErdCount', '0x2000 to 0x2FFF: laundry ERDs'),
-        ('dishWasher', 'dishWasherErds', 'dishWasherErdCount', '0x3000 to 0x3FFF: dishwasher ERDs'),
-        ('waterHeater', 'waterHeaterErds', 'waterHeaterErdCount', '0x4000 to 0x4FFF: waterHeater ERDs'),
-        ('range', 'rangeErds', 'rangeErdCount', '0x5000 to 0x5FFF: range ERDs (stoves, cooktops, ovens, etc)'),
-        ('airConditioning', 'airConditioningErds', 'airConditioningErdCount', '0x7000 to 0x7FFF: air conditioning ERDs (mini split, Zoneline, etc)'),
-        ('waterFilter', 'waterFilterErds', 'waterFilterErdCount', '0x8000 to 0x8FFF: water filter ERDs'),
-        ('smallAppliance', 'smallApplianceErds', 'smallApplianceErdCount', '0x9000 to 0x9FFF: small appliance ERDs (coffee makers, etc)'),
-        ('energy', 'energyErds', 'energyErdCount', '0xD000 to 0xDFFF: energy ERDs (all appliance types)')
-    ]
-    
-    for category_key, array_name, count_name, description in category_info:
+    for category_key, array_name, count_name, description in CATEGORY_INFO:
         header += f"// {description}\n"
         header += f"extern const tiny_erd_t {array_name}[];\n"
         header += f"extern const uint16_t {count_name};\n\n"
@@ -148,8 +201,11 @@ def generate_header(categories: Dict[str, List[int]], polling_list_max_size: int
 
     # Add the lookup table structure
     header += """typedef struct {
+  // Category-specific ERD list; NULL when the type has no category.
   const tiny_erd_t* erdList;
   uint16_t erdCount;
+  // Discovery category token (matches ha_discovery_categories[].name); NULL when none.
+  const char* category;
 } applianceTypeToErdListAndCount_t;
 
 extern const applianceTypeToErdListAndCount_t applianceTypeToErdGroupTranslation[];
@@ -160,26 +216,14 @@ extern const uint16_t maximumApplianceType;
     return header
 
 
-def generate_erd_lists_cpp(categories: Dict[str, List[int]]) -> str:
+def generate_erd_lists_cpp(categories: Dict[str, List[int]],
+                           appliance_type_values: Dict[str, str]) -> str:
     """Generate the erd_lists.cpp companion file with actual array definitions."""
     cpp = """#include "erd_lists.h"
 
 """
 
-    category_info = [
-        ('common', 'commonErds', 'commonErdCount', '0x0000 to 0x0FFF: common ERDs (all appliance types)'),
-        ('refrigeration', 'refrigerationErds', 'refrigerationErdCount', '0x1000 to 0x1FFF: refrigeration ERDs'),
-        ('laundry', 'laundryErds', 'laundryErdCount', '0x2000 to 0x2FFF: laundry ERDs'),
-        ('dishWasher', 'dishWasherErds', 'dishWasherErdCount', '0x3000 to 0x3FFF: dishwasher ERDs'),
-        ('waterHeater', 'waterHeaterErds', 'waterHeaterErdCount', '0x4000 to 0x4FFF: waterHeater ERDs'),
-        ('range', 'rangeErds', 'rangeErdCount', '0x5000 to 0x5FFF: range ERDs (stoves, cooktops, ovens, etc)'),
-        ('airConditioning', 'airConditioningErds', 'airConditioningErdCount', '0x7000 to 0x7FFF: air conditioning ERDs (mini split, Zoneline, etc)'),
-        ('waterFilter', 'waterFilterErds', 'waterFilterErdCount', '0x8000 to 0x8FFF: water filter ERDs'),
-        ('smallAppliance', 'smallApplianceErds', 'smallApplianceErdCount', '0x9000 to 0x9FFF: small appliance ERDs (coffee makers, etc)'),
-        ('energy', 'energyErds', 'energyErdCount', '0xD000 to 0xDFFF: energy ERDs (all appliance types)')
-    ]
-
-    for category_key, array_name, count_name, description in category_info:
+    for category_key, array_name, count_name, description in CATEGORY_INFO:
         erds = categories[category_key]
         cpp += f"// {description}\n"
         cpp += f"const tiny_erd_t {array_name}[] = {{\n"
@@ -212,66 +256,22 @@ def generate_erd_lists_cpp(categories: Dict[str, List[int]]) -> str:
     cpp += "};\n"
     cpp += "const uint16_t applianceApiFeatureErdCount = sizeof(applianceApiFeatureErds) / sizeof(applianceApiFeatureErds[0]);\n\n"
 
-    # Lookup table
-    cpp += """const applianceTypeToErdListAndCount_t applianceTypeToErdGroupTranslation[] = {
-  { waterHeaterErds, waterHeaterErdCount }, // 0x00 = Water heater
-  { laundryErds, laundryErdCount }, // 0x01 = Clothes washer
-  { laundryErds, laundryErdCount }, // 0x02 = Clothes dryer
-  { refrigerationErds, refrigerationErdCount }, // 0x03 = Refrigerator
-  { smallApplianceErds, smallApplianceErdCount }, // 0x04 = Microwave
-  { rangeErds, rangeErdCount }, // 0x05 = Advantium
-  { dishWasherErds, dishWasherErdCount }, // 0x06 = Dishwasher
-  { rangeErds, rangeErdCount }, // 0x07 = Oven
-  { rangeErds, rangeErdCount }, // 0x08 = Electric range
-  { rangeErds, rangeErdCount }, // 0x09 = Gas range
-  { airConditioningErds, airConditioningErdCount }, // 0x0A = Thermostat/RAC
-  { rangeErds, rangeErdCount }, // 0x0B = Electric Cooktop
-  { rangeErds, rangeErdCount }, // 0x0C = Pizza Oven
-  { rangeErds, rangeErdCount }, // 0x0D = Gas Cooktop
-  { airConditioningErds, airConditioningErdCount }, // 0x0E = Split / DFS (Duct-Free Split) AC
-  { rangeErds, rangeErdCount }, // 0x0F = Hood
-  { waterFilterErds, waterFilterErdCount }, // 0x10 = Point of Entry Water Filter
-  { rangeErds, rangeErdCount }, // 0x11 = Induction Cooktop
-  { refrigerationErds, refrigerationErdCount }, // 0x12 = Delivery Box
-  { rangeErds, rangeErdCount }, // 0x13 = Kitchen Hub Vent Hood
-  { airConditioningErds, airConditioningErdCount }, // 0x14 = Zoneline/PTAC
-  { waterFilterErds, waterFilterErdCount }, // 0x15 = Water Softener
-  { airConditioningErds, airConditioningErdCount }, // 0x16 = Portable AC
-  { laundryErds, laundryErdCount }, // 0x17 = Combination Washer Dryer
-  { refrigerationErds, refrigerationErdCount }, // 0x18 = Dual Zone Wine Chiller
-  { refrigerationErds, refrigerationErdCount }, // 0x19 = Beverage Center
-  { smallApplianceErds, smallApplianceErdCount }, // 0x1A = Coffee Brewer
-  { smallApplianceErds, smallApplianceErdCount }, // 0x1B = Opal Nugget Ice Maker
-  { refrigerationErds, refrigerationErdCount }, // 0x1C = In-Home Grower
-  { airConditioningErds, airConditioningErdCount }, // 0x1D = Dehumidifer
-  { refrigerationErds, refrigerationErdCount }, // 0x1E = Under Counter Ice Maker
-  { airConditioningErds, airConditioningErdCount }, // 0x1F = Through Wall AC
-  { dishWasherErds, dishWasherErdCount }, // 0x20 = F&P DishDrawer
-  { smallApplianceErds, smallApplianceErdCount }, // 0x21 = Espresso Coffee Maker
-  { smallApplianceErds, smallApplianceErdCount }, // 0x22 = Toaster Oven
-  { airConditioningErds, airConditioningErdCount }, // 0x23 = Zoneline/VTAC
-  { airConditioningErds, airConditioningErdCount }, // 0x24 = Central DFS (Duct-Free Split) Controller
-  { smallApplianceErds, smallApplianceErdCount }, // 0x25 = BLE Mesh Gateway
-  { smallApplianceErds, smallApplianceErdCount }, // 0x26 = Stand Mixer
-  { rangeErds, rangeErdCount }, // 0x27 = Fisher & Paykel Cooktop
-  { rangeErds, rangeErdCount }, // 0x28 = Fisher & Paykel Cooktop Teppanyaki
-  { rangeErds, rangeErdCount }, // 0x29 = Fisher & Paykel Ventilation Downdraft
-  { smallApplianceErds, smallApplianceErdCount }, // 0x2A = Smart Plug
-  { smallApplianceErds, smallApplianceErdCount }, // 0x2B = Smoker
-  { airConditioningErds, airConditioningErdCount }, // 0x2C = Air Handler VRF
-  { laundryErds, laundryErdCount }, // 0x2D = Fabric Care Cabinet Closet
-  { laundryErds, laundryErdCount }, // 0x2E = Laundry Center
-  { rangeErds, rangeErdCount }, // 0x2F = Grill
-  { refrigerationErds, refrigerationErdCount }, // 0x30 = Freezer
-  { rangeErds, rangeErdCount }, // 0x31 = Warming Drawer
-  { smallApplianceErds, smallApplianceErdCount }, // 0x32 = Vacuum Seal Drawer
-  { refrigerationErds, refrigerationErdCount }, // 0x33 = Wine Cabinet
-  { airConditioningErds, airConditioningErdCount }, // 0x34 = Central AC
-  { rangeErds, rangeErdCount }, // 0x35 = Hearth Pizza Oven
-  { smallApplianceErds, smallApplianceErdCount }, // 0x36 = Sourdough Starter
-};
-const uint16_t maximumApplianceType = sizeof(applianceTypeToErdGroupTranslation) / sizeof(applianceTypeToErdGroupTranslation[0]);
-"""
+    # Lookup table, indexed by appliance type. Derived from the upstream
+    # ERD 0x0008 enum plus APPLIANCE_TYPE_CATEGORY; see
+    # scripts/appliance_type_categories.py for how each category was chosen.
+    cpp += "const applianceTypeToErdListAndCount_t applianceTypeToErdGroupTranslation[] = {\n"
+    for type_value, display_name, token in build_appliance_group_rows(appliance_type_values):
+        if token is None:
+            cpp += (f"  {{ nullptr, 0, nullptr }}, "
+                    f"// 0x{type_value:02X} = {display_name} (no category-specific ERDs)\n")
+        else:
+            array_name, count_name = CATEGORY_CPP[token]
+            cpp += (f"  {{ {array_name}, {count_name}, \"{token}\" }}, "
+                    f"// 0x{type_value:02X} = {display_name}\n")
+    cpp += "};\n"
+    cpp += ("const uint16_t maximumApplianceType = sizeof(applianceTypeToErdGroupTranslation) / "
+            "sizeof(applianceTypeToErdGroupTranslation[0]);\n")
+
 
     return cpp
 
@@ -543,12 +543,11 @@ def generate_appliance_type_map(erds: List[Dict]) -> str:
     Maps each appliance-type value to a PascalCase identifier. The identifier is
     part of the generated device ID (applianceType_model_serial), so it must be
     stable across regenerations. Naming rule: plain PascalCase — split the display
-    name on non-alphanumeric characters and capitalize the first letter of each word.
+    name on non-alphanumeric characters and capitalize the first letter of each
+    word. The value is returned as a string literal, not a std::string: the only
+    caller concatenates it into the device ID and nothing owns the pointer.
     """
-    erd = next((e for e in erds if e.get('id') == '0x0008'), None)
-    if erd is None:
-        raise ValueError("ERD 0x0008 (Appliance Type) not found in ERD definitions")
-    values = erd['data'][0]['values']
+    values = get_appliance_type_values(erds)
 
     def to_identifier(name: str) -> str:
         words = re.split(r'[^a-zA-Z0-9]+', name)
@@ -567,9 +566,8 @@ def generate_appliance_type_map(erds: List[Dict]) -> str:
         "#define APPLIANCE_TYPE_MAP_H",
         "",
         "#include <cstdint>",
-        "#include <string>",
         "",
-        "inline std::string appliance_type_to_string(uint8_t appliance_type) {",
+        "inline const char* appliance_type_to_string(uint8_t appliance_type) {",
         "  switch (appliance_type) {",
     ]
     for key in sorted(values, key=int):
@@ -719,7 +717,7 @@ def main():
 
     # Generate header (includes POLLING_LIST_MAX_SIZE)
     header_content = generate_header(categories, polling_list_max_size)
-    cpp_content = generate_erd_lists_cpp(categories)
+    cpp_content = generate_erd_lists_cpp(categories, get_appliance_type_values(erds))
 
     # Write output
     print(f"\nWriting generated header to {output_file}")
