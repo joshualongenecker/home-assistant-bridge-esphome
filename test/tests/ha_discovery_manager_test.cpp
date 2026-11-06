@@ -12,22 +12,6 @@ TEST_GROUP(ha_discovery_manager)
 {
 };
 
-TEST(ha_discovery_manager, uses_legacy_topic_without_board_address)
-{
-    char topic[128];
-    ha_discovery_test_format_erd_topic(topic, sizeof(topic), "unit", "f414", "", "value");
-
-    STRCMP_EQUAL("geappliances/unit/erd/0xf414/value", topic);
-}
-
-TEST(ha_discovery_manager, combines_board_address_and_erd_in_non_primary_topic)
-{
-    char topic[128];
-    ha_discovery_test_format_erd_topic(topic, sizeof(topic), "unit", "f414", "a2", "value");
-
-    STRCMP_EQUAL("geappliances/unit/erd/0xa2_0xf414/value", topic);
-}
-
 static const char* const SENSOR_LINE = "{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\"}";
 static const char* const BUTTON_LINE = "{\"i\":\"0001\",\"n\":\"Reset\",\"d\":\"button\"}";
 
@@ -59,6 +43,66 @@ TEST_GROUP(ha_discovery_manager_availability)
         return manager.payload_buf;
     }
 };
+
+/* Golden discovery topics: the payload must carry the exact topics the
+ * publisher and write path use (shared erd_topic grammar). */
+TEST(ha_discovery_manager_availability, payload_state_topic_matches_grammar_primary_board)
+{
+    const char* payload = build(SENSOR_LINE);
+
+    CHECK(strstr(payload, "\"state_topic\":\"geappliances/unit/erd/0x0001/value\"") != NULL);
+}
+
+TEST(ha_discovery_manager_availability, payload_state_topic_matches_grammar_secondary_board)
+{
+    const char* payload = build("{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\",\"a\":\"a2\"}");
+
+    CHECK(strstr(payload, "\"state_topic\":\"geappliances/unit/erd/0xa2_0x0001/value\"") != NULL);
+}
+
+TEST(ha_discovery_manager_availability, payload_state_topic_canonicalizes_uppercase_board_address)
+{
+    /* The custom profile allows any hex case in "a"; the shared grammar
+     * re-emits it lowercase so discovery topics always match the
+     * publisher's lowercase value topics. */
+    const char* payload = build("{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\",\"a\":\"A2\"}");
+
+    CHECK(strstr(payload, "\"state_topic\":\"geappliances/unit/erd/0xa2_0x0001/value\"") != NULL);
+}
+
+TEST(ha_discovery_manager_availability, payload_command_topic_matches_grammar)
+{
+    const char* payload = build("{\"i\":\"0001\",\"n\":\"System Mode\",\"d\":\"select\",\"ct\":\"{{ value }}\",\"a\":\"a2\"}");
+
+    CHECK(strstr(payload, "\"command_topic\":\"geappliances/unit/erd/0xa2_0x0001/write\"") != NULL);
+}
+
+TEST(ha_discovery_manager_availability, rejects_board_address_matching_primary_sentinel)
+{
+    /* "ff"/"FF" is the GEA broadcast address the grammar reserves for the
+     * primary sentinel; an explicit address-specific entity must not
+     * silently bind to (and control) the primary board. */
+    CHECK_FALSE(ha_discovery_test_build_payload(&manager, "{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\",\"a\":\"ff\"}"));
+    CHECK_FALSE(ha_discovery_test_build_payload(&manager, "{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\",\"a\":\"FF\"}"));
+    UNSIGNED_LONGS_EQUAL(2, manager.total_filtered);
+}
+
+TEST(ha_discovery_manager_availability, accepts_board_address_fe_below_sentinel)
+{
+    const char* payload = build("{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\",\"a\":\"fe\"}");
+
+    CHECK(strstr(payload, "\"state_topic\":\"geappliances/unit/erd/0xfe_0x0001/value\"") != NULL);
+}
+
+TEST(ha_discovery_manager_availability, rejects_non_hex_board_address)
+{
+    /* The two-hex-digit validation must reject any non-hex "a" before it
+     * reaches the numeric conversion (strtoul would silently map it to
+     * board 0x00). */
+    CHECK_FALSE(ha_discovery_test_build_payload(&manager, "{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\",\"a\":\"zz\"}"));
+    CHECK_FALSE(ha_discovery_test_build_payload(&manager, "{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\",\"a\":\"0\"}"));
+    UNSIGNED_LONGS_EQUAL(2, manager.total_filtered);
+}
 
 TEST(ha_discovery_manager_availability, omits_availability_when_not_set)
 {

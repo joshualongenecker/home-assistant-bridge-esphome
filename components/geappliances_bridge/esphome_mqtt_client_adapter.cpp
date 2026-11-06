@@ -3,7 +3,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 #include "erd_cache.h"
-#include "tiny_gea_constants.h"
+#include "erd_topic.h"
 
 extern "C" {
 #include "tiny_utils.h"
@@ -33,16 +33,12 @@ static void update_erd_write_result(
   tiny_gea3_erd_client_write_failure_reason_t failure_reason)
 {
   auto self = reinterpret_cast<esphome_mqtt_client_adapter_t*>(_self);
-  auto mqtt_client = esphome::mqtt::global_mqtt_client;
-  if (mqtt_client == nullptr || !mqtt_client->is_connected()) return;
 
-  char topic[128];
-  if (board_address != tiny_gea_broadcast_address) {
-    snprintf(topic, sizeof(topic), "geappliances/%s/erd/0x%02x_0x%04x/write_result",
-            self->device_id, board_address, erd);
-  } else {
-    snprintf(topic, sizeof(topic), "geappliances/%s/erd/0x%04x/write_result",
-            self->device_id, erd);
+  char topic[ERD_TOPIC_BUF_SIZE];
+  if (erd_topic_format(topic, sizeof(topic), self->device_id, board_address, erd,
+                       ERD_TOPIC_OP_WRITE_RESULT) < 0) {
+    ESP_LOGW(TAG, "Write result topic truncated for ERD 0x%04X", erd);
+    return;
   }
 
   // Use a stack buffer to avoid heap allocation.
@@ -59,7 +55,9 @@ static void update_erd_write_result(
   }
 
   ESP_LOGD(TAG, "Write result for ERD 0x%04X: %s", erd, payload);
-  mqtt_client->publish(topic, payload, strlen(payload), 0, true);
+  /* Publish through the adapter's own publish_raw slot so the ESPHome global
+   * client is reached through one seam, not reached around. */
+  esphome_mqtt_client_adapter_publish_raw(_self, topic, payload, strlen(payload), true);
 }
 
 static i_tiny_event_t* on_write_request(i_mqtt_client_t* _self)
@@ -135,37 +133,23 @@ extern "C" void esphome_mqtt_client_adapter_subscribe_write_topic(
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
   if (mqtt_client == nullptr) return;
 
-  char topic[128];
-  snprintf(topic, sizeof(topic), "geappliances/%s/erd/+/write",
-          self->device_id);
-  strncpy(self->write_topic_, topic, sizeof(self->write_topic_) - 1);
-  self->write_topic_[sizeof(self->write_topic_) - 1] = '\0';
+  if (erd_topic_format_write_filter(self->write_topic_, sizeof(self->write_topic_),
+                                    self->device_id) < 0) {
+    ESP_LOGW(TAG, "Write topic filter too long for device_id: %s", self->device_id);
+    return;
+  }
 
-  mqtt_client->subscribe(topic, [self](const std::string& topic, const std::string& payload) {
-    auto pos = topic.find("/erd/0x");
-    if (pos == std::string::npos) return;
-
-    const char* segment = topic.c_str() + pos + 5; // points to "0x..."
-
-    // Primary-board topics are 0x{erd}; secondary-board topics are
-    // 0x{addr}_0x{erd}. Distinguish by the "_" separator: a prefix means a
-    // secondary board, no prefix means the primary board (tagged with the
-    // broadcast address 0xFF, which can never be a physical board address, so
-    // a secondary board at 0x00 stays unambiguous). The write bridge resolves
-    // the 0xFF sentinel to the detected host address. A segment whose address
-    // or ERD field is not valid hex is dropped; a secondary board at 0x00
-    // parses as 0x00 and stays distinct from the 0xFF primary sentinel.
-    uint8_t board_address = tiny_gea_broadcast_address;
-    unsigned erd = 0;
-    const char* underscore = strchr(segment, '_');
-    if (underscore != nullptr) {
-      unsigned addr = 0;
-      if (sscanf(segment, "%x", &addr) != 1) return;
-      if (sscanf(underscore + 1, "%x", &erd) != 1) return;
-      board_address = static_cast<uint8_t>(addr);
-    } else {
-      if (sscanf(segment, "%x", &erd) != 1) return;
-    }
+  mqtt_client->subscribe(self->write_topic_, [self](const std::string& topic, const std::string& payload) {
+    // Grammar and sentinel rules live in erd_topic.h: no-prefix topics
+    // parse to the ERD_TOPIC_PRIMARY (0xFF) sentinel, which the write
+    // bridge resolves to the detected host address; a secondary board at
+    // 0x00 parses as 0x00 and stays distinct from the sentinel. Topics
+    // that do not match the grammar exactly are dropped.
+    uint8_t board_address = 0;
+    uint16_t erd = 0;
+    erd_topic_op_t op = ERD_TOPIC_OP_VALUE;
+    if (!erd_topic_parse(topic.c_str(), self->device_id, &board_address, &erd, &op)) return;
+    if (op != ERD_TOPIC_OP_WRITE) return;
 
     // Decode hex payload to a local stack buffer to avoid race condition:
     // if a new MQTT message arrives before tiny_event_publish() delivers
@@ -183,7 +167,7 @@ extern "C" void esphome_mqtt_client_adapter_subscribe_write_topic(
     uint8_t local_size = static_cast<uint8_t>(decoded);
 
     mqtt_client_on_write_request_args_t args;
-    args.erd = static_cast<tiny_erd_t>(erd);
+    args.erd = erd;
     args.board_address = board_address;
     args.size = local_size;
     args.value = local_buffer;

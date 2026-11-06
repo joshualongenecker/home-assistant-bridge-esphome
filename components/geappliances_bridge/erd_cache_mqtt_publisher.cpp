@@ -2,6 +2,7 @@
 #include "erd_cache_mqtt_publisher.h"
 #include "erd_cache.h"
 #include "erd_bridge_common.h"
+#include "erd_topic.h"
 #include "geappliances_bridge_log.h"
 #include "i_mqtt_client.h"
 #include "esphome/core/log.h"
@@ -276,13 +277,13 @@ bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self)
                                                     snap_data, &snap_size);
   bool published_ok = false;
   if (have_entry) {
-    int topic_len;
-    if (snap_addr == self->primary_board_address) {
-      topic_len = snprintf(self->task_topic, sizeof(self->task_topic), "geappliances/%s/erd/0x%04x/value", self->device_id, snap_erd);
-    } else {
-      topic_len = snprintf(self->task_topic, sizeof(self->task_topic), "geappliances/%s/erd/0x%02x_0x%04x/value", self->device_id, snap_addr, snap_erd);
-    }
-    if (topic_len >= 0 && (unsigned)topic_len < sizeof(self->task_topic)) {
+    /* The cache stores physical board addresses; the detected primary
+     * address maps onto the grammar's 0xFF primary sentinel. */
+    int topic_len = erd_topic_format(self->task_topic, sizeof(self->task_topic),
+                                     self->device_id,
+                                     snap_addr == self->primary_board_address ? (uint8_t)ERD_TOPIC_PRIMARY : snap_addr,
+                                     snap_erd, ERD_TOPIC_OP_VALUE);
+    if (topic_len >= 0) {
       size_t data_len = snap_size;
       for (size_t i = 0; i < data_len; i++) {
         snprintf(self->task_hex + i * 2, 3, "%02x", snap_data[i]);
@@ -306,8 +307,8 @@ bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self)
          * update_required so the entry is picked up on the next wake. */
         erd_cache_mark_unpublished(self->cache, entry);
       }
-    } else if (topic_len >= (int)sizeof(self->task_topic)) {
-      ESP_LOGW(PUBLISHER_TAG, "MQTT topic truncated (device_id too long: %s)", self->device_id);
+    } else {
+      ESP_LOGW(PUBLISHER_TAG, "MQTT topic format failed (device_id too long? %s)", self->device_id);
     }
   }
 
