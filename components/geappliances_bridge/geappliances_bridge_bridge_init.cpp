@@ -131,10 +131,6 @@ void GeappliancesBridge::initialize_mqtt_client_()
   esphome_mqtt_client_adapter_init(&this->mqtt_client_adapter_,
                                    this->device_identity_manager_.get_device_id());
 
-  this->erd_registry_.clear_registered_erds();
-  esphome_mqtt_client_adapter_set_erd_registry(
-    &this->mqtt_client_adapter_, &this->erd_registry_);
-
   this->mqtt_client_adapter_initialized_ = true;
 }
 

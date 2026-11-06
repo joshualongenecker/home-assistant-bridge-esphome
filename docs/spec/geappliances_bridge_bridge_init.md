@@ -144,17 +144,15 @@ When no active ERD client is available (autodiscovery skipped) and no GEA3 UART 
 
 **Implementation:** `geappliances_bridge_bridge_init.cpp` lines 166–170.
 
-#### Requirement 3.4.3: Adapter Binding and Registry Setup
+#### Requirement 3.4.3: Adapter Binding
 
 The method MUST:
 1. Call `esphome_mqtt_client_adapter_init()` with the device ID from `device_identity_manager_`.
-2. Clear any stale registered ERDs from `erd_registry_`.
-3. Pass the registry pointer to the MQTT adapter via `esphome_mqtt_client_adapter_set_erd_registry()`.
-4. Set `mqtt_client_adapter_initialized_` to `true`.
+2. Set `mqtt_client_adapter_initialized_` to `true`.
 
-**Rationale:** The registry provides valid-ERD filtering and registered-ERD tracking for the MQTT adapter. Clearing stale registrations ensures a clean state on re-initialization.
+**Rationale:** The adapter is the write path's MQTT handle; the flag gates `initialize_erd_bridge_()`, which needs it for the write bridge and the write-topic subscription.
 
-**Implementation:** `geappliances_bridge_bridge_init.cpp` lines 173–183.
+**Implementation:** `geappliances_bridge_bridge_init.cpp`, `initialize_mqtt_client_()`.
 
 ### 3.5 ERD Bridge Initialization (Phase 6)
 

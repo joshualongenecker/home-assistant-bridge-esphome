@@ -41,14 +41,13 @@ static void mqtt_publisher_task(void* arg)
     bool connected = false;
     bool has_deps = false;
     bool paused = false;
-    bool mutex_held = false;
     if (self->state_mutex) {
       if (xSemaphoreTake(self->state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        mutex_held = true;
         connected = self->mqtt_connected;
         paused = self->paused;
         has_deps = self->cache != NULL && self->mqtt_client != NULL &&
                    self->device_id != NULL && self->get_time_ms != NULL;
+        xSemaphoreGive(self->state_mutex);
       }
     } else {
       // Fallback when mutex creation failed — read without protection.
@@ -59,97 +58,10 @@ static void mqtt_publisher_task(void* arg)
     }
 
     if (!connected || paused || !has_deps) {
-      if (mutex_held) {
-        xSemaphoreGive(self->state_mutex);
-      }
       continue;
     }
 
-    /* Release the state mutex before the snapshot + publish so it is never
-     * held across the slow MQTT publish. Cache access is separately protected
-     * by the cache's own mutex (inside erd_cache_snapshot_next_updated and the
-     * mark functions). The cache/client/device_id/get_time_ms pointers are set
-     * once at init and never changed, so they are safe to use without the state
-     * mutex. The state mutex is re-acquired after the publish to update the
-     * publisher's own counters/flag (see below). */
-    if (mutex_held) {
-      xSemaphoreGive(self->state_mutex);
-      mutex_held = false;
-    }
-
-    /* Publish one entry per wake. The snapshot atomically copies the payload
-     * out of the arena under the cache lock, so the main loop cannot overwrite
-     * it during the slow MQTT publish. */
-    uint8_t snap_data[ERD_CACHE_MAX_DATA_SIZE];
-    erd_cache_entry_t* entry = NULL;
-    tiny_erd_t snap_erd = 0;
-    uint8_t snap_addr = 0;
-    uint8_t snap_size = 0;
-    bool have_entry = erd_cache_snapshot_next_updated(self->cache, &self->publish_index,
-                                                      &entry, &snap_erd, &snap_addr,
-                                                      snap_data, &snap_size);
-    bool published_ok = false;
-    if (have_entry) {
-      int topic_len;
-      if (snap_addr == self->primary_board_address) {
-        topic_len = snprintf(self->task_topic, sizeof(self->task_topic), "geappliances/%s/erd/0x%04x/value", self->device_id, snap_erd);
-      } else {
-        topic_len = snprintf(self->task_topic, sizeof(self->task_topic), "geappliances/%s/erd/0x%02x_0x%04x/value", self->device_id, snap_addr, snap_erd);
-      }
-      if (topic_len >= 0 && (unsigned)topic_len < sizeof(self->task_topic)) {
-        size_t data_len = snap_size;
-        for (size_t i = 0; i < data_len; i++) {
-          snprintf(self->task_hex + i * 2, 3, "%02x", snap_data[i]);
-        }
-        self->task_hex[data_len * 2] = '\0';
-
-        uint32_t t_publish = self->get_time_ms();
-        bool sent = mqtt_client_publish_raw(self->mqtt_client, self->task_topic,
-            self->task_hex, data_len * 2, true);
-        uint32_t elapsed = self->get_time_ms() - t_publish;
-
-        if (elapsed >= 1000) {
-          ESP_LOGW(PUBLISHER_TAG, "Slow publish: %lums for ERD 0x%04x addr 0x%02x", (unsigned long)elapsed, snap_erd, snap_addr);
-        }
-
-        if (sent) {
-          erd_cache_mark_published(self->cache, entry);
-          published_ok = true;
-        } else {
-          /* Publish dropped (queue full or not connected) - re-set
-           * update_required so the entry is picked up on the next wake. */
-          erd_cache_mark_unpublished(self->cache, entry);
-        }
-      } else if (topic_len >= (int)sizeof(self->task_topic)) {
-        ESP_LOGW(PUBLISHER_TAG, "MQTT topic truncated (device_id too long: %s)", self->device_id);
-      }
-    }
-
-    /* Update the publisher's own state under the state mutex. Re-acquired here
-     * (never held across the slow publish above) so this task and the main
-     * loop's readers (get_publish_rate, first_round_done, on_connected) see a
-     * consistent view. publish_index is intentionally left alone: it is the scan
-     * iterator advanced by the snapshot under the cache lock, and its only other
-     * writer is on_connected's reset-to-0 - a benign race (aligned uint16_t,
-     * idempotent). */
-    if (self->state_mutex) {
-      if (xSemaphoreTake(self->state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        if (published_ok) {
-          self->total_published++;
-          self->publish_count_window++;
-        } else if (!have_entry && !self->first_round_done) {
-          self->first_round_done = true;
-        }
-        xSemaphoreGive(self->state_mutex);
-      }
-    } else {
-      if (published_ok) {
-        self->total_published++;
-        self->publish_count_window++;
-      } else if (!have_entry && !self->first_round_done) {
-        self->first_round_done = true;
-      }
-    }
+    erd_cache_mqtt_publisher_publish_one(self);
   }
 
   // Signal completion before deleting the task (clean shutdown handshake).
@@ -339,67 +251,92 @@ void erd_cache_mqtt_publisher_signal_work(erd_cache_mqtt_publisher_t* self)
   }
 }
 
-bool erd_cache_mqtt_publisher_loop(erd_cache_mqtt_publisher_t* self)
+bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self)
 {
   if (!self->cache || !self->mqtt_client || !self->device_id || !self->get_time_ms) {
     return false;
   }
 
-  if (!self->mqtt_connected) {
+  if (!self->mqtt_connected || self->paused) {
     self->missed_loops++;
     return false;
   }
 
+  /* Publish one entry. The snapshot atomically copies the payload out of the
+   * arena under the cache lock, so the main loop cannot overwrite it during
+   * the slow MQTT publish. The task loop checks mqtt_connected/paused before
+   * calling; direct callers (tests) must set up state themselves. */
   uint8_t snap_data[ERD_CACHE_MAX_DATA_SIZE];
   erd_cache_entry_t* entry = NULL;
   tiny_erd_t snap_erd = 0;
   uint8_t snap_addr = 0;
   uint8_t snap_size = 0;
-  if (!erd_cache_snapshot_next_updated(self->cache, &self->publish_index,
-                                       &entry, &snap_erd, &snap_addr,
-                                       snap_data, &snap_size)) {
-    if (!self->first_round_done) {
+  bool have_entry = erd_cache_snapshot_next_updated(self->cache, &self->publish_index,
+                                                    &entry, &snap_erd, &snap_addr,
+                                                    snap_data, &snap_size);
+  bool published_ok = false;
+  if (have_entry) {
+    int topic_len;
+    if (snap_addr == self->primary_board_address) {
+      topic_len = snprintf(self->task_topic, sizeof(self->task_topic), "geappliances/%s/erd/0x%04x/value", self->device_id, snap_erd);
+    } else {
+      topic_len = snprintf(self->task_topic, sizeof(self->task_topic), "geappliances/%s/erd/0x%02x_0x%04x/value", self->device_id, snap_addr, snap_erd);
+    }
+    if (topic_len >= 0 && (unsigned)topic_len < sizeof(self->task_topic)) {
+      size_t data_len = snap_size;
+      for (size_t i = 0; i < data_len; i++) {
+        snprintf(self->task_hex + i * 2, 3, "%02x", snap_data[i]);
+      }
+      self->task_hex[data_len * 2] = '\0';
+
+      uint32_t t_publish = self->get_time_ms();
+      bool sent = mqtt_client_publish_raw(self->mqtt_client, self->task_topic,
+          self->task_hex, data_len * 2, true);
+      uint32_t elapsed = self->get_time_ms() - t_publish;
+
+      if (elapsed >= 1000) {
+        ESP_LOGW(PUBLISHER_TAG, "Slow publish: %lums for ERD 0x%04x addr 0x%02x", (unsigned long)elapsed, snap_erd, snap_addr);
+      }
+
+      if (sent) {
+        erd_cache_mark_published(self->cache, entry);
+        published_ok = true;
+      } else {
+        /* Publish dropped (queue full or not connected) - re-set
+         * update_required so the entry is picked up on the next wake. */
+        erd_cache_mark_unpublished(self->cache, entry);
+      }
+    } else if (topic_len >= (int)sizeof(self->task_topic)) {
+      ESP_LOGW(PUBLISHER_TAG, "MQTT topic truncated (device_id too long: %s)", self->device_id);
+    }
+  }
+
+  /* Update the publisher's own state under the state mutex (never held across
+   * the slow publish above) so this task and the main loop's readers
+   * (get_publish_rate, first_round_done, on_connected) see a consistent view.
+   * publish_index is intentionally left alone: it is the scan iterator advanced
+   * by the snapshot under the cache lock, and its only other writer is
+   * on_connected's reset-to-0 - a benign race (aligned uint16_t, idempotent). */
+  if (self->state_mutex) {
+    if (xSemaphoreTake(self->state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+      if (published_ok) {
+        self->total_published++;
+        self->publish_count_window++;
+      } else if (!have_entry && !self->first_round_done) {
+        self->first_round_done = true;
+      }
+      xSemaphoreGive(self->state_mutex);
+    }
+  } else {
+    if (published_ok) {
+      self->total_published++;
+      self->publish_count_window++;
+    } else if (!have_entry && !self->first_round_done) {
       self->first_round_done = true;
     }
-    return false;
   }
 
-  char topic[128];
-  int topic_len;
-  if (snap_addr == self->primary_board_address) {
-    topic_len = snprintf(topic, sizeof(topic), "geappliances/%s/erd/0x%04x/value", self->device_id, snap_erd);
-  } else {
-    topic_len = snprintf(topic, sizeof(topic), "geappliances/%s/erd/0x%02x_0x%04x/value", self->device_id, snap_addr, snap_erd);
-  }
-  if (topic_len < 0 || (unsigned)topic_len >= sizeof(topic)) {
-    ESP_LOGW(PUBLISHER_TAG, "MQTT topic truncated (device_id too long: %s)", self->device_id);
-    return false;
-  }
-
-  char hex[512];
-  size_t data_len = snap_size;
-  for (size_t i = 0; i < data_len; i++) {
-    snprintf(hex + i * 2, 3, "%02x", snap_data[i]);
-  }
-  hex[data_len * 2] = '\0';
-
-  uint32_t t_publish = self->get_time_ms();
-  bool sent = mqtt_client_publish_raw(self->mqtt_client, topic, hex, data_len * 2, true);
-  uint32_t elapsed = self->get_time_ms() - t_publish;
-
-  if (elapsed >= 1000) {
-    ESP_LOGW(PUBLISHER_TAG, "Slow publish: %lums for ERD 0x%04x addr 0x%02x", (unsigned long)elapsed, snap_erd, snap_addr);
-  }
-
-  if (sent) {
-    erd_cache_mark_published(self->cache, entry);
-    self->total_published++;
-    self->publish_count_window++;
-  } else {
-    erd_cache_mark_unpublished(self->cache, entry);
-  }
-
-  return true;
+  return published_ok;
 }
 
 void erd_cache_mqtt_publisher_on_connected(erd_cache_mqtt_publisher_t* self)

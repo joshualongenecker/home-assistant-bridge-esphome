@@ -107,21 +107,19 @@ TEST(configuration_based_tests, subscription_mode_dishwasher)
   // Initialize bridge in subscription mode
   configure_subscription_mode();
   simulate_subscription_added();
-  
+
   // Simulate dishwasher cycle state change
   uint8_t cycle_state[] = {0x01};
-  
-  mock()
-    .expectOneCall("register_erd")
-    .withParameter("erd", ERD_CYCLE_STATE);
-  
+
+  simulate_erd_publication(ERD_CYCLE_STATE, cycle_state, sizeof(cycle_state));
+
   // Verify the ERD was cached (bridges write to erd_cache directly)
   uint16_t iter = 0;
-  POINTERS_TRUE(erd_cache_get_next_entry(&cache, &iter) != nullptr);
-  
-  simulate_erd_publication(ERD_CYCLE_STATE, cycle_state, sizeof(cycle_state));
-  
-  mock().checkExpectations();
+  erd_cache_entry_t* entry;
+  while ((entry = erd_cache_get_next_entry(&cache, &iter)) != nullptr) {
+    if (entry->erd == ERD_CYCLE_STATE) break;
+  }
+  POINTERS_TRUE(entry != nullptr);
 }
 ```
 

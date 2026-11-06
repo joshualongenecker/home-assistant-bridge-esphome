@@ -10,7 +10,6 @@ Relays write requests from MQTT to the GEA3 ERD client and reports results back.
 |----------|-------------|
 | `erd_write_bridge_init(self, timer_group, erd_client, mqtt_client, host_address)` | Initialize the write bridge: store dependencies, subscribe to MQTT write requests and ERD client activity events, initialize the HSM in `state_ready`. |
 | `erd_write_bridge_destroy(self)` | Unsubscribe from both event sources (with null guards for partial init), disarm the HSM. No heap cleanup needed — all state is embedded in the struct. |
-| `erd_write_bridge_set_host_address(self, host_address)` | Update the host address after the appliance is identified or re-identified. Writes are gated on this not being the broadcast address. |
 
 ## Struct
 

@@ -81,10 +81,12 @@ void erd_cache_mqtt_publisher_stop(erd_cache_mqtt_publisher_t* self);
 void erd_cache_mqtt_publisher_signal_work(erd_cache_mqtt_publisher_t* self);
 
 /*!
- * No-ops if MQTT is disconnected (increments missed_loops).
- * With the ESP-IDF framework, publishing is handled by the background task.
+ * Publishes at most one updated cache entry: snapshot, topic/hex formatting,
+ * retained publish, and publish bookkeeping. No-ops (incrementing missed_loops)
+ * if MQTT is disconnected or publishing is paused. The background task calls
+ * this once per wake; exposed for tests that drive the publish path directly.
  */
-bool erd_cache_mqtt_publisher_loop(erd_cache_mqtt_publisher_t* self);
+bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self);
 
 void erd_cache_mqtt_publisher_on_connected(erd_cache_mqtt_publisher_t* self);
 

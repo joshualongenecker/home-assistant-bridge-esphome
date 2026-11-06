@@ -99,7 +99,6 @@ extern "C" void esphome_mqtt_client_adapter_init(
    * (configured_device_id_ or generated_device_id_), which live in the
    * bridge object and outlive the adapter. */
   self->device_id = device_id;
-  self->erd_registry = nullptr;
 
   tiny_event_init(&self->on_write_request_event);
   tiny_event_init(&self->on_mqtt_disconnect_event);
@@ -124,12 +123,6 @@ extern "C" void esphome_mqtt_client_adapter_init(
   }
 }
 
-extern "C" void esphome_mqtt_client_adapter_set_erd_registry(
-  esphome_mqtt_client_adapter_t* self,
-  esphome::geappliances_bridge::ErdRegistry* erd_registry)
-{
-  self->erd_registry = erd_registry;
-}
 extern "C" void esphome_mqtt_client_adapter_notify_disconnected(
   esphome_mqtt_client_adapter_t* self)
 {
