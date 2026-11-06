@@ -432,10 +432,18 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
     }
 
     /* The topic grammar takes the board address numerically: empty means the
-     * primary-board sentinel, anything else is the parsed physical address. */
+     * primary-board sentinel, anything else is the parsed physical address.
+     * An explicit "ff"/"FF" is the GEA broadcast address, which the grammar
+     * reserves for the sentinel and which can never be a physical board
+     * address; reject it so an address-specific entity can never silently
+     * bind to (and control) the primary board. */
     uint8_t board_address = (uint8_t)ERD_TOPIC_PRIMARY;
     if (self->board_address_buf[0]) {
         board_address = (uint8_t)strtoul(self->board_address_buf, NULL, 16);
+        if (board_address == (uint8_t)ERD_TOPIC_PRIMARY) {
+            self->total_filtered++;
+            return false;
+        }
     }
     uint16_t erd_id = (uint16_t)strtoul(erd_id_hex, NULL, 16);
 

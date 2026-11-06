@@ -77,6 +77,23 @@ TEST(ha_discovery_manager_availability, payload_command_topic_matches_grammar)
     CHECK(strstr(payload, "\"command_topic\":\"geappliances/unit/erd/0xa2_0x0001/write\"") != NULL);
 }
 
+TEST(ha_discovery_manager_availability, rejects_board_address_matching_primary_sentinel)
+{
+    /* "ff"/"FF" is the GEA broadcast address the grammar reserves for the
+     * primary sentinel; an explicit address-specific entity must not
+     * silently bind to (and control) the primary board. */
+    CHECK_FALSE(ha_discovery_test_build_payload(&manager, "{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\",\"a\":\"ff\"}"));
+    CHECK_FALSE(ha_discovery_test_build_payload(&manager, "{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\",\"a\":\"FF\"}"));
+    UNSIGNED_LONGS_EQUAL(2, manager.total_filtered);
+}
+
+TEST(ha_discovery_manager_availability, accepts_board_address_fe_below_sentinel)
+{
+    const char* payload = build("{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\",\"a\":\"fe\"}");
+
+    CHECK(strstr(payload, "\"state_topic\":\"geappliances/unit/erd/0xfe_0x0001/value\"") != NULL);
+}
+
 TEST(ha_discovery_manager_availability, omits_availability_when_not_set)
 {
     const char* payload = build(SENSOR_LINE);
