@@ -95,8 +95,9 @@ extern "C" void esphome_mqtt_client_adapter_init(
   const char* device_id)
 {
   self->interface.api = &api;
-  /* Lifetime: stores a pointer into the caller's string. Safe because
-   * ESPHome's YAML config strings outlive the bridge component. */
+  /* Lifetime: stores a pointer into DeviceIdentityManager's buffers
+   * (configured_device_id_ or generated_device_id_), which live in the
+   * bridge object and outlive the adapter. */
   self->device_id = device_id;
 
   tiny_event_init(&self->on_write_request_event);

@@ -11,8 +11,7 @@ docs/
 ├── architecture/
 │   ├── overview.md            # C4 context + container diagrams, system summary
 │   ├── startup-sequence.md    # 8-phase startup HSM sequence diagram
-│   ├── data-flow.md           # Read path, write path, discovery flow
-│   └── roadmap.md             # Future features and architectural improvements
+│   └── data-flow.md           # Read path, write path, discovery flow
 ├── spec/                      # One file per module (detailed specifications)
 │   └── spec-template.md       # Template for new specs
 ├── guides/
