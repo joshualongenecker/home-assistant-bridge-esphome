@@ -377,51 +377,58 @@ TEST(erd_poll_list_builder, thermostat_type_polls_air_conditioning_erds)
 {
   // Thermostat (56) had no entry in the old hand-written table, so an
   // appliance of that type was polled with common + energy + feature ERDs
-  // only and its 0x7xxx ERDs were never read.
+  // only and its air conditioning ERDs were never read. 0x7000 is
+  // airConditioningErds[0]; asserting the specific ERD (not "anything in
+  // 0x7xxx") keeps the test honest if feature ERDs ever move into the band.
   config.appliance_type = 56;
 
   auto result = build_erd_poll_list(config);
 
-  bool found_air_conditioning_erd = false;
+  bool found = false;
   for (uint16_t i = 0; i < result.erds_count; i++) {
-    if (result.erds[i].erd >= 0x7000 && result.erds[i].erd <= 0x7FFF) {
-      found_air_conditioning_erd = true;
+    if (result.erds[i].erd == airConditioningErds[0]) {
+      found = true;
       break;
     }
   }
-  CHECK_TRUE(found_air_conditioning_erd);
+  CHECK_TRUE(found);
 }
 
-TEST(erd_poll_list_builder, appliance_type_without_a_category_polls_only_universal_erds)
+TEST(erd_poll_list_builder, appliance_type_without_a_category_polls_no_category_erds)
 {
   // HomeVentilation (58) has no upstream ERDs, so its generated entry carries a
-  // NULL ERD list; the builder must skip it instead of dereferencing it.
+  // NULL ERD list; the builder must skip it instead of dereferencing it. The
+  // property that matters: no ERD from ANY category list ends up in the poll
+  // list -- not a byte-range guess about common/energy/feature contents.
   config.appliance_type = 58;
 
   auto result = build_erd_poll_list(config);
 
-  CHECK(result.erds_count >= (commonErdCount + energyErdCount + applianceApiFeatureErdCount));
-  for (uint16_t i = 0; i < result.erds_count; i++) {
-    const uint16_t erd = result.erds[i].erd;
-    const bool universal = (erd <= 0x0FFF) || (erd >= 0xD000 && erd <= 0xDFFF);
-    CHECK_TRUE(universal);
+  for (uint16_t type = 0; type < maximumApplianceType; type++) {
+    const auto& group = applianceTypeToErdGroupTranslation[type];
+    if (group.category == nullptr || group.erdList == nullptr) continue;
+    for (uint16_t g = 0; g < group.erdCount; g++) {
+      for (uint16_t i = 0; i < result.erds_count; i++) {
+        CHECK_TRUE(result.erds[i].erd != group.erdList[g]);
+      }
+    }
   }
 }
 
 TEST(erd_poll_list_builder, microwave_type_polls_range_erds)
 {
   // Microwave (4) polled the small appliance group while its feature API
-  // requires range ERDs.
+  // requires range ERDs. 0x5000 is rangeErds[0].
   config.appliance_type = 4;
 
   auto result = build_erd_poll_list(config);
 
-  bool found_range_erd = false;
+  bool found = false;
   for (uint16_t i = 0; i < result.erds_count; i++) {
-    if (result.erds[i].erd >= 0x5000 && result.erds[i].erd <= 0x5FFF) {
-      found_range_erd = true;
+    if (result.erds[i].erd == rangeErds[0]) {
+      found = true;
       break;
     }
   }
-  CHECK_TRUE(found_range_erd);
+  CHECK_TRUE(found);
 }

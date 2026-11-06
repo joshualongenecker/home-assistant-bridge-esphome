@@ -138,11 +138,18 @@ def build_appliance_group_rows(appliance_type_values: Dict[str, str]):
     largest enum value needs a category. A type the upstream enum gained but
     the mapping does not know about is an error rather than a skip: silently
     dropping it is exactly how appliances stopped getting their category ERDs.
+    The mirror case (upstream removed a type the mapping still covers) is an
+    error too, so dead entries cannot linger.
     """
     display = {int(k): v for k, v in appliance_type_values.items()
                if int(k) != UNKNOWN_APPLIANCE_TYPE}
     if not display:
         raise ValueError("ERD 0x0008 (Appliance Type) enum has no values")
+    stale = sorted(set(APPLIANCE_TYPE_CATEGORY) - set(int(k) for k in appliance_type_values))
+    if stale:
+        raise ValueError(
+            f"APPLIANCE_TYPE_CATEGORY covers types the upstream enum no longer defines: {stale}; "
+            "remove them from scripts/appliance_type_categories.py and regenerate")
     bad_tokens = sorted({t for t in APPLIANCE_TYPE_CATEGORY.values()
                          if t is not None and t not in CATEGORY_CPP})
     if bad_tokens:
@@ -159,9 +166,6 @@ def build_appliance_group_rows(appliance_type_values: Dict[str, str]):
                 "APPLIANCE_TYPE_CATEGORY in scripts/appliance_type_categories.py; "
                 "add it (None if it has no category-specific ERDs) and regenerate")
         rows.append((type_value, display[type_value], APPLIANCE_TYPE_CATEGORY[type_value]))
-    stale = sorted(set(APPLIANCE_TYPE_CATEGORY) - set(display))
-    if stale:
-        print(f"WARNING: APPLIANCE_TYPE_CATEGORY covers types the enum no longer defines: {stale}")
     return rows
 
 
@@ -571,6 +575,8 @@ def generate_appliance_type_map(erds: List[Dict]) -> str:
         "  switch (appliance_type) {",
     ]
     for key in sorted(values, key=int):
+        if int(key) == UNKNOWN_APPLIANCE_TYPE:
+            continue  # 255 is the Unknown/broadcast sentinel; `default` owns it.
         lines.append(f'    case {key}: return "{to_identifier(values[key])}";')
     lines.append('    default: return "Unknown";')
     lines.append("  }")

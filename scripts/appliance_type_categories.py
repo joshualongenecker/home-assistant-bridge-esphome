@@ -127,5 +127,3 @@ APPLIANCE_TYPE_CATEGORY: Dict[int, Optional[str]] = {
 # generator skips it when emitting the table.
 UNKNOWN_APPLIANCE_TYPE = 255
 
-# Categories that apply to every appliance type.
-UNIVERSAL_CATEGORIES = ("common", "energy")

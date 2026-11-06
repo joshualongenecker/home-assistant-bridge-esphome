@@ -53,30 +53,47 @@ class TestApplianceGroupRows(unittest.TestCase):
     def test_new_enum_value_without_a_mapping_fails_loudly(self):
         # Pretend the upstream enum gained a type that nobody mapped: the
         # generator must refuse rather than emit a table that skips it.
+        values = dict(upstream_appliance_types())
+        values["59"] = "New Thing"
+        with self.assertRaises(ValueError) as ctx:
+            gen.build_appliance_group_rows(values)
+        self.assertIn("APPLIANCE_TYPE_CATEGORY", str(ctx.exception))
+        self.assertIn("New Thing", str(ctx.exception))
+
+    def test_enum_gap_fails_loudly(self):
+        # Remove a type from the middle of the enum; the mapping entry for it
+        # has to go too, or the stale-key check fires first.
         original = dict(APPLIANCE_TYPE_CATEGORY)
-        APPLIANCE_TYPE_CATEGORY.pop(2)
+        APPLIANCE_TYPE_CATEGORY.pop(1)
         try:
-            values = {"0": "Water Heater", "1": "Clothes Dryer", "2": "New Thing"}
+            values = dict(upstream_appliance_types())
+            del values["1"]
             with self.assertRaises(ValueError) as ctx:
                 gen.build_appliance_group_rows(values)
-            self.assertIn("APPLIANCE_TYPE_CATEGORY", str(ctx.exception))
-            self.assertIn("New Thing", str(ctx.exception))
+            self.assertIn("gap", str(ctx.exception))
         finally:
             APPLIANCE_TYPE_CATEGORY.clear()
             APPLIANCE_TYPE_CATEGORY.update(original)
 
-    def test_enum_gap_fails_loudly(self):
-        values = {"0": "Water Heater", "2": "Clothes Dryer"}
-        with self.assertRaises(ValueError) as ctx:
-            gen.build_appliance_group_rows(values)
-        self.assertIn("gap", str(ctx.exception))
+    def test_stale_mapping_entry_fails_loudly(self):
+        # The mirror case: upstream removed a type the mapping still covers.
+        original = dict(APPLIANCE_TYPE_CATEGORY)
+        APPLIANCE_TYPE_CATEGORY[99] = "range"
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                gen.build_appliance_group_rows(upstream_appliance_types())
+            self.assertIn("no longer defines", str(ctx.exception))
+            self.assertIn("99", str(ctx.exception))
+        finally:
+            APPLIANCE_TYPE_CATEGORY.clear()
+            APPLIANCE_TYPE_CATEGORY.update(original)
 
     def test_unknown_category_token_fails_loudly(self):
         original = dict(APPLIANCE_TYPE_CATEGORY)
         APPLIANCE_TYPE_CATEGORY[0] = "waterheaterz"
         try:
             with self.assertRaises(ValueError) as ctx:
-                gen.build_appliance_group_rows({"0": "Water Heater"})
+                gen.build_appliance_group_rows(upstream_appliance_types())
             self.assertIn("waterheaterz", str(ctx.exception))
         finally:
             APPLIANCE_TYPE_CATEGORY.clear()

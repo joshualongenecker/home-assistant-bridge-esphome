@@ -9,23 +9,31 @@
 
 #include "appliance_type_category.h"
 #include "erd_lists.h"
+#include "ha_discovery_data.h"
 
 #include "CppUTest/TestHarness.h"
 
 #include <cstdint>
+#include <cstring>
 
 namespace {
 
-// The category tokens that appear in ha_discovery_categories[].
-const char* const kAllCategories[] = {
-  "common", "refrigeration", "laundry", "dishwasher", "waterheater",
-  "range", "airconditioning", "waterfilter", "smallappliance", "energy",
-};
+bool has_category(const char* name)
+{
+  for (uint16_t c = 0; c < ha_discovery_category_count; c++) {
+    if (strcmp(ha_discovery_categories[c].name, name) == 0) return true;
+  }
+  return false;
+}
 
 bool accepts_anything_else(uint8_t appliance_type)
 {
-  for (const char* category : kAllCategories) {
-    if (strcmp(category, "common") == 0 || strcmp(category, "energy") == 0) continue;
+  // Every category the discovery dataset actually ships, so a token added to
+  // the data file is covered without touching this test.
+  for (uint16_t c = 0; c < ha_discovery_category_count; c++) {
+    const char* category = ha_discovery_categories[c].name;
+    if (strcmp(category, "custom") == 0 || strcmp(category, "common") == 0 ||
+        strcmp(category, "energy") == 0) continue;
     if (should_process_category(category, appliance_type)) return true;
   }
   return false;
@@ -47,6 +55,15 @@ TEST(ha_discovery_category, common_and_energy_apply_to_every_type)
     CHECK_TRUE(should_process_category("common", static_cast<uint8_t>(type)));
     CHECK_TRUE(should_process_category("energy", static_cast<uint8_t>(type)));
   }
+}
+
+TEST(ha_discovery_category, common_and_energy_categories_exist_in_the_dataset)
+{
+  // The filter special-cases these two by name and build_erd_poll_list()
+  // appends their ERD lists unconditionally; a rename in the data file would
+  // otherwise silently stop energy discovery for every appliance.
+  CHECK_TRUE(has_category("common"));
+  CHECK_TRUE(has_category("energy"));
 }
 
 TEST(ha_discovery_category, type_gets_its_own_category_only)

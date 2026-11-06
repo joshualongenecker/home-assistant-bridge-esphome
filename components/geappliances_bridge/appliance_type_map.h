@@ -72,7 +72,6 @@ inline const char* appliance_type_to_string(uint8_t appliance_type) {
     case 56: return "Thermostat";
     case 57: return "AirPurifier";
     case 58: return "HomeVentilation";
-    case 255: return "Unknown";
     default: return "Unknown";
   }
 }
