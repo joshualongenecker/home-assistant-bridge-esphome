@@ -3,6 +3,10 @@
 #include <cstdio>
 #include <cstring>
 
+/* The parse loop below iterates the enum range; a non-contiguous enum would
+ * silently break op matching. */
+static_assert(ERD_TOPIC_OP_WRITE_RESULT == 2, "erd_topic_op_t must stay contiguous");
+
 static const char* erd_topic_op_to_string(erd_topic_op_t op)
 {
   switch (op) {

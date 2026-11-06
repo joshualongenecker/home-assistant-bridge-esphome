@@ -83,6 +83,8 @@ TEST(ErdTopic, formats_write_filter) {
 /* Format: failure modes                                                */
 /* ------------------------------------------------------------------ */
 
+/* strlen(full) is the formatted length; the NUL terminator needs one more
+ * byte, so a buffer of exactly strlen(full) must be rejected. */
 TEST(ErdTopic, format_rejects_buffer_exactly_one_byte_short) {
   const char* full = "geappliances/dev/erd/0x3015/value";
   char small[ERD_TOPIC_BUF_SIZE];
@@ -100,6 +102,22 @@ TEST(ErdTopic, format_accepts_buffer_exactly_fitting) {
 
 TEST(ErdTopic, format_rejects_invalid_op) {
   LONGS_EQUAL(-1, erd_topic_format(buf, sizeof(buf), "dev", ERD_TOPIC_PRIMARY, 0x3015, (erd_topic_op_t)99));
+}
+
+TEST(ErdTopic, format_rejects_null_arguments) {
+  LONGS_EQUAL(-1, erd_topic_format(NULL, sizeof(buf), "dev", ERD_TOPIC_PRIMARY, 0x3015, ERD_TOPIC_OP_VALUE));
+  LONGS_EQUAL(-1, erd_topic_format(buf, sizeof(buf), NULL, ERD_TOPIC_PRIMARY, 0x3015, ERD_TOPIC_OP_VALUE));
+}
+
+TEST(ErdTopic, parse_rejects_null_arguments) {
+  uint8_t addr;
+  uint16_t erd;
+  erd_topic_op_t op;
+  CHECK_FALSE(erd_topic_parse(NULL, "dev", &addr, &erd, &op));
+  CHECK_FALSE(erd_topic_parse("geappliances/dev/erd/0x3015/value", NULL, &addr, &erd, &op));
+  CHECK_FALSE(erd_topic_parse("geappliances/dev/erd/0x3015/value", "dev", NULL, &erd, &op));
+  CHECK_FALSE(erd_topic_parse("geappliances/dev/erd/0x3015/value", "dev", &addr, NULL, &op));
+  CHECK_FALSE(erd_topic_parse("geappliances/dev/erd/0x3015/value", "dev", &addr, &erd, NULL));
 }
 
 /* ------------------------------------------------------------------ */
@@ -183,6 +201,10 @@ TEST(ErdTopic, parse_rejects_malformed_topics) {
   CHECK(parse_rejects("geappliances/dev/erd/0x3015/valuex"));
   CHECK(parse_rejects("geappliances/dev/erd/0x3015/foo"));
   CHECK(parse_rejects("geappliances/dev/erd/0x3015/write_resultx"));
+  /* The literal "0x" prefixes must be lowercase; uppercase X is not the
+   * grammar even though the hex digits themselves are case-insensitive. */
+  CHECK(parse_rejects("geappliances/dev/erd/0X10_0x3015/value"));
+  CHECK(parse_rejects("geappliances/dev/erd/0x10_0X3015/value"));
 }
 
 TEST(ErdTopic, parse_rejects_secondary_address_matching_primary_sentinel) {
@@ -216,4 +238,29 @@ TEST(ErdTopic, format_parse_round_trip_matrix) {
       }
     }
   }
+}
+
+TEST(ErdTopic, long_device_id_fits_exactly_and_one_more_byte_rejects) {
+  /* A device_id near ERD_TOPIC_BUF_SIZE is the only realistic way
+   * erd_topic_format can fail in production. The secondary form fixes 35
+   * chars + NUL, so 92 device_id bytes fit exactly and 93 overflow. */
+  char device_id[93];
+  memset(device_id, 'd', sizeof(device_id) - 1);
+  device_id[sizeof(device_id) - 1] = '\0';
+
+  int len = erd_topic_format(buf, sizeof(buf), device_id, 0x10, 0x3015, ERD_TOPIC_OP_VALUE);
+  LONGS_EQUAL(ERD_TOPIC_BUF_SIZE - 1, len);
+
+  uint8_t addr = 0;
+  uint16_t erd = 0;
+  erd_topic_op_t op;
+  CHECK_TRUE(erd_topic_parse(buf, device_id, &addr, &erd, &op));
+  UNSIGNED_LONGS_EQUAL(0x10, addr);
+  UNSIGNED_LONGS_EQUAL(0x3015, erd);
+  LONGS_EQUAL(ERD_TOPIC_OP_VALUE, op);
+
+  char longer[94];
+  memset(longer, 'd', sizeof(longer) - 1);
+  longer[sizeof(longer) - 1] = '\0';
+  LONGS_EQUAL(-1, erd_topic_format(buf, sizeof(buf), longer, 0x10, 0x3015, ERD_TOPIC_OP_VALUE));
 }

@@ -5,6 +5,7 @@
 #include "ha_discovery_manager.h"
 #include "ha_discovery_data.h"
 #include "appliance_type_category.h"
+#include "erd_topic.h"
 #include "geappliances_bridge_log.h"
 
 #include <cstdio>
@@ -359,31 +360,6 @@ static bool should_filter_config_topic(const char* name) {
     return false;
 }
 
-/* Primary-board entries retain the legacy topic. Non-primary entries combine
- * the board address and ERD ID in one MQTT topic segment. */
-static void format_erd_topic(char* destination, size_t destination_size,
-                             const char* device_id, const char* erd_id,
-                             const char* board_address, const char* operation)
-{
-    if (board_address[0]) {
-        snprintf(destination, destination_size,
-                 "geappliances/%s/erd/0x%s_0x%s/%s",
-                 device_id, board_address, erd_id, operation);
-    } else {
-        snprintf(destination, destination_size,
-                 "geappliances/%s/erd/0x%s/%s", device_id, erd_id, operation);
-    }
-}
-
-#ifdef HA_DISCOVERY_TEST_EXPORT
-void ha_discovery_test_format_erd_topic(char* destination, size_t destination_size,
-                                        const char* device_id, const char* erd_id,
-                                        const char* board_address, const char* operation)
-{
-    format_erd_topic(destination, destination_size, device_id, erd_id, board_address, operation);
-}
-#endif
-
 static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
 {
     if (self->device_id == NULL) return false;
@@ -455,6 +431,12 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
         return false;
     }
 
+    /* The topic grammar takes the board address numerically: empty means the
+     * primary-board sentinel, anything else is the parsed physical address. */
+    uint8_t board_address = (uint8_t)ERD_TOPIC_PRIMARY;
+    if (self->board_address_buf[0]) {
+        board_address = (uint8_t)strtoul(self->board_address_buf, NULL, 16);
+    }
     uint16_t erd_id = (uint16_t)strtoul(erd_id_hex, NULL, 16);
 
     if (!erd_is_registered_sorted(self, erd_id)) {
@@ -462,8 +444,9 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
         return false;
     }
 
+    uint16_t paired_id = 0;
     if (self->paired_erd_buf[0]) {
-        uint16_t paired_id = (uint16_t)strtoul(self->paired_erd_buf, NULL, 16);
+        paired_id = (uint16_t)strtoul(self->paired_erd_buf, NULL, 16);
         if (!erd_is_registered_sorted(self, paired_id)) {
             self->total_filtered++;
             return false;
@@ -484,22 +467,22 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
         snprintf(self->unique_id_buf, sizeof(self->unique_id_buf), "%s_erd_%s", self->device_id, erd_id_hex);
     }
 
-    format_erd_topic(self->state_topic_buf, sizeof(self->state_topic_buf), self->device_id,
-                     erd_id_hex, self->board_address_buf, "value");
-    format_erd_topic(self->command_topic_buf, sizeof(self->command_topic_buf), self->device_id,
-                     erd_id_hex, self->board_address_buf, "write");
+    erd_topic_format(self->state_topic_buf, sizeof(self->state_topic_buf), self->device_id,
+                     board_address, erd_id, ERD_TOPIC_OP_VALUE);
+    erd_topic_format(self->command_topic_buf, sizeof(self->command_topic_buf), self->device_id,
+                     board_address, erd_id, ERD_TOPIC_OP_WRITE);
 
     if (self->paired_erd_buf[0]) {
         if (self->role_buf[0] && strcmp(self->role_buf, "request") == 0) {
-            format_erd_topic(self->actual_command_topic_buf, sizeof(self->actual_command_topic_buf),
-                             self->device_id, erd_id_hex, self->board_address_buf, "write");
-            format_erd_topic(self->actual_state_topic_buf, sizeof(self->actual_state_topic_buf),
-                             self->device_id, self->paired_erd_buf, self->board_address_buf, "value");
+            erd_topic_format(self->actual_command_topic_buf, sizeof(self->actual_command_topic_buf),
+                             self->device_id, board_address, erd_id, ERD_TOPIC_OP_WRITE);
+            erd_topic_format(self->actual_state_topic_buf, sizeof(self->actual_state_topic_buf),
+                             self->device_id, board_address, paired_id, ERD_TOPIC_OP_VALUE);
         } else {
-            format_erd_topic(self->actual_state_topic_buf, sizeof(self->actual_state_topic_buf),
-                             self->device_id, erd_id_hex, self->board_address_buf, "value");
-            format_erd_topic(self->actual_command_topic_buf, sizeof(self->actual_command_topic_buf),
-                             self->device_id, self->paired_erd_buf, self->board_address_buf, "write");
+            erd_topic_format(self->actual_state_topic_buf, sizeof(self->actual_state_topic_buf),
+                             self->device_id, board_address, erd_id, ERD_TOPIC_OP_VALUE);
+            erd_topic_format(self->actual_command_topic_buf, sizeof(self->actual_command_topic_buf),
+                             self->device_id, board_address, paired_id, ERD_TOPIC_OP_WRITE);
         }
     } else {
         snprintf(self->actual_state_topic_buf, sizeof(self->actual_state_topic_buf), "%s", self->state_topic_buf);

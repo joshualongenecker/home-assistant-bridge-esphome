@@ -41,6 +41,9 @@ TEST_GROUP(esphome_mqtt_client_adapter)
 
   void teardown()
   {
+    /* Restore first: a failed STRCMP_EQUAL returns early and would
+     * otherwise leave the global pointing at this test's stack double. */
+    esphome::mqtt::global_mqtt_client = nullptr;
     esphome_mqtt_client_adapter_destroy(&adapter);
     mock().clear();
   }
@@ -94,6 +97,20 @@ TEST(esphome_mqtt_client_adapter, update_erd_write_result_failure_publishes_erro
   STRCMP_EQUAL("geappliances/test_device/erd/0xa1_0x0092/write_result", mqtt_double.last_published_topic_.c_str());
   STRCMP_EQUAL("{\"error\":\"incorrect_size\"}", mqtt_double.last_published_payload_.c_str());
   esphome::mqtt::global_mqtt_client = nullptr;
+}
+
+TEST(esphome_mqtt_client_adapter, update_erd_write_result_skips_publish_when_disconnected)
+{
+  init_adapter();
+  esphome::mqtt::MqttTestDouble mqtt_double;
+  mqtt_double.connected_ = false;
+  esphome::mqtt::global_mqtt_client = &mqtt_double;
+
+  adapter.interface.api->update_erd_write_result(&adapter.interface, 0x0092, 0xFF, true, 0);
+
+  /* The connection gate lives inside publish_raw; a disconnected client
+   * must not be touched and nothing may be published. */
+  STRCMP_EQUAL("", mqtt_double.last_published_topic_.c_str());
 }
 
 TEST(esphome_mqtt_client_adapter, update_erd_write_result_with_no_mqtt_client_is_safe)

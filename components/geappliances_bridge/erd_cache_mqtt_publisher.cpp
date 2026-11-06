@@ -308,7 +308,7 @@ bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self)
         erd_cache_mark_unpublished(self->cache, entry);
       }
     } else {
-      ESP_LOGW(PUBLISHER_TAG, "MQTT topic truncated (device_id too long: %s)", self->device_id);
+      ESP_LOGW(PUBLISHER_TAG, "MQTT topic format failed (device_id too long? %s)", self->device_id);
     }
   }
 

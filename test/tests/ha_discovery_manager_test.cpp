@@ -60,6 +60,16 @@ TEST(ha_discovery_manager_availability, payload_state_topic_matches_grammar_seco
     CHECK(strstr(payload, "\"state_topic\":\"geappliances/unit/erd/0xa2_0x0001/value\"") != NULL);
 }
 
+TEST(ha_discovery_manager_availability, payload_state_topic_canonicalizes_uppercase_board_address)
+{
+    /* The custom profile allows any hex case in "a"; the shared grammar
+     * re-emits it lowercase so discovery topics always match the
+     * publisher's lowercase value topics. */
+    const char* payload = build("{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\",\"a\":\"A2\"}");
+
+    CHECK(strstr(payload, "\"state_topic\":\"geappliances/unit/erd/0xa2_0x0001/value\"") != NULL);
+}
+
 TEST(ha_discovery_manager_availability, payload_command_topic_matches_grammar)
 {
     const char* payload = build("{\"i\":\"0001\",\"n\":\"System Mode\",\"d\":\"select\",\"ct\":\"{{ value }}\",\"a\":\"a2\"}");
