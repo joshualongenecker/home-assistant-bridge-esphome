@@ -94,6 +94,16 @@ TEST(ha_discovery_manager_availability, accepts_board_address_fe_below_sentinel)
     CHECK(strstr(payload, "\"state_topic\":\"geappliances/unit/erd/0xfe_0x0001/value\"") != NULL);
 }
 
+TEST(ha_discovery_manager_availability, rejects_non_hex_board_address)
+{
+    /* The two-hex-digit validation must reject any non-hex "a" before it
+     * reaches the numeric conversion (strtoul would silently map it to
+     * board 0x00). */
+    CHECK_FALSE(ha_discovery_test_build_payload(&manager, "{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\",\"a\":\"zz\"}"));
+    CHECK_FALSE(ha_discovery_test_build_payload(&manager, "{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\",\"a\":\"0\"}"));
+    UNSIGNED_LONGS_EQUAL(2, manager.total_filtered);
+}
+
 TEST(ha_discovery_manager_availability, omits_availability_when_not_set)
 {
     const char* payload = build(SENSOR_LINE);

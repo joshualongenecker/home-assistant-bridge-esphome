@@ -29,6 +29,7 @@ class MqttTestDouble : public MQTTClientComponent {
   std::string last_published_topic_;
   std::string last_published_payload_;
   bool last_published_retain_{false};
+  int publish_calls_{0};
 
   std::function<void(const std::string&, const std::string&)> subscribe_callback_;
   std::function<void(bool)> on_connect_callback_;
@@ -40,6 +41,7 @@ class MqttTestDouble : public MQTTClientComponent {
     last_published_topic_ = topic;
     last_published_payload_ = payload;
     last_published_retain_ = retain;
+    publish_calls_++;
     return !publish_should_fail_;
   }
 
@@ -48,6 +50,7 @@ class MqttTestDouble : public MQTTClientComponent {
     last_published_topic_ = topic;
     last_published_payload_.assign(payload, payload_length);
     last_published_retain_ = retain;
+    publish_calls_++;
     return !publish_should_fail_;
   }
 

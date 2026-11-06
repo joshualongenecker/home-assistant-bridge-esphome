@@ -109,7 +109,9 @@ TEST(esphome_mqtt_client_adapter, update_erd_write_result_skips_publish_when_dis
   adapter.interface.api->update_erd_write_result(&adapter.interface, 0x0092, 0xFF, true, 0);
 
   /* The connection gate lives inside publish_raw; a disconnected client
-   * must not be touched and nothing may be published. */
+   * must not be touched and nothing may be published. Assert the call
+   * count, not just the default-empty topic string. */
+  LONGS_EQUAL(0, mqtt_double.publish_calls_);
   STRCMP_EQUAL("", mqtt_double.last_published_topic_.c_str());
 }
 

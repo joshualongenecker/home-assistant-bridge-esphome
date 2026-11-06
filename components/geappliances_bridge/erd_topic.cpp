@@ -5,7 +5,9 @@
 
 /* The parse loop below iterates the enum range; a non-contiguous enum would
  * silently break op matching. */
-static_assert(ERD_TOPIC_OP_WRITE_RESULT == 2, "erd_topic_op_t must stay contiguous");
+static_assert(ERD_TOPIC_OP_VALUE == 0 && ERD_TOPIC_OP_WRITE == 1 &&
+                  ERD_TOPIC_OP_WRITE_RESULT == 2,
+              "erd_topic_op_t must stay contiguous");
 
 static const char* erd_topic_op_to_string(erd_topic_op_t op)
 {
