@@ -554,3 +554,204 @@ TEST(erd_bridge_poll, should_not_crash_on_destroy_with_null_erd_client)
 
   erd_bridge_poll_destroy(&self);
 }
+
+// ============================================================================
+// Budgeted send/resume paths driven by an injected clock (test seam).
+//
+// These paths — the POLL_YIELD_MS batch break inside send_poll_read_requests_bounded,
+// the POLL_CYCLE_SEND_BUDGET_MS early return in send_cycle_reads, and the
+// cycle_sending_in_progress resume — were previously unreachable in unit tests:
+// the HAL double's millis() is frozen at 0 unless a test sets it, so elapsed
+// time was always 0 and send_cycle_reads always queued the whole cycle in one
+// batch (and last_cycle_time_ms was always 0).
+// ============================================================================
+
+static uint32_t s_budgeted_clock_ms = 0;
+
+/* Advances 10 ms per call. send_next_poll_read_request calls it twice per
+ * read, so the 50 ms batch budget breaks after exactly 10 reads and the
+ * 100 ms cycle-send budget trips immediately after the first batch. */
+static uint32_t budgeted_clock_advance_10(void)
+{
+  s_budgeted_clock_ms += 10;
+  return s_budgeted_clock_ms;
+}
+
+static void budgeted_yield_noop(void) {}
+
+TEST_GROUP_BASE(erd_bridge_poll_budgeted_send, simulation_test_base)
+{
+  enum {
+    polling_interval = 1000,
+    probe_erd_base = 0x0100,
+    probe_erd_count = 12
+  };
+
+  erd_bridge_poll_t self;
+  probe_entry_t probe_list[probe_erd_count];
+
+  void setup()
+  {
+    simulation_test_base_setup();
+    s_budgeted_clock_ms = 0;
+    for (int i = 0; i < probe_erd_count; i++) {
+      probe_list[i] = {(tiny_erd_t)(probe_erd_base + i), PROBE_ENTRY_DEFAULT_ADDRESS};
+    }
+  }
+
+  void teardown()
+  {
+    mock().disable();
+    erd_bridge_poll_destroy(&self);
+    simulation_test_base_teardown();
+    mock().enable();
+  }
+
+  void given_that_discovery_completed_with_fake_clock()
+  {
+    mock().disable();
+    erd_bridge_poll_init(
+      &self,
+      &timer_group.timer_group,
+      &erd_client.interface,
+      polling_interval,
+      0xC0, probe_list, probe_erd_count,
+      &test_cache);
+
+    uint8_t probe_val = 0x01;
+    for (int i = 0; i < probe_erd_count; i++) {
+      trigger_read_completed(0xC0, (tiny_erd_t)(probe_erd_base + i), &probe_val, sizeof(probe_val));
+    }
+    erd_bridge_poll_set_time_fn(&self, budgeted_clock_advance_10);
+    erd_bridge_poll_set_yield_fn(&self, budgeted_yield_noop);
+    mock().enable();
+
+    CHECK_EQUAL(polling_state_polling, self.current_state);
+  }
+
+  void should_request_reads(uint16_t first, uint16_t count)
+  {
+    for (uint16_t i = first; i < first + count; i++) {
+      mock()
+        .expectOneCall("read")
+        .onObject(&erd_client)
+        .withParameter("address", 0xC0)
+        .withParameter("erd", (tiny_erd_t)(probe_erd_base + i))
+        .ignoreOtherParameters()
+        .andReturnValue(true);
+    }
+  }
+};
+
+TEST(erd_bridge_poll_budgeted_send, should_stop_at_send_budget_and_resume_without_losing_reads)
+{
+  given_that_discovery_completed_with_fake_clock();
+
+  // First timer expiry starts the cycle: 10 reads fill the batch, the
+  // 100 ms cycle-send budget trips, and a resume timer is armed.
+  should_request_reads(0, 10);
+  after(polling_interval);
+
+  CHECK_TRUE(self.cycle_sending_in_progress);
+  CHECK_TRUE(self.erd_index == 10);
+  CHECK_TRUE(self.polling_timer_armed);
+
+  // The resume pass continues from erd_index — it must NOT restart the
+  // cycle from 0 and must queue the remaining ERDs exactly once.
+  should_request_reads(10, 2);
+  after(100);
+
+  CHECK_FALSE(self.cycle_sending_in_progress);
+  CHECK_TRUE(self.erd_index == 12);
+
+  // Completing the cycle records health metrics from the injected clock.
+  // Against the frozen HAL double these were always 0.
+  for (int i = 0; i < probe_erd_count; i++) {
+    uint8_t v = (uint8_t)i;
+    trigger_read_completed(0xC0, (tiny_erd_t)(probe_erd_base + i), &v, sizeof(v));
+  }
+  CHECK_EQUAL(1u, self.cycle_count);
+  CHECK_TRUE(self.last_cycle_time_ms > 0);
+  mock().checkExpectations();
+}
+
+// ============================================================================
+// restart_pending: timer expiry mid-cycle defers the restart until the
+// in-flight cycle completes, then restarts immediately.
+// ============================================================================
+
+TEST_GROUP_BASE(erd_bridge_poll_restart_pending, simulation_test_base)
+{
+  enum {
+    polling_interval = 1000,
+    erd_1 = 0x2001,
+    erd_2 = 0x2002
+  };
+
+  erd_bridge_poll_t self;
+  const probe_entry_t probe_list[2] = {{erd_1, PROBE_ENTRY_DEFAULT_ADDRESS}, {erd_2, PROBE_ENTRY_DEFAULT_ADDRESS}};
+
+  void setup()
+  {
+    simulation_test_base_setup();
+  }
+
+  void teardown()
+  {
+    mock().disable();
+    erd_bridge_poll_destroy(&self);
+    simulation_test_base_teardown();
+    mock().enable();
+  }
+
+  void should_request_read(uint8_t address, tiny_erd_t erd)
+  {
+    mock()
+      .expectOneCall("read")
+      .onObject(&erd_client)
+      .withParameter("address", address)
+      .withParameter("erd", erd)
+      .ignoreOtherParameters()
+      .andReturnValue(true);
+  }
+};
+
+TEST(erd_bridge_poll_restart_pending, should_defer_restart_until_cycle_completes_then_restart_immediately)
+{
+  mock().disable();
+  erd_bridge_poll_init(
+    &self,
+    &timer_group.timer_group,
+    &erd_client.interface,
+    polling_interval,
+    0xC0, probe_list, 2,
+    &test_cache);
+
+  uint8_t probe_val = 0x01;
+  trigger_read_completed(0xC0, erd_1, &probe_val, sizeof(probe_val));
+  trigger_read_completed(0xC0, erd_2, &probe_val, sizeof(probe_val));
+  mock().enable();
+
+  // Cycle 1 queues both reads (2 < 10, no batch break).
+  should_request_read(0xC0, erd_1);
+  should_request_read(0xC0, erd_2);
+  after(polling_interval);
+
+  // Timer fires again while both reads are in flight: defer, don't restart.
+  after(polling_interval);
+  CHECK_TRUE(self.restart_pending);
+  CHECK_TRUE(self.erd_index == 2);
+
+  // The last completion must start the next cycle immediately.
+  should_request_read(0xC0, erd_1);
+  should_request_read(0xC0, erd_2);
+  uint8_t a = 0xAA;
+  uint8_t b = 0xBB;
+  trigger_read_completed(0xC0, erd_1, &a, sizeof(a));
+  trigger_read_completed(0xC0, erd_2, &b, sizeof(b));
+
+  CHECK_FALSE(self.restart_pending);
+  CHECK_TRUE(self.erd_index == 2);
+  CHECK_EQUAL(1u, self.cycle_count);
+  mock().checkExpectations();
+}
