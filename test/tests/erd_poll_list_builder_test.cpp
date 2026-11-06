@@ -397,13 +397,17 @@ TEST(erd_poll_list_builder, thermostat_type_polls_air_conditioning_erds)
 TEST(erd_poll_list_builder, appliance_type_without_a_category_polls_no_category_erds)
 {
   // HomeVentilation (58) has no upstream ERDs, so its generated entry carries a
-  // NULL ERD list; the builder must skip it instead of dereferencing it. The
-  // property that matters: no ERD from ANY category list ends up in the poll
-  // list -- not a byte-range guess about common/energy/feature contents.
+  // NULL ERD list; the builder must skip it instead of dereferencing it.
   config.appliance_type = 58;
 
   auto result = build_erd_poll_list(config);
 
+  // The universal lists are still appended unconditionally...
+  CHECK(result.erds_count >= (commonErdCount + energyErdCount + applianceApiFeatureErdCount));
+  // ...and no ERD from ANY category list ends up in the poll list -- not a
+  // byte-range guess about common/energy/feature contents.
+  // maximumApplianceType is the table length (sizeof/sizeof), so this walks
+  // every generated entry; there is no sentinel slot.
   for (uint16_t type = 0; type < maximumApplianceType; type++) {
     const auto& group = applianceTypeToErdGroupTranslation[type];
     if (group.category == nullptr || group.erdList == nullptr) continue;

@@ -29,7 +29,10 @@ bool has_category(const char* name)
 bool accepts_anything_else(uint8_t appliance_type)
 {
   // Every category the discovery dataset actually ships, so a token added to
-  // the data file is covered without touching this test.
+  // the data file is covered without touching this test. "custom" is skipped
+  // because ha_discovery_manager_run() handles it before ever calling the
+  // filter (and custom_category_is_not_matched_here pins that the filter
+  // itself never accepts it).
   for (uint16_t c = 0; c < ha_discovery_category_count; c++) {
     const char* category = ha_discovery_categories[c].name;
     if (strcmp(category, "custom") == 0 || strcmp(category, "common") == 0 ||
