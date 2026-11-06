@@ -3,6 +3,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 #include "erd_cache.h"
+#include "erd_topic.h"
 #include "tiny_gea_constants.h"
 
 extern "C" {
@@ -33,16 +34,12 @@ static void update_erd_write_result(
   tiny_gea3_erd_client_write_failure_reason_t failure_reason)
 {
   auto self = reinterpret_cast<esphome_mqtt_client_adapter_t*>(_self);
-  auto mqtt_client = esphome::mqtt::global_mqtt_client;
-  if (mqtt_client == nullptr || !mqtt_client->is_connected()) return;
 
-  char topic[128];
-  if (board_address != tiny_gea_broadcast_address) {
-    snprintf(topic, sizeof(topic), "geappliances/%s/erd/0x%02x_0x%04x/write_result",
-            self->device_id, board_address, erd);
-  } else {
-    snprintf(topic, sizeof(topic), "geappliances/%s/erd/0x%04x/write_result",
-            self->device_id, erd);
+  char topic[ERD_TOPIC_BUF_SIZE];
+  if (erd_topic_format(topic, sizeof(topic), self->device_id, board_address, erd,
+                       ERD_TOPIC_OP_WRITE_RESULT) < 0) {
+    ESP_LOGW(TAG, "Write result topic truncated for ERD 0x%04X", erd);
+    return;
   }
 
   // Use a stack buffer to avoid heap allocation.
@@ -59,7 +56,9 @@ static void update_erd_write_result(
   }
 
   ESP_LOGD(TAG, "Write result for ERD 0x%04X: %s", erd, payload);
-  mqtt_client->publish(topic, payload, strlen(payload), 0, true);
+  /* Publish through the adapter's own publish_raw slot so the ESPHome global
+   * client is reached through one seam, not reached around. */
+  esphome_mqtt_client_adapter_publish_raw(_self, topic, payload, strlen(payload), true);
 }
 
 static i_tiny_event_t* on_write_request(i_mqtt_client_t* _self)

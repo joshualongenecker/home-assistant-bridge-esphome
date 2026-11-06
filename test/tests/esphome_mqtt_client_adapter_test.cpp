@@ -1,11 +1,11 @@
 /*!
  * @file
- * @brief Unit tests for the ESPHome MQTT client adapter (debug-log mode).
+ * @brief Unit tests for the ESPHome MQTT client adapter.
  *
- * The adapter no longer publishes to MQTT.  All publish paths are replaced
- * with ESP_LOGD debug messages.  These tests verify that the adapter
- * functions without crashing, correctly filters ERDs through the registry,
- * and that all MQTT-specific entry points are safe no-ops.
+ * The adapter publishes write_result topics through its own publish_raw
+ * slot. These tests pin the golden topic strings (shared erd_topic
+ * grammar) against the ESPHome MQTT double's recorded publish and verify
+ * that the MQTT-specific entry points are safe with no client wired.
  */
 
 #include "CppUTest/TestHarness.h"
@@ -18,6 +18,7 @@
 
 #include "esphome_mqtt_client_adapter.h"
 #include "double/esphome_hal_double.hpp"
+#include "double/mqtt_test_double.hpp"
 
 #include <string>
 #include <set>
@@ -66,20 +67,41 @@ TEST(esphome_mqtt_client_adapter, init_sets_api_pointer)
 /* update_erd_write_result                                              */
 /* ------------------------------------------------------------------ */
 
-TEST(esphome_mqtt_client_adapter, update_erd_write_result_success_no_crash)
+TEST(esphome_mqtt_client_adapter, update_erd_write_result_success_publishes_ok_on_primary_topic)
 {
   init_adapter();
+  esphome::mqtt::MqttTestDouble mqtt_double;
+  mqtt_double.connected_ = true;
+  esphome::mqtt::global_mqtt_client = &mqtt_double;
 
   adapter.interface.api->update_erd_write_result(&adapter.interface, 0x0092, 0xFF, true, 0);
-  // global_mqtt_client is null in tests — publish is skipped, no crash.
+
+  STRCMP_EQUAL("geappliances/test_device/erd/0x0092/write_result", mqtt_double.last_published_topic_.c_str());
+  STRCMP_EQUAL("ok", mqtt_double.last_published_payload_.c_str());
+  esphome::mqtt::global_mqtt_client = nullptr;
 }
 
-TEST(esphome_mqtt_client_adapter, update_erd_write_result_failure_no_crash)
+TEST(esphome_mqtt_client_adapter, update_erd_write_result_failure_publishes_error_on_secondary_topic)
 {
   init_adapter();
+  esphome::mqtt::MqttTestDouble mqtt_double;
+  mqtt_double.connected_ = true;
+  esphome::mqtt::global_mqtt_client = &mqtt_double;
+
+  adapter.interface.api->update_erd_write_result(&adapter.interface, 0x0092, 0xA1, false,
+      tiny_gea3_erd_client_write_failure_reason_incorrect_size);
+
+  STRCMP_EQUAL("geappliances/test_device/erd/0xa1_0x0092/write_result", mqtt_double.last_published_topic_.c_str());
+  STRCMP_EQUAL("{\"error\":\"incorrect_size\"}", mqtt_double.last_published_payload_.c_str());
+  esphome::mqtt::global_mqtt_client = nullptr;
+}
+
+TEST(esphome_mqtt_client_adapter, update_erd_write_result_with_no_mqtt_client_is_safe)
+{
+  init_adapter();
+  esphome::mqtt::global_mqtt_client = nullptr;
 
   adapter.interface.api->update_erd_write_result(&adapter.interface, 0x0092, 0xA1, false, 3);
-  // global_mqtt_client is null in tests — publish is skipped, no crash.
 }
 /* ------------------------------------------------------------------ */
 /* destroy                                                              */
