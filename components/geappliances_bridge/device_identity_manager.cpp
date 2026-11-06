@@ -71,11 +71,11 @@ void DeviceIdentityManager::on_erd_read_completed(tiny_erd_t erd, const uint8_t*
     ESP_LOGI(TAG, "Read serial number: %s", this->serial_number_);
 
     /* Build generated_device_id: applianceType_model_serial */
-    const std::string type_str = appliance_type_to_string(this->appliance_type_);
+    const char* type_str = appliance_type_to_string(this->appliance_type_);
     const std::string sanitized_model = this->sanitize_for_mqtt_topic_(this->model_number_);
     const std::string sanitized_serial = this->sanitize_for_mqtt_topic_(this->serial_number_);
     snprintf(this->generated_device_id_, sizeof(this->generated_device_id_),
-             "%s_%s_%s", type_str.c_str(), sanitized_model.c_str(), sanitized_serial.c_str());
+             "%s_%s_%s", type_str, sanitized_model.c_str(), sanitized_serial.c_str());
     ESP_LOGI(TAG, "Generated device ID: %s", this->generated_device_id_);
     this->state_ = DEVICE_ID_STATE_COMPLETE;
 

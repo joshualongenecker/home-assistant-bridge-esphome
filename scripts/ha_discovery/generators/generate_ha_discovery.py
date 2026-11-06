@@ -41,6 +41,20 @@ from typing import Any, Dict, List, Optional, Tuple
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from pipeline.ha_constants import VALID_DEVICE_CLASSES, CATEGORIES
 
+# The appliance-type -> category mapping is shared with
+# scripts/generate_erd_lists.py; importing it here turns a category token that
+# is not a ha_constants.CATEGORIES key (i.e. one with no JSONL output file)
+# into a pipeline failure instead of a firmware table that never matches.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from appliance_type_categories import APPLIANCE_TYPE_CATEGORY
+
+_unknown_categories = sorted({c for c in APPLIANCE_TYPE_CATEGORY.values()
+                              if c is not None and c not in CATEGORIES})
+if _unknown_categories:
+    raise SystemExit(
+        "APPLIANCE_TYPE_CATEGORY names categories with no discovery output: "
+        f"{_unknown_categories}; valid ones are {sorted(CATEGORIES)}")
+
 
 def _is_valid_device_class(domain: str, device_class: str) -> bool:
     """Check if device_class is valid for the given HA domain."""
