@@ -212,9 +212,6 @@ ha_discovery_state_t ha_discovery_manager_get_state(ha_discovery_manager_t* self
 void cleanup_topic_callback(const char* topic, const char* payload, size_t payload_len, void* arg);
 void cleanup_start(ha_discovery_cleanup_t* self);
 uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self);
-void ha_discovery_test_format_erd_topic(char* destination, size_t destination_size,
-                                        const char* device_id, const char* erd_id,
-                                        const char* board_address, const char* operation);
 bool ha_discovery_test_build_payload(ha_discovery_manager_t* self, const char* line);
 #endif
 
