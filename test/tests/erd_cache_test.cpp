@@ -28,6 +28,18 @@ static erd_cache_entry_t* find_entry(erd_cache_t* cache, tiny_erd_t erd, uint8_t
   return NULL;
 }
 
+// Helper: drive the production read path. erd_cache_snapshot_next_updated() is
+// the only public "next updated entry" API; the tests use it to exercise the
+// scan/clear semantics previously covered through a dedicated wrapper.
+static erd_cache_entry_t* next_updated(erd_cache_t* cache, uint16_t* iter)
+{
+  erd_cache_entry_t* entry = NULL;
+  if (!erd_cache_snapshot_next_updated(cache, iter, &entry, NULL, NULL, NULL, NULL)) {
+    return NULL;
+  }
+  return entry;
+}
+
 TEST_GROUP(erd_cache)
 {
   erd_cache_t cache;
@@ -204,16 +216,16 @@ TEST(erd_cache, get_next_updated_returns_updated_entries)
   erd_cache_update(&cache, 0x0002, 0xFF, data2, 1);
 
   uint16_t iter = 0;
-  erd_cache_entry_t* e1 = erd_cache_get_next_updated(&cache, &iter);
+  erd_cache_entry_t* e1 = next_updated(&cache, &iter);
   CHECK(NULL != e1);
   CHECK_EQUAL(0x0001, e1->erd);
   CHECK_FALSE(e1->update_required);
 
-  erd_cache_entry_t* e2 = erd_cache_get_next_updated(&cache, &iter);
+  erd_cache_entry_t* e2 = next_updated(&cache, &iter);
   CHECK(NULL != e2);
   CHECK_EQUAL(0x0002, e2->erd);
 
-  erd_cache_entry_t* e3 = erd_cache_get_next_updated(&cache, &iter);
+  erd_cache_entry_t* e3 = next_updated(&cache, &iter);
   CHECK(NULL == e3);
 }
 
@@ -231,15 +243,15 @@ TEST(erd_cache, get_next_updated_skips_non_updated)
   e2->update_required = false;
 
   uint16_t iter = 0;
-  erd_cache_entry_t* e = erd_cache_get_next_updated(&cache, &iter);
+  erd_cache_entry_t* e = next_updated(&cache, &iter);
   CHECK(NULL != e);
   CHECK_EQUAL(0x0001, e->erd);
 
-  e = erd_cache_get_next_updated(&cache, &iter);
+  e = next_updated(&cache, &iter);
   CHECK(NULL != e);
   CHECK_EQUAL(0x0003, e->erd);
 
-  e = erd_cache_get_next_updated(&cache, &iter);
+  e = next_updated(&cache, &iter);
   CHECK(NULL == e);
 }
 
@@ -249,8 +261,8 @@ TEST(erd_cache, get_next_updated_resets_iterator)
   erd_cache_update(&cache, 0x0001, 0xFF, data, 1);
 
   uint16_t iter = 0;
-  erd_cache_get_next_updated(&cache, &iter);
-  erd_cache_get_next_updated(&cache, &iter);
+  next_updated(&cache, &iter);
+  next_updated(&cache, &iter);
   CHECK_EQUAL(0, iter);
 }
 
@@ -433,7 +445,7 @@ TEST(erd_cache, rate_limit_disabled_allows_immediate_publish)
   erd_cache_update(&cache, 0x0001, 0xFF, data, 1);
 
   uint16_t iter = 0;
-  erd_cache_entry_t* entry = erd_cache_get_next_updated(&cache, &iter);
+  erd_cache_entry_t* entry = next_updated(&cache, &iter);
   CHECK(entry != NULL);
   CHECK_EQUAL(0x0001, entry->erd);
 }
@@ -446,7 +458,7 @@ TEST(erd_cache, rate_limit_first_entry_publishes_immediately)
   erd_cache_update(&cache, 0x0001, 0xFF, data, 1);
 
   uint16_t iter = 0;
-  erd_cache_entry_t* entry = erd_cache_get_next_updated(&cache, &iter);
+  erd_cache_entry_t* entry = next_updated(&cache, &iter);
   CHECK(entry != NULL);
   CHECK_EQUAL(0x0001, entry->erd);
 
@@ -466,7 +478,7 @@ TEST(erd_cache, rate_limit_blocks_republish_until_cooldown_expires)
 
   /* First publish — immediate. */
   uint16_t iter = 0;
-  erd_cache_entry_t* entry = erd_cache_get_next_updated(&cache, &iter);
+  erd_cache_entry_t* entry = next_updated(&cache, &iter);
   CHECK(entry != NULL);
   erd_cache_mark_published(&cache, entry);
 
@@ -476,7 +488,7 @@ TEST(erd_cache, rate_limit_blocks_republish_until_cooldown_expires)
 
   /* get_next_updated should skip the rate-limited entry. */
   iter = 0;
-  CHECK(NULL == erd_cache_get_next_updated(&cache, &iter));
+  CHECK(NULL == next_updated(&cache, &iter));
 
   /* Tick 4 times — cooldown goes from 5 to 1, still blocked. */
   for (int i = 0; i < 4; i++) {
@@ -486,7 +498,7 @@ TEST(erd_cache, rate_limit_blocks_republish_until_cooldown_expires)
   entry = erd_cache_get_next_entry(&cache, &iter);
   CHECK(entry != NULL);
   CHECK_EQUAL(1, entry->publish_cooldown);
-  CHECK(NULL == erd_cache_get_next_updated(&cache, &iter));
+  CHECK(NULL == next_updated(&cache, &iter));
 
   /* Tick once more — cooldown reaches 0, now eligible. */
   erd_cache_tick_cooldowns(&cache);
@@ -496,7 +508,7 @@ TEST(erd_cache, rate_limit_blocks_republish_until_cooldown_expires)
   CHECK_EQUAL(0, entry->publish_cooldown);
 
   iter = 0;
-  entry = erd_cache_get_next_updated(&cache, &iter);
+  entry = next_updated(&cache, &iter);
   CHECK(entry != NULL);
   CHECK_EQUAL(0x0001, entry->erd);
 }
@@ -508,7 +520,7 @@ TEST(erd_cache, rate_limit_reload_after_publish)
   erd_cache_update(&cache, 0x0001, 0xFF, data, 1);
 
   uint16_t iter = 0;
-  erd_cache_entry_t* entry = erd_cache_get_next_updated(&cache, &iter);
+  erd_cache_entry_t* entry = next_updated(&cache, &iter);
   CHECK(entry != NULL);
   erd_cache_mark_published(&cache, entry);
 
@@ -525,7 +537,7 @@ TEST(erd_cache, rate_limit_tick_only_decrements_when_update_required)
   erd_cache_update(&cache, 0x0001, 0xFF, data, 1);
 
   uint16_t iter = 0;
-  erd_cache_entry_t* entry = erd_cache_get_next_updated(&cache, &iter);
+  erd_cache_entry_t* entry = next_updated(&cache, &iter);
   CHECK(entry != NULL);
   erd_cache_mark_published(&cache, entry);
 
@@ -547,11 +559,11 @@ TEST(erd_cache, rate_limit_multiple_erds_independent)
 
   /* Both publish immediately (first time). */
   uint16_t iter = 0;
-  erd_cache_entry_t* e1 = erd_cache_get_next_updated(&cache, &iter);
+  erd_cache_entry_t* e1 = next_updated(&cache, &iter);
   CHECK(e1 != NULL);
   erd_cache_mark_published(&cache, e1);
 
-  erd_cache_entry_t* e2 = erd_cache_get_next_updated(&cache, &iter);
+  erd_cache_entry_t* e2 = next_updated(&cache, &iter);
   CHECK(e2 != NULL);
   erd_cache_mark_published(&cache, e2);
 
@@ -561,7 +573,7 @@ TEST(erd_cache, rate_limit_multiple_erds_independent)
 
   /* 0x0001 is rate-limited, 0x0002 has no pending update. */
   iter = 0;
-  CHECK(NULL == erd_cache_get_next_updated(&cache, &iter));
+  CHECK(NULL == next_updated(&cache, &iter));
 
   /* Tick twice — 0x0001 cooldown goes from 3 to 1. */
   erd_cache_tick_cooldowns(&cache);
@@ -576,7 +588,7 @@ TEST(erd_cache, rate_limit_multiple_erds_independent)
   uint8_t data4[] = { 0x04 };
   erd_cache_update(&cache, 0x0002, 0xFF, data4, 1);
   iter = 0;
-  CHECK(NULL == erd_cache_get_next_updated(&cache, &iter));
+  CHECK(NULL == next_updated(&cache, &iter));
 }
 
 TEST(erd_cache, rate_limit_disabled_via_zero)
@@ -586,7 +598,7 @@ TEST(erd_cache, rate_limit_disabled_via_zero)
   erd_cache_update(&cache, 0x0001, 0xFF, data, 1);
 
   uint16_t iter = 0;
-  erd_cache_entry_t* entry = erd_cache_get_next_updated(&cache, &iter);
+  erd_cache_entry_t* entry = next_updated(&cache, &iter);
   CHECK(entry != NULL);
   erd_cache_mark_published(&cache, entry);
 
@@ -600,7 +612,7 @@ TEST(erd_cache, rate_limit_disabled_via_zero)
   uint8_t data2[] = { 0x02 };
   erd_cache_update(&cache, 0x0001, 0xFF, data2, 1);
   iter = 0;
-  entry = erd_cache_get_next_updated(&cache, &iter);
+  entry = next_updated(&cache, &iter);
   CHECK(entry != NULL);
 }
 
@@ -611,7 +623,7 @@ TEST(erd_cache, rate_limit_tick_noop_when_disabled)
   erd_cache_update(&cache, 0x0001, 0xFF, data, 1);
 
   uint16_t iter = 0;
-  erd_cache_entry_t* entry = erd_cache_get_next_updated(&cache, &iter);
+  erd_cache_entry_t* entry = next_updated(&cache, &iter);
   CHECK(entry != NULL);
   erd_cache_mark_published(&cache, entry);
 
@@ -631,7 +643,7 @@ TEST(erd_cache, rate_limit_unchanged_data_does_not_reset_cooldown)
 
   /* First publish — immediate (new entry). */
   uint16_t iter = 0;
-  erd_cache_entry_t* entry = erd_cache_get_next_updated(&cache, &iter);
+  erd_cache_entry_t* entry = next_updated(&cache, &iter);
   CHECK(entry != NULL);
   erd_cache_mark_published(&cache, entry);
   /* Send the same data again — unchanged data is skipped. */
@@ -657,14 +669,14 @@ TEST(erd_cache, rate_limit_unchanged_data_does_not_reset_cooldown)
   uint8_t data2[] = { 0x02 };
   erd_cache_update(&cache, 0x0001, 0xFF, data2, 1);
   iter = 0;
-  CHECK(NULL == erd_cache_get_next_updated(&cache, &iter));
+  CHECK(NULL == next_updated(&cache, &iter));
 
   /* Tick 5 times — cooldown reaches 0, now eligible. */
   for (int i = 0; i < 5; i++) {
     erd_cache_tick_cooldowns(&cache);
   }
   iter = 0;
-  entry = erd_cache_get_next_updated(&cache, &iter);
+  entry = next_updated(&cache, &iter);
   CHECK(entry != NULL);
   CHECK_EQUAL(0x0001, entry->erd);
 }

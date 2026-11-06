@@ -2,8 +2,6 @@
 #pragma once
 #include "esphome/components/mqtt/mqtt_client.h"
 
-#include "erd_registry.h"
-
 extern "C" {
 #include "i_mqtt_client.h"
 #include "tiny_event.h"
@@ -15,7 +13,6 @@ typedef struct {
   tiny_event_t on_write_request_event;
   tiny_event_t on_mqtt_disconnect_event;
   tiny_event_t on_mqtt_connect_event;
-  esphome::geappliances_bridge::ErdRegistry* erd_registry;
   // Tracked write topic for unsubscribe on destroy.
   char write_topic_[128];
 } esphome_mqtt_client_adapter_t;
@@ -27,10 +24,6 @@ extern "C" {
 void esphome_mqtt_client_adapter_init(
   esphome_mqtt_client_adapter_t* self,
   const char* device_id);
-
-void esphome_mqtt_client_adapter_set_erd_registry(
-  esphome_mqtt_client_adapter_t* self,
-  esphome::geappliances_bridge::ErdRegistry* erd_registry);
 
 void esphome_mqtt_client_adapter_notify_disconnected(
   esphome_mqtt_client_adapter_t* self);

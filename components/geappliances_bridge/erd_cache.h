@@ -93,13 +93,6 @@ void erd_cache_mark_unpublished(erd_cache_t* self, erd_cache_entry_t* entry);
  * Call once per second from the main loop. Takes the cache lock. */
 void erd_cache_tick_cooldowns(erd_cache_t* self);
 
-/* Returns the next entry with update_required=true, then clears the flag.
- * Caller provides an iterator (uint16_t) initialized to 0.
- * Returns NULL when no more updated entries remain.
- * NOTE: Declared for future use (e.g., batch republish after MQTT reconnect).
- *       Not used in the initial implementation. */
-erd_cache_entry_t* erd_cache_get_next_updated(erd_cache_t* self, uint16_t* iterator);
-
 /* Atomically fetch the next update_required entry AND copy its payload out of
  * the arena in one lock hold. This is the publisher's safe read path: the
  * arena slice is copied into data_out (capacity >= ERD_CACHE_MAX_DATA_SIZE)
@@ -117,8 +110,9 @@ uint16_t erd_cache_get_count(erd_cache_t* self);
 /* Returns the next valid entry in the cache, iterating all entries.
  * Caller provides an iterator (uint16_t) initialized to 0.
  * Returns NULL when no more valid entries remain (resets iterator to 0).
- * Unlike erd_cache_get_next_updated(), this does NOT require update_required=true
- * and does NOT clear any flags — it is a read-only iteration. */
+ * Unlike erd_cache_snapshot_next_updated(), this does NOT require
+ * update_required=true and does NOT clear any flags — it is a read-only
+ * iteration. */
 erd_cache_entry_t* erd_cache_get_next_entry(erd_cache_t* self, uint16_t* iterator);
 
 /* Returns the number of cache updates since the last call, then resets the window counter. */

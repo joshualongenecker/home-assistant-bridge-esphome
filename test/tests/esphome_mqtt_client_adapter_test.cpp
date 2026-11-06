@@ -30,13 +30,11 @@ TEST_GROUP(esphome_mqtt_client_adapter)
 {
   esphome_mqtt_client_adapter_t adapter;
   std::string device_id_str;
-  esphome::geappliances_bridge::ErdRegistry erd_registry;
 
   void setup()
   {
     mock().strictOrder();
     device_id_str = "test_device";
-    erd_registry = esphome::geappliances_bridge::ErdRegistry();
     esphome_hal_double_set_millis(0);
   }
 
@@ -49,12 +47,6 @@ TEST_GROUP(esphome_mqtt_client_adapter)
   void init_adapter()
   {
     esphome_mqtt_client_adapter_init(&adapter, device_id_str.c_str());
-  }
-
-  void init_adapter_with_registry()
-  {
-    init_adapter();
-    esphome_mqtt_client_adapter_set_erd_registry(&adapter, &erd_registry);
   }
 };
 

@@ -12,7 +12,6 @@ The `i_mqtt_client_t` struct wraps a vtable (`i_mqtt_client_api_t`) that the con
 
 | Method | Description |
 |--------|-------------|
-| `mqtt_client_register_erd(self, erd)` | Register a newly discovered ERD with the MQTT adapter. The adapter creates MQTT topics for the ERD. |
 | `mqtt_client_update_erd_write_result(self, erd, board_address, success, failure_reason)` | Provide the result for the most recently completed write request to an ERD. The adapter publishes the result to the appropriate MQTT topic (legacy no-prefix for the primary board, address-prefixed for secondary boards). |
 | `mqtt_client_on_write_request(self)` | Return an event pointer for subscribing to write requests received from MQTT. The bridge subscribes to this event to handle write commands. |
 | `mqtt_client_on_mqtt_disconnect(self)` | Return an event pointer for subscribing to MQTT disconnect notifications. |

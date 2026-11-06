@@ -51,14 +51,6 @@ void erd_write_bridge_destroy(erd_write_bridge_t* self);
 
 Unsubscribes all event handlers and frees state. Guards against being called on a never-initialized struct (checks `timer_group == NULL`) and against partial init where `mqtt_client` or `erd_client` may be null.
 
-### 2.3 Host Address Update
-
-```c
-void erd_write_bridge_set_host_address(erd_write_bridge_t* self, uint8_t host_address);
-```
-
-Updates the host address on the bridge struct. This is available as a utility for manual host address changes but is not called by any production code; the host address is set once during `erd_write_bridge_init()`.
-
 ---
 
 ## 3. State Machine
@@ -189,7 +181,7 @@ erd_write_bridge_init(
 
 ### 8.2 Host Address
 
-The host address is set once during `erd_write_bridge_init()`. The `erd_write_bridge_set_host_address()` utility is available for manual updates but is not called by any production code.
+The host address is set once during `erd_write_bridge_init()`, from the address detected by autodiscovery.
 
 ### 8.3 Teardown
 

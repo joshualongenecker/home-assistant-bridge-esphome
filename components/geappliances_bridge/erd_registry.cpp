@@ -47,32 +47,12 @@ void ErdRegistry::add_valid_erds(const tiny_erd_t* erds, uint16_t count)
   std::sort(valid_erds_, valid_erds_ + valid_erds_count_);
 }
 
-void ErdRegistry::clear_registered_erds()
-{
-  registered_erds_count_ = 0;
-}
-
-void ErdRegistry::register_erd(tiny_erd_t erd)
-{
-  for (uint16_t i = 0; i < registered_erds_count_; i++) {
-    if (registered_erds_[i] == erd) return;
-  }
-  if (registered_erds_count_ >= ERD_REGISTRY_MAX_VALID) return;
-  registered_erds_[registered_erds_count_++] = erd;
-}
-
 bool ErdRegistry::is_valid(tiny_erd_t erd) const
 {
   if (!valid_erds_ready_) {
     return true;  /* No filter active: all ERDs are valid. */
   }
   return std::binary_search(valid_erds_, valid_erds_ + valid_erds_count_, erd);
-}
-
-tiny_erd_t ErdRegistry::registered_erd(uint16_t idx) const
-{
-  if (idx >= registered_erds_count_) return 0;
-  return registered_erds_[idx];
 }
 
 tiny_erd_t ErdRegistry::valid_erd(uint16_t idx) const

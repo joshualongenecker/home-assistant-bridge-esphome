@@ -155,7 +155,7 @@ typedef struct {
 | `erd` | `tiny_erd_t` | ERD identifier |
 | `data_offset` | `uint16_t` | Offset into arena where data is stored |
 | `data_size` | `uint8_t` | Actual data size (invariant after registration, max 248) |
-| `update_required` | `bool` | Set during update; cleared by `get_next_updated()` |
+| `update_required` | `bool` | Set during update; cleared by `erd_cache_snapshot_next_updated()` |
 | `publish_cooldown` | `uint8_t` | Counts down from `max_cooldown` to 0; 0 means eligible for publishing |
 | `valid` | `bool` | True if entry is in use |
 
@@ -207,7 +207,7 @@ typedef struct erd_cache_t {
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `erd_cache_get_next_updated` | `erd_cache_entry_t* erd_cache_get_next_updated(erd_cache_t* self, uint16_t* iterator)` | Returns the next entry with `update_required = true`, then clears the flag. Caller provides an iterator (`uint16_t`) initialized to 0. Entries with an active `publish_cooldown` are skipped (rate-limited) when `max_cooldown > 0`. Returns `NULL` when no more updated entries remain; resets iterator to 0. |
+| `erd_cache_snapshot_next_updated` | `bool erd_cache_snapshot_next_updated(erd_cache_t* self, uint16_t* iterator, erd_cache_entry_t** entry_out, tiny_erd_t* erd_out, uint8_t* addr_out, uint8_t* data_out, uint8_t* size_out)` | Atomically fetch the next entry with `update_required = true` AND copy its payload out of the arena in one lock hold; clears the flag. Caller provides an iterator (`uint16_t`) initialized to 0. Entries with an active `publish_cooldown` are skipped (rate-limited) when `max_cooldown > 0`. Returns `true` and fills the out-params when an entry was found; `false` otherwise (iterator reset to 0). |
 | `erd_cache_get_count` | `uint16_t erd_cache_get_count(erd_cache_t* self)` | Returns the number of valid entries currently in the cache. |
 | `erd_cache_get_next_entry` | `erd_cache_entry_t* erd_cache_get_next_entry(erd_cache_t* self, uint16_t* iterator)` | Returns the next valid entry in the cache, iterating all entries. Does NOT require `update_required = true` and does NOT clear any flags — it is a read-only iteration. Resets iterator to 0 when exhausted. |
 | `erd_cache_mark_all_updated` | `void erd_cache_mark_all_updated(erd_cache_t* self)` | Marks all valid entries as `update_required = true`. Used after a long MQTT disconnect to force a full drain of retained values to the broker. |
@@ -249,7 +249,7 @@ The window is determined by the call interval of the consumer (e.g., ~60 s if ca
 
 8. **New entries always marked updated:** New entries always set `update_required = true`.
 
-9. **Iterator reset on exhaustion:** Both `get_next_updated()` and `get_next_entry()` reset the iterator to 0 when no more entries are found, allowing the caller to restart iteration.
+9. **Iterator reset on exhaustion:** Both `erd_cache_snapshot_next_updated()` and `erd_cache_get_next_entry()` reset the iterator to 0 when no more entries are found, allowing the caller to restart iteration.
 
 10. **Safe init/destroy:** `erd_cache_init()` and `erd_cache_destroy()` guard against non-initialized structs.
 
@@ -277,4 +277,4 @@ The window is determined by the call interval of the consumer (e.g., ~60 s if ca
 
 5. **Linear scan for free slot:** New entry insertion scans for the first invalid slot, which is O(n) in the worst case.
 
-6. **No batch republish:** `get_next_updated()` clears `update_required` per entry. If publishing fails mid-iteration (e.g., MQTT disconnect), the cleared entries are not re-marked. A batch republish mechanism would need to iterate all entries via `get_next_entry()` and re-publish.
+6. **No batch republish:** `erd_cache_snapshot_next_updated()` clears `update_required` per entry. If publishing fails mid-iteration (e.g., MQTT disconnect), the cleared entries are not re-marked. A batch republish mechanism would need to iterate all entries via `erd_cache_get_next_entry()` and re-publish.

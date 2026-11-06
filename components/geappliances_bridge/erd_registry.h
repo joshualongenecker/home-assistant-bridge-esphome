@@ -29,18 +29,8 @@ class ErdRegistry {
   /// call is a no-op (filtering stays disabled).
   void add_valid_erds(const tiny_erd_t* erds, uint16_t count);
 
-  /// Reset the registered-ERD set. Call before bridge (re-)initialization.
-  void clear_registered_erds();
-
   // -------------------------------------------------------------------------
-  // Runtime methods (called by the MQTT adapter during operation)
-  // -------------------------------------------------------------------------
-
-  /// Record that an ERD has been registered at runtime.
-  void register_erd(tiny_erd_t erd);
-
-  // -------------------------------------------------------------------------
-  // Queries (used by MQTT adapter during register_erd)
+  // Runtime methods (called by the subscription bridge during operation)
   // -------------------------------------------------------------------------
 
   /// Returns true if valid-ERD filtering is active.
@@ -54,14 +44,8 @@ class ErdRegistry {
   // Read-only accessors (diagnostics)
   // -------------------------------------------------------------------------
 
-  /// Returns the number of registered ERDs.
-  uint16_t registered_erd_count() const { return registered_erds_count_; }
-
   /// Returns the number of valid ERDs (filter).
   uint16_t valid_erd_count() const { return valid_erds_count_; }
-
-  /// Returns the registered ERD at the given index (0-based).
-  tiny_erd_t registered_erd(uint16_t idx) const;
 
   /// Returns the valid ERD at the given index (0-based).
   tiny_erd_t valid_erd(uint16_t idx) const;
@@ -69,8 +53,6 @@ class ErdRegistry {
  private:
   tiny_erd_t valid_erds_[ERD_REGISTRY_MAX_VALID];
   uint16_t valid_erds_count_{0};
-  tiny_erd_t registered_erds_[ERD_REGISTRY_MAX_VALID];
-  uint16_t registered_erds_count_{0};
   bool valid_erds_ready_{false};
 };
 
