@@ -15,7 +15,7 @@
 | [Overview](./architecture/overview.md) | C4 model: system context, container, and component diagrams |
 | [Startup Sequence](./architecture/startup-sequence.md) | 8-phase startup HSM sequence diagram |
 | [Data Flow](./architecture/data-flow.md) | Read path, write path, and discovery flow diagrams |
-| [Roadmap](./architecture/roadmap.md) | Future features and architectural improvements |
+| [Architecture Review](./architecture/architecture-review.md) | Prioritized architectural improvements for the bridge component |
 | [Module Descriptions](./module_descriptions/) | Lightweight summary for each module |
 
 ## Specifications
