@@ -39,7 +39,7 @@ extern const uint8_t ha_discovery_data_common[];
 // refrigeration.jsonl chunks
 extern const ha_discovery_chunk_t ha_discovery_chunk_refrigeration[];
 
-// refrigeration.jsonl compressed data (56090 bytes from 377921 bytes)
+// refrigeration.jsonl compressed data (56090 bytes from 377922 bytes)
 extern const uint8_t ha_discovery_data_refrigeration[];
 
 // laundry.jsonl chunks
@@ -97,6 +97,6 @@ extern const uint16_t ha_discovery_category_count;
 
 // FNV-1a hash of all discovery data for change detection.
 // Changes when discovery definitions are updated.
-#define HA_DISCOVERY_DATA_HASH 0x966758a3u
+#define HA_DISCOVERY_DATA_HASH 0x91bbc64eu
 
 #endif
