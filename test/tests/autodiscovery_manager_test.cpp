@@ -344,10 +344,10 @@ TEST(autodiscovery_manager, gea3_only_retries_gea3)
 }
 
 /* ------------------------------------------------------------------ */
-/* Completion with null callback                                        */
+/* GEA3 completes, both UARTs on                                        */
 /* ------------------------------------------------------------------ */
 
-TEST(autodiscovery_manager, completion_with_null_callback_does_not_crash)
+TEST(autodiscovery_manager, gea3_completes_with_both_uart_adapters_configured)
 {
   manager.init(&timer_group,
                &gea3_client.interface,

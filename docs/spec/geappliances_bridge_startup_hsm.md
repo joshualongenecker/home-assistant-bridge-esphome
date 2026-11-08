@@ -174,13 +174,11 @@ startup_state_top (root — consumes all unhandled signals)
   ├─ startup_state_autodiscovery
   │    ├─ entry: run_autodiscovery()
   │    ├─ run_loop: if autodiscovery complete → startup_state_device_id
-  │    ├─ autodiscovery_complete: if complete → startup_state_device_id
   │    └─ exit: —
   │
   ├─ startup_state_device_id
   │    ├─ entry: init_device_id_reading(); if complete → startup_state_mqtt_client_init
   │    ├─ run_loop: if device ID complete → startup_state_mqtt_client_init
-  │    ├─ device_id_complete: → startup_state_mqtt_client_init
   │    └─ exit: —
   │
   ├─ startup_state_mqtt_client_init
@@ -191,8 +189,6 @@ startup_state_top (root — consumes all unhandled signals)
   ├─ startup_state_feature_bits
   │    ├─ entry: —
   │    ├─ run_loop: if feature bits complete/failed → startup_state_bridge_init
-  │    ├─ mqtt_connected: if feature bits complete/failed → startup_state_bridge_init
-  │    ├─ feature_bits_complete: → startup_state_bridge_init
   │    └─ exit: —
   │
   ├─ startup_state_bridge_init
@@ -206,7 +202,6 @@ startup_state_top (root — consumes all unhandled signals)
   │    ├─ run_loop: if failed → handle_subscription_failed() → running;
   │    │            log_poll_state_transitions(), handle_polling_failed(),
   │    │            maybe_start_custom_erd_polling(); if not active → running
-  │    ├─ subscription_fallback: → startup_state_running
   │    └─ exit: —
   │
   └─ startup_state_running (terminal)
