@@ -407,12 +407,12 @@ typedef struct {
 
 ### 10.3 Triggering
 
-`GeappliancesBridge` triggers cleanup when a discovery refresh is requested:
+`DiscoveryLifecycleManager` triggers cleanup when a discovery refresh is requested or a discovery-affecting change is detected at steady state:
 
 1. `ha_discovery_cleanup_configure()` — pass device ID, MQTT client, and time source
 2. `ha_discovery_cleanup_start()` — begin cleanup process
 3. Each loop iteration: `ha_discovery_cleanup_run()` — advance the state machine
-4. When `ha_discovery_cleanup_is_done()` returns true: destroy cleanup module, configure and start discovery manager for fresh publishing, drive publishing until complete, call mark_boot_successful_for_reboot(), wait 5 seconds, then call safe_reboot()
+4. When `ha_discovery_cleanup_is_done()` returns true: destroy cleanup module, configure and start discovery manager for fresh publishing, drive publishing until complete, run the `confirm_firmware` hook and save the discovery record, wait 5 seconds, then call `safe_reboot()`
 
 ### 10.4 Independence
 
