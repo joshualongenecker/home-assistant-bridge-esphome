@@ -108,17 +108,17 @@ boots skip discovery entirely. Discovery runs in four scenarios:
 3. **Device ID change:** If the device ID changes (e.g. appliance swap or
    configuration change), the bridge detects the mismatch at steady state, cleans
    old discovery topics, publishes fresh ones, and reboots.
-4. **Fresh install:** On first boot with no stored discovery state, the bridge
-   publishes discovery topics only (no cleanup or reboot).
+4. **Fresh install:** On first boot with no stored discovery state, the bridge queues an
+   initial publish (no cleanup phase), publishes discovery topics, and reboots.
 
 ### Discovery Change Detection
 
 At steady state, the bridge compares the current `HA_DISCOVERY_DATA_HASH` (computed
 by the build-time pipeline), the current device ID, and the current
 `appliance_api_parsing` and `filter_config_topics` flags against the stored
-`DiscoveryNVS {hash, device_id, appliance_api_parsing, filter_config_topics}` struct in NVS. If any field differs, it triggers
-cleanup → publish → reboot. The stored state is updated after each successful
-publish so subsequent boots detect no change.
+`DiscoveryRecord {version, hash, device_id, appliance_api_parsing, filter_config_topics}` struct
+in NVS. If any field differs, it triggers cleanup → publish → reboot. The stored state is
+updated after each successful publish so subsequent boots detect no change.
 
 ```
 Firmware update → steady state → detect discovery hash/device_id change
@@ -131,7 +131,7 @@ Firmware update → steady state → detect discovery hash/device_id change
 ### Discovery Refresh Flow
 
 ```
-Button press → queue request via `ota_cleanup_manager_.trigger_discovery_refresh()`
+Button press → queue request via `discovery_lifecycle_manager_.trigger_discovery_refresh()`
   → wait for steady state, MQTT, device ID
   → cleanup old discovery topics
   → publish fresh discovery topics

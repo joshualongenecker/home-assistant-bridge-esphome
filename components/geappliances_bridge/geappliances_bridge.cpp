@@ -240,7 +240,7 @@ void GeappliancesBridge::setup() {
   ESP_LOGI(TAG, "Waiting %lu seconds before starting autodiscovery...",
            (unsigned long)(AUTODISCOVERY_STARTUP_DELAY_MS / 1000));
 
-  this->ota_cleanup_manager_.init(
+  this->discovery_lifecycle_manager_.init(
       &this->ha_discovery_manager_,
       this->device_identity_manager_,
       this->mqtt_client_adapter_,
@@ -248,9 +248,8 @@ void GeappliancesBridge::setup() {
       this->generate_device_config_,
       this->appliance_api_parsing_,
       this->filter_config_topics_,
-      this->steady_state_reached_,
-      this->mqtt_client_adapter_initialized_,
-      +[]() { esphome::App.safe_reboot(); });
+      &GeappliancesBridge::discovery_is_ready_,
+      this);
   this->diagnostic_sensor_publisher_.init(
       this->erd_publish_rate_sensor_,
       this->mqtt_publish_rate_sensor_,
@@ -309,7 +308,7 @@ void GeappliancesBridge::loop() {
 
   this->update_publisher_state_();
 
-  this->ota_cleanup_manager_.loop();
+  this->discovery_lifecycle_manager_.loop();
 
   this->diagnostic_sensor_publisher_.loop();
 }
@@ -755,7 +754,7 @@ bool GeappliancesBridge::check_steady_state()
              erd_cache_get_arena_usage_percent(&this->erd_cache_));
 
     if (this->generate_device_config_) {
-      this->ota_cleanup_manager_.check_discovery_changes(
+      this->discovery_lifecycle_manager_.check_discovery_changes(
           this->device_identity_manager_.get_device_id());
     }
   }
@@ -788,9 +787,16 @@ void GeappliancesBridge::init_erd_cache_publisher_()
   ha_discovery_manager_init(&this->ha_discovery_manager_);
 }
 
+// Steady state and MQTT initialization are the bridge's own state; the
+// discovery lifecycle asks instead of holding a reference to either.
+bool GeappliancesBridge::discovery_is_ready_(void* context) {
+  auto* self = static_cast<GeappliancesBridge*>(context);
+  return self->steady_state_reached_ && self->mqtt_client_adapter_initialized_;
+}
+
 void GeappliancesBridge::trigger_discovery_refresh()
 {
-  this->ota_cleanup_manager_.trigger_discovery_refresh();
+  this->discovery_lifecycle_manager_.trigger_discovery_refresh();
 }
 
 void GeappliancesBridge::maybe_start_custom_erd_polling()

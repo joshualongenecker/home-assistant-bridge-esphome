@@ -89,7 +89,7 @@ tries subscribe and falls back to poll).
 ### Lifecycle managers
 | File | Responsibility |
 |------|----------------|
-| `ota_cleanup_manager.h/.cpp` | OTA cleanup state machine (cleanup + republish before reboot). |
+| `discovery_lifecycle_manager.h/.cpp` | HA discovery lifecycle phase machine (initial publish, cleanup + republish, reboot). |
 | `diagnostic_sensor_publisher.h/.cpp` | Publishes diagnostic/telemetry sensors (publish rates, cache entries/updates, MQTT disconnect stats). |
 
 ### Adapters / interfaces
