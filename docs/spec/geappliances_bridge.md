@@ -191,7 +191,7 @@ The bridge integrates Home Assistant MQTT discovery via the `ha_discovery_manage
 3. **Device ID changed** (different appliance or config change): cleanup → publish → reboot
 4. **Discovery Refresh button pressed**: cleanup → publish → reboot
 
-Change detection runs in `check_steady_state()` (not `setup()`), since device identity is not available until steady state is reached. After each successful publish, a `DiscoveryNVS {hash, device_id, appliance_api_parsing, filter_config_topics}` struct is stored in NVS for comparison on the next boot.
+Change detection runs in `check_steady_state()` (not `setup()`), since device identity is not available until steady state is reached. After each successful publish, a `DiscoveryRecord {version, hash, device_id, appliance_api_parsing, filter_config_topics}` struct is stored in NVS for comparison on the next boot.
 
 ### 11.1 Configuration Flags
 
@@ -222,24 +222,43 @@ The following state variables were previously members of `GeappliancesBridge` bu
 
 | Variable | Owner |
 |----------|-------|
-| `discovery_refresh_in_progress_` | `OtaCleanupManager` |
-| `ota_cleanup_needed_` | `OtaCleanupManager` |
-| `ota_cleanup_in_progress_` | `OtaCleanupManager` |
-| `ota_discovery_publishing_` | `OtaCleanupManager` |
-| `ota_reboot_pending_` | `OtaCleanupManager` |
-| `ota_reboot_start_ms_` | `OtaCleanupManager` |
-| `initial_discovery_needed_` | `OtaCleanupManager` |
-| `initial_discovery_done_` | `OtaCleanupManager` |
-| `cleanup_trigger_` | `OtaCleanupManager` |
+| `phase_` | `DiscoveryLifecycleManager` |
+| `trigger_` | `DiscoveryLifecycleManager` |
+| `initial_publish_done_` | `DiscoveryLifecycleManager` |
+| `reboot_start_ms_` | `DiscoveryLifecycleManager` |
 | `last_erd_publish_rate_publish_` | `DiagnosticSensorPublisher` |
 | `last_erd_cache_stats_publish_` | `DiagnosticSensorPublisher` |
 | `last_mqtt_disconnect_stats_publish_` | `DiagnosticSensorPublisher` |
 
+`DiscoveryLifecycleManager` keeps its lifecycle in one `Phase` value instead of the cluster of independent booleans it used to carry, which were only valid in the handful of combinations the previous `loop()` source order happened to produce:
+
+| Phase | Meaning |
+|-------|---------|
+| `kPhaseIdle` | Nothing running; accepts the next request |
+| `kPhaseQueuedInitial` | Initial publish requested, waiting for readiness |
+| `kPhaseQueuedCleanup` | Cleanup + republish requested, waiting for readiness |
+| `kPhaseCleaning` | Deleting stale discovery topics |
+| `kPhasePublishing` | A discovery run is in flight |
+| `kPhaseRebootPending` | Published and recorded; rebooting after the delay |
+
+```text
+Idle --trigger_initial_discovery()--> QueuedInitial
+Idle --trigger_ota_cleanup() / trigger_discovery_refresh()--> QueuedCleanup
+QueuedInitial --ready--> Publishing
+QueuedCleanup --ready--> Cleaning
+Cleaning --cleanup done--> Publishing
+Publishing --run failed--> Idle               (no record saved, no reboot)
+Publishing --run complete--> RebootPending
+RebootPending --5 s elapsed--> Idle
+```
+
+`trigger_` (`kTriggerNone` / `kTriggerOta` / `kTriggerDiscoveryRefresh` / `kTriggerInitial`) records why the current phase was entered. It is orthogonal to the phase because the same cleanup → publish → reboot sequence runs for every trigger. `initial_publish_done_` is the one piece of state outside the phase: a sticky latch that keeps a fresh install from publishing twice in the same boot if the NVS record never landed.
+
 ### 11.3 Discovery Change Detection (check_steady_state())
 
-When steady state is first reached, `check_steady_state()` calls `ota_cleanup_manager_.check_discovery_changes()` with the current device ID. Under `#ifdef USE_ESP_IDF`, the method loads a `DiscoveryNVS {hash, device_id, appliance_api_parsing, filter_config_topics}` struct from NVS preferences (key `0x64697363u` / "disc").
+When steady state is first reached, `check_steady_state()` calls `discovery_lifecycle_manager_.check_discovery_changes()` with the current device ID. The method loads a `DiscoveryRecord {version, hash, device_id, appliance_api_parsing, filter_config_topics}` struct through the injected `load_discovery_record` hook (NVS preferences key `0x64697363u` / "disc" on the device).
 
-Four outcomes are possible:
+Three outcomes are possible:
 
 - **No stored state (fresh install):** `trigger_initial_discovery()` is called. The bridge will publish discovery topics without cleanup, then reboot.
 - **Hash, device ID, appliance_api_parsing, or filter_config_topics changed:** `trigger_ota_cleanup()` is called. The bridge will clean old topics, publish fresh discovery, and reboot.
@@ -253,32 +272,33 @@ Each `loop()` iteration delegates discovery and diagnostic work to the extracted
 
 1. **Update publisher state:** Call `update_publisher_state_()` to manage the publisher pause/resume state machine and signal or run the publisher.
 
-2. **Discovery cleanup and refresh:** Delegates to `ota_cleanup_manager_.loop()`, which drives the state machine for all discovery paths: initial publish (fresh install), cleanup + republish (hash/device ID change or Discovery Refresh), and the final reboot. The state machine gates on steady state, MQTT initialization, and device ID completion, and handles the full lifecycle: optional cleanup, discovery publishing, safe-mode counter clearing, OTA rollback cancellation, NVS state storage, and the final reboot delay.
+2. **Discovery lifecycle:** Delegates to `discovery_lifecycle_manager_.loop()`, which advances the discovery phase machine by at most one transition per call: initial publish (fresh install), cleanup + republish (hash/device ID change or Discovery Refresh), and the final reboot. The machine gates on steady state, MQTT initialization, and device ID completion, and handles the full lifecycle: optional cleanup, discovery publishing, safe-mode counter clearing, OTA rollback cancellation, NVS state storage, and the final reboot delay.
 
 3. **Diagnostic sensor publishing:** Delegates to `diagnostic_sensor_publisher_.loop()`, which publishes ERD publish rate, MQTT publish rate, ERD cache stats, and MQTT disconnect stats at their configured intervals (~60 seconds).
 
 ### 11.5 trigger_discovery_refresh() Flow
 
-`trigger_discovery_refresh()` is now a **public** method (previously protected with `friend DiscoveryRefreshButton`). It delegates to `ota_cleanup_manager_.trigger_discovery_refresh()`.
+`trigger_discovery_refresh()` is now a **public** method (previously protected with `friend DiscoveryRefreshButton`). It delegates to `discovery_lifecycle_manager_.trigger_discovery_refresh()`.
 
-The actual behavior is implemented in `OtaCleanupManager`:
+The actual behavior is implemented in `DiscoveryLifecycleManager`:
 
-1. **Idempotency guard:** If any discovery operation is already in progress (`discovery_refresh_in_progress_`, `ota_cleanup_needed_`, `ota_cleanup_in_progress_`, `ota_discovery_publishing_`, or `ota_reboot_pending_`), log a warning ("Discovery refresh already in progress, ignoring") and return.
-2. **Queue the request:** Set `discovery_refresh_in_progress_` to `true`, set `cleanup_trigger_` to `DISCOVERY_REFRESH`, and log "Discovery refresh queued, will execute when appliance is ready".
+1. **Idempotency guard:** If any phase other than `kPhaseIdle` is active, log a warning naming the request and the current phase and return. "One phase at a time" is the invariant the enum enforces.
+2. **Queue the request:** Set `trigger_` to `kTriggerDiscoveryRefresh`, move the phase to `kPhaseQueuedCleanup`, and log "Discovery refresh queued, will execute when appliance is ready".
 
 No guard checks for steady state, MQTT readiness, or device ID are performed at press time. The request is queued and will execute in `loop()` once all prerequisites are met. This allows the user to press the button at any time, even during startup.
 
 ### 11.6 NVS State Storage and Reboot Preparation
 
-After discovery publishing completes, `OtaCleanupManager.loop()` performs several steps before rebooting:
+After a successful discovery run, `DiscoveryLifecycleManager::finish_publish_()` performs several steps before arming the reboot. Each host-environment step goes through an injected hook, so the phase machine runs identically on the device and in the unit-test harness:
 
-1. **Clear the safe mode boot loop counter:** Writes `0` to the ESPHome preferences key matching `SAFE_MODE_RTC_KEY` (233825507UL) and syncs immediately. This prevents the device from entering safe mode due to rapid reboots during the cleanup → publish → reboot cycle.
-2. **Cancel OTA rollback:** Calls `esp_ota_mark_app_valid_cancel_rollback()` to mark the current OTA partition as valid, preventing the bootloader from rolling back to the previous partition on the next boot.
-3. **Store discovery state in NVS:** Saves a `DiscoveryNVS {hash, device_id, appliance_api_parsing, filter_config_topics}` struct to NVS preferences (key `0x64697363u` / "disc"). The `hash` field is set to `HA_DISCOVERY_DATA_HASH`, `device_id` from `DeviceIdentityManager`, and both config flags from the current YAML configuration. This stored state is compared against on the next boot to detect changes requiring cleanup.
+1. **Confirm the firmware** (`confirm_firmware`): writes `0` to the ESPHome preferences key matching `SAFE_MODE_RTC_KEY` (233825507UL), syncs immediately, and calls `esp_ota_mark_app_valid_cancel_rollback()`. This prevents the device from entering safe mode due to rapid reboots during the cleanup → publish → reboot cycle, and marks the current OTA partition valid so the bootloader does not roll back. It runs for a failed run too, so a good OTA is never rolled back because discovery failed.
+2. **Store the discovery record** (`save_discovery_record`): saves `DiscoveryRecord {version, hash, device_id, appliance_api_parsing, filter_config_topics}` to NVS preferences (key `0x64697363u` / "disc"). The `hash` field is `ha_discovery_manager_data_hash()`, `device_id` comes from `DeviceIdentityManager`, and both config flags from the current YAML configuration. This stored state is compared against on the next boot to detect changes requiring cleanup. `version` is `kRecordVersion`, bumped whenever the record layout changes.
+
+A **failed** run skips the record and the reboot and returns to `kPhaseIdle`: leaving the stored record stale or absent is what makes the next boot retry.
 
 ### 11.7 Integration with ha_discovery_manager
 
-The bridge owns a `ha_discovery_manager_t` instance (`ha_discovery_manager_`). The manager is driven by `OtaCleanupManager` from `loop()` via delegation:
+The bridge owns a `ha_discovery_manager_t` instance (`ha_discovery_manager_`). The manager is driven by `DiscoveryLifecycleManager` from `loop()` via delegation:
 
 - **Configuration:** `ha_discovery_manager_configure()` is called when discovery starts (during any discovery path: initial publish, change-triggered cleanup, or Discovery Refresh), passing the device identity (ID, model, serial, appliance type), the `filter_config_topics_` flag, the ERD cache, and the MQTT client interface.
 - **Start:** `ha_discovery_manager_start()` transitions the manager from `IDLE` to `BUILDING`.
@@ -287,18 +307,18 @@ The bridge owns a `ha_discovery_manager_t` instance (`ha_discovery_manager_`). T
 
 ### 11.8 Integration with ha_discovery_cleanup
 
-The cleanup module is accessed via `ha_discovery_manager_.cleanup` and driven by `OtaCleanupManager`. All cleanup paths (hash/device ID change, Discovery Refresh) use the same cleanup module; initial publish skips cleanup entirely.
+The cleanup module is accessed via `ha_discovery_manager_.cleanup` and driven by `DiscoveryLifecycleManager`. All cleanup paths (hash/device ID change, Discovery Refresh) use the same cleanup module; initial publish skips cleanup entirely.
 
-`OtaCleanupManager` handles the full lifecycle:
+`DiscoveryLifecycleManager` handles the full lifecycle:
 
 - **Configuration:** `ha_discovery_cleanup_configure()` is called with the device ID, MQTT client interface, and time source.
 - **Start:** `ha_discovery_cleanup_start()` begins the cleanup process.
-- **Drive:** `ha_discovery_cleanup_run()` is called each `loop()` iteration within `OtaCleanupManager`.
-- **Completion:** `ha_discovery_cleanup_is_done()` returns `true` when all phases are complete. `OtaCleanupManager` then destroys the cleanup module, resets the discovery manager, and proceeds to publish fresh discovery topics.
+- **Drive:** `ha_discovery_cleanup_run()` is called each `loop()` iteration while the phase is `kPhaseCleaning`.
+- **Completion:** `ha_discovery_cleanup_is_done()` returns `true` when all phases are complete. `DiscoveryLifecycleManager` then destroys the cleanup module, resets the discovery manager, and proceeds to publish fresh discovery topics.
 
 ### 11.9 Reboot with safe_reboot()
 
-After cleanup and discovery publishing complete, `OtaCleanupManager` reboots using `esphome::App.safe_reboot()` instead of `esphome::App.reboot()`. `safe_reboot()` performs a graceful MQTT disconnect before resetting, ensuring a clean session end on the broker. This prevents the broker from thinking the device is still connected, which could cause stale availability topics or delayed reconnection events.
+After cleanup and discovery publishing complete, `DiscoveryLifecycleManager` reboots using `esphome::App.safe_reboot()` instead of `esphome::App.reboot()` (the `reboot` hook). `safe_reboot()` performs a graceful MQTT disconnect before resetting, ensuring a clean session end on the broker. This prevents the broker from thinking the device is still connected, which could cause stale availability topics or delayed reconnection events.
 
 A 5-second delay precedes the reboot to allow final discovery messages to transmit and the heap to stabilize. The reboot also defragments the heap after the memory-intensive cleanup and publish cycle.
 

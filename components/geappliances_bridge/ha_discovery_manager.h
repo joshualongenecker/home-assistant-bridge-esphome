@@ -190,7 +190,7 @@ void ha_discovery_manager_set_availability(
  * Fingerprint of everything that determines the published discovery payloads:
  * the generated data (HA_DISCOVERY_DATA_HASH), the optional custom profile,
  * and the runtime-injected availability topic/payloads. Used by
- * OtaCleanupManager for change detection: any change to these inputs must
+ * DiscoveryLifecycleManager for change detection: any change to these inputs must
  * change this value so a cleanup/republish is triggered. With availability
  * unset the value is identical to pre-availability firmware, so those
  * installs do not get a spurious republish.

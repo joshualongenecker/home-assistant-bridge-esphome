@@ -51,7 +51,7 @@ extern "C" {
 #include "feature_bit_manager.h"
 #include "autodiscovery_manager.h"
 #include "geappliances_bridge_startup_hsm.h"
-#include "ota_cleanup_manager.h"
+#include "discovery_lifecycle_manager.h"
 #include "diagnostic_sensor_publisher.h"
 #include "erd_poll_list_builder.h"
 #include "appliance_type_map.h"
@@ -168,6 +168,10 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   void run_protocol_stack_();
   void log_poll_state_transitions_();
   void update_publisher_state_();
+  // Readiness predicate handed to DiscoveryLifecycleManager: the bridge owns
+  // steady state and MQTT initialization, so it answers instead of exposing
+  // those members as references the manager could alias.
+  static bool discovery_is_ready_(void* context);
   void start_feature_bit_reading_();
   void init_erd_cache_publisher_();
   void init_polling_bridge_(bool log_as_info, const probe_entry_t* custom_erds = nullptr,
@@ -259,8 +263,10 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   bool discovery_just_resumed_{false};
 
   AutodiscoveryManager autodiscovery_manager_;
-  // OTA-triggered discovery cleanup: set in setup() if the stored discovery data hash differs from the current build's hash. Driven in loop() after steady state. After cleanup, reboots (same as DiscoveryRefresh) for fresh republish.
-  OtaCleanupManager ota_cleanup_manager_;
+  // HA discovery lifecycle: initial publish, cleanup + republish (OTA, config
+  // change, Discovery Refresh) and the reboot that follows a successful
+  // publish. Driven from loop() once steady state is reached.
+  DiscoveryLifecycleManager discovery_lifecycle_manager_;
   DiagnosticSensorPublisher diagnostic_sensor_publisher_;
 
   tiny_timer_group_t timer_group_;
