@@ -240,13 +240,13 @@ static int chunk_decompress(ha_discovery_manager_t* self, const uint8_t* compres
     (void)self; (void)compressed; (void)compressed_len; (void)output; (void)output_len;
     return -1;
 #else
-    tinfl_init(&self->decomp_state);
+    tinfl_init(self->decomp_state);
 
     size_t src_size = compressed_len;
     size_t dst_size = *output_len;
 
     tinfl_status status = gea_tinfl_decompress(
-        &self->decomp_state,
+        self->decomp_state,
         compressed, &src_size,
         output, output, &dst_size,
         TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
@@ -762,6 +762,8 @@ static void cleanup_resources(ha_discovery_manager_t* self)
     self->line_buf = NULL;
     free(self->payload_buf);
     self->payload_buf = NULL;
+    free(self->decomp_state);
+    self->decomp_state = NULL;
     ha_discovery_cleanup_destroy(&self->cleanup);
 }
 
@@ -932,13 +934,14 @@ void ha_discovery_manager_init(ha_discovery_manager_t* self)
     uint16_t custom_max_chunk = self->custom_max_decompressed_chunk;
     uint32_t custom_data_hash = self->custom_data_hash;
 
-    /* Free any discovery buffers still allocated from a prior run before
-     * zeroing the struct, so a re-init can never orphan the ~44 KB of heap
+    /* Free any discovery allocations still held from a prior run before
+     * zeroing the struct, so a re-init can never orphan the ~52 KB of heap
      * memory (mirrors ha_discovery_manager_cleanup()). free(NULL) is a no-op
-     * when the buffers were never allocated. */
+     * when they were never allocated. */
     free(self->decomp_buf);
     free(self->line_buf);
     free(self->payload_buf);
+    free(self->decomp_state);
 
     memset(self, 0, sizeof(*self));
 
@@ -1049,19 +1052,22 @@ void ha_discovery_manager_start(ha_discovery_manager_t* self)
 {
     if (self->state != ha_discovery_state_idle) return;
 
-    /* Allocate the large discovery buffers on the heap for the duration of
-     * this run only. The device reboots after discovery, so this memory never
-     * persists into steady state; keeping it out of the struct removes the
-     * ~44 KB from the permanent heap carve on non-discovery boots. */
+    /* Allocate the large discovery buffers and the tinfl decompressor state on
+     * the heap for the duration of this run only. The device reboots after
+     * discovery, so this memory never persists into steady state; keeping it
+     * out of the struct removes ~52 KB from the permanent heap carve on
+     * non-discovery boots. */
     size_t free_heap __attribute__((unused)) = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t largest_free __attribute__((unused)) = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-    ESP_LOGI(TAG, "Discovery: allocating %u bytes (decomp+line+payload); free heap=%u, largest block=%u",
-             (unsigned)(HA_DISCOVERY_DECOMP_BUF_SIZE + HA_DISCOVERY_LINE_BUF_SIZE + HA_DISCOVERY_PAYLOAD_BUF_SIZE),
+    ESP_LOGI(TAG, "Discovery: allocating %u bytes (decomp+line+payload+tinfl); free heap=%u, largest block=%u",
+             (unsigned)(HA_DISCOVERY_DECOMP_BUF_SIZE + HA_DISCOVERY_LINE_BUF_SIZE + HA_DISCOVERY_PAYLOAD_BUF_SIZE +
+                        sizeof(tinfl_decompressor)),
              (unsigned)free_heap, (unsigned)largest_free);
     self->decomp_buf = (uint8_t*)malloc(HA_DISCOVERY_DECOMP_BUF_SIZE);
     self->line_buf = (char*)malloc(HA_DISCOVERY_LINE_BUF_SIZE);
     self->payload_buf = (char*)malloc(HA_DISCOVERY_PAYLOAD_BUF_SIZE);
-    if (!self->decomp_buf || !self->line_buf || !self->payload_buf) {
+    self->decomp_state = (tinfl_decompressor*)malloc(sizeof(tinfl_decompressor));
+    if (!self->decomp_buf || !self->line_buf || !self->payload_buf || !self->decomp_state) {
         ESP_LOGE(TAG, "Discovery: failed to allocate discovery buffers (free heap=%u)", (unsigned)free_heap);
         free(self->decomp_buf);
         self->decomp_buf = NULL;
@@ -1069,6 +1075,8 @@ void ha_discovery_manager_start(ha_discovery_manager_t* self)
         self->line_buf = NULL;
         free(self->payload_buf);
         self->payload_buf = NULL;
+        free(self->decomp_state);
+        self->decomp_state = NULL;
         self->state = ha_discovery_state_failed;
         return;
     }

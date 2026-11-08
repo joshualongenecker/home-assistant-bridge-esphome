@@ -295,8 +295,9 @@ void DiscoveryLifecycleManager::finish_publish_() {
   this->hooks_.confirm_firmware(this->hooks_.context);
 
   if (discovery_failed) {
-    // Reset the manager to idle: this frees the discovery buffers (so the
-    // ~44 KB does not linger for the rest of the boot) and clears run state.
+    // Reset the manager to idle: this frees the discovery allocations (so the
+    // ~52 KB of buffers plus the tinfl state does not linger for the rest of
+    // the boot) and clears run state.
     // Also do not save the discovery record and do not arm the reboot:
     // leaving the stored record stale/absent is what makes
     // check_discovery_changes() re-trigger discovery on the next boot.
