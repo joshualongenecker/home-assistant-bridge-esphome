@@ -97,6 +97,14 @@ typedef struct {
    * processes its first signal.  NULL means no callback. */
   void (*on_discovery_complete)(void* context);
   void* on_discovery_complete_context;
+  /* Time and yield injection — mirrors erd_cache_mqtt_publisher_t::get_time_ms.
+   * Defaults are set in erd_bridge_poll_init() (esphome::millis / delay(0));
+   * tests install fakes via the setters so the budgeted send/resume paths
+   * (POLL_YIELD_MS, POLL_CYCLE_SEND_BUDGET_MS, cycle_sending_in_progress)
+   * are exercised against a deterministic clock instead of the HAL double's
+   * frozen counter. */
+  uint32_t (*get_time_ms)(void);
+  void (*yield_fn)(void);
 } erd_bridge_poll_t;
 
 void erd_bridge_poll_init(
@@ -108,6 +116,18 @@ void erd_bridge_poll_init(
   const probe_entry_t* probe_list,
   uint16_t probe_list_count,
   erd_cache_t* cache);
+
+/* Override the time source / yield after init (test seam).  MUST be called
+ * after erd_bridge_poll_init(): init installs the HAL defaults
+ * unconditionally (the struct is a garbage-initialized plain member and
+ * nothing on the hardware path pre-sets these fields, so pre-init values
+ * are not preserved).  A NULL argument restores the default. */
+void erd_bridge_poll_set_time_fn(
+  erd_bridge_poll_t* self,
+  uint32_t (*get_time_ms)(void));
+void erd_bridge_poll_set_yield_fn(
+  erd_bridge_poll_t* self,
+  void (*yield_fn)(void));
 
 void erd_bridge_poll_destroy(erd_bridge_poll_t* self);
 

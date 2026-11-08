@@ -23,6 +23,13 @@ static constexpr uint32_t POLL_YIELD_MS = 50;          // per-batch time budget
 static constexpr uint32_t POLL_CYCLE_SEND_BUDGET_MS = 100;  // max time per send invocation
 static constexpr uint32_t POLL_CYCLE_RESUME_MS = 100;   // timer interval when send budget exceeded
 
+/* Default yield between send batches: hands control back to the ESPHome
+ * main loop / IDLE task on the same core. */
+static void poll_default_yield(void)
+{
+  esphome::delay(0);
+}
+
 static void arm_polling_timer(erd_bridge_poll_t* self, tiny_timer_ticks_t ticks)
 {
   self->polling_timer_armed = true;
@@ -77,7 +84,7 @@ static void clear_discovery_state(erd_bridge_poll_t* self)
 //           send_next_poll_read_request, where restart_pending is never set).
 static void on_polling_cycle_complete(erd_bridge_poll_t* self, bool immediate)
 {
-  uint32_t now = esphome::millis();
+  uint32_t now = self->get_time_ms();
   self->last_cycle_time_ms = (uint32_t)(now - self->cycle_start_ms);
   self->cycle_count++;
 
@@ -132,9 +139,9 @@ static void send_next_poll_read_request(erd_bridge_poll_t* self)
     self->request_id++;
     uint8_t addr = self->erd_polling_addresses[self->erd_index];
     if (addr == PROBE_ENTRY_DEFAULT_ADDRESS) addr = self->erd_host_address;
-    uint32_t t0 = esphome::millis();
+    uint32_t t0 = self->get_time_ms();
     bool queued = tiny_gea3_erd_client_read(self->erd_client, &self->request_id, addr, self->erd_polling_list[self->erd_index]);
-    uint32_t elapsed = esphome::millis() - t0;
+    uint32_t elapsed = self->get_time_ms() - t0;
     self->erd_index++;
     if (!queued) {
       /* Queue full — the read was silently dropped. Count it as completed
@@ -166,19 +173,19 @@ static void send_next_poll_read_request(erd_bridge_poll_t* self)
 // The caller wraps this in a while loop:
 //     while (self->erd_index < self->polling_list_count) {
 //       send_poll_read_requests_bounded(self, POLL_YIELD_MS);
-//       esphome::delay(0); // yield to main loop
+//       self->yield_fn(); // yield to main loop
 //     }
 // so that all ERDs are queued before proceeding.
 
 static void send_poll_read_requests_bounded(erd_bridge_poll_t* self, uint32_t budget_ms)
 {
-  uint32_t start = esphome::millis();
+  uint32_t start = self->get_time_ms();
   uint16_t count = 0;
   while (self->erd_index < self->polling_list_count) {
     send_next_poll_read_request(self);
     count++;
     // Check time budget every 10 ERDs to minimize overhead on small lists.
-    if (count % 10 == 0 && (esphome::millis() - start) >= budget_ms) {
+    if (count % 10 == 0 && (self->get_time_ms() - start) >= budget_ms) {
       break;
     }
   }
@@ -193,17 +200,17 @@ static void send_poll_read_requests_bounded(erd_bridge_poll_t* self, uint32_t bu
  * was exceeded and a resume timer should be armed. */
 static bool send_cycle_reads(erd_bridge_poll_t* self)
 {
-  uint32_t send_start = esphome::millis();
+  uint32_t send_start = self->get_time_ms();
   while (self->erd_index < self->polling_list_count) {
     send_poll_read_requests_bounded(self, POLL_YIELD_MS);
-    esphome::delay(0);
-    if ((esphome::millis() - send_start) >= POLL_CYCLE_SEND_BUDGET_MS) {
+    self->yield_fn();
+    if ((self->get_time_ms() - send_start) >= POLL_CYCLE_SEND_BUDGET_MS) {
       self->cycle_sending_in_progress = true;
       return false;
     }
   }
   self->cycle_sending_in_progress = false;
-  uint32_t elapsed = esphome::millis() - send_start;
+  uint32_t elapsed = self->get_time_ms() - send_start;
   if (elapsed >= 1000) {
     ESP_LOGW(TAG, "Long cycle send: %lums for %u ERDs", (unsigned long)elapsed, self->polling_list_count);
   }
@@ -379,7 +386,7 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
         // Cycle was already complete when the timer fired — start next cycle.
         self->erd_index = 0;
         self->cycle_completed_count = 0;
-        uint32_t now = esphome::millis();
+        uint32_t now = self->get_time_ms();
         self->cycle_start_ms = now;
         all_sent = send_cycle_reads(self);
         if (all_sent) {
@@ -513,6 +520,14 @@ static void erd_bridge_poll_init_impl(
   self->cycle_count                 = 0;
   self->polling_failure_count     = 0;
   self->cycle_has_failure         = false;
+  /* Time/yield defaults are installed unconditionally — unlike the
+   * on_discovery_complete preservation below.  Nothing on the hardware path
+   * pre-sets them, and erd_bridge_poll_t is a plain (garbage-initialized)
+   * member of GeappliancesBridge, so a preserve-if-non-NULL check here would
+   * read garbage and skip the default install.  Tests inject via the
+   * setters AFTER init. */
+  self->get_time_ms = esphome::millis;
+  self->yield_fn = poll_default_yield;
   erd_set_init(&self->erd_set);
   self->erd_cache = cache;
   // Preserve a pre-set callback (e.g., from the bridge wiring it before
@@ -553,6 +568,22 @@ void erd_bridge_poll_init(
   erd_bridge_poll_init_impl(
     self, timer_group, erd_client, polling_interval_ms,
     host_address, probe_list, probe_list_count, cache);
+}
+
+void erd_bridge_poll_set_time_fn(
+  erd_bridge_poll_t* self,
+  uint32_t (*get_time_ms)(void))
+{
+  /* NULL restores the init default (esphome::millis). */
+  self->get_time_ms = get_time_ms ? get_time_ms : esphome::millis;
+}
+
+void erd_bridge_poll_set_yield_fn(
+  erd_bridge_poll_t* self,
+  void (*yield_fn)(void))
+{
+  /* NULL restores the init default (the delay(0) wrapper). */
+  self->yield_fn = yield_fn ? yield_fn : poll_default_yield;
 }
 
 void erd_bridge_poll_destroy(erd_bridge_poll_t* self)
