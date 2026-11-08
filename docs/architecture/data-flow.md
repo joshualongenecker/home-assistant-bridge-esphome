@@ -175,8 +175,9 @@ graph LR
    contains independently-compressible chunks to keep the decompression buffer
    small (18 KB max).
 2. **Decompress** — The `tinfl` (miniz) decompressor expands one chunk at a
-   time into a pre-allocated 18 KB buffer. The decompressor state is
-   re-initialized per chunk so each is self-contained.
+   time into an 18 KB buffer that is heap-allocated for the duration of the
+   discovery run and freed afterwards. The ~8 KB decompressor state is allocated
+   with it and re-initialized per chunk, so each chunk is self-contained.
 3. **Parse JSONL** — A zero-allocation JSON parser extracts fields from each
    newline-delimited JSON line. All buffers (payload, topic, entity fields) are
    pre-allocated on the struct to avoid heap allocation during processing.

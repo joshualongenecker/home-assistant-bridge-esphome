@@ -5,10 +5,10 @@
  *
  * States: IDLE -> BUILDING -> DISCOVERING -> COMPLETE / FAILED
  *
- * The three large buffers (decomp ~18 KB, line ~18 KB, payload ~8 KB) are
- * heap-allocated only for the duration of a discovery run; on non-discovery
- * boots they are never allocated. Peak memory during discovery: those three
- * buffers + the sorted ERD array (~1.3 KB).
+ * The three large buffers (decomp ~18 KB, line ~18 KB, payload ~8 KB) and the
+ * ~8 KB tinfl decompressor state are heap-allocated only for the duration of a
+ * discovery run; on non-discovery boots they are never allocated. Peak memory
+ * during discovery: those four allocations + the sorted ERD array (~1.3 KB).
  */
 
 #ifndef ha_discovery_manager_h
@@ -63,7 +63,8 @@ typedef enum {
 
 /*!
  * Peak memory: payload buffer (~8 KB) + decompress buffer (~18 KB) +
- * line buffer (~18 KB) + sorted ERD array (~1.3 KB).
+ * line buffer (~18 KB) + tinfl decompressor state (~8 KB) + sorted ERD
+ * array (~1.3 KB).
  */
 typedef struct {
   erd_cache_t* cache;              // Shared ERD cache (owned by GeappliancesBridge)
@@ -83,9 +84,12 @@ typedef struct {
   uint16_t sorted_erds[HA_DISCOVERY_MAX_ERDS];
   uint16_t sorted_erds_count;
 
-  tinfl_decompressor decomp_state;
+  /* tinfl state. Heap-allocated only while a discovery run is active, like the
+   * buffers below: it is ~8 KB of huffman-table scratch that is re-initialized
+   * for every chunk, so it earns no space outside a run. */
+  tinfl_decompressor* decomp_state;
   /* Heap-allocated only while a discovery run is active; NULL otherwise, so
-   * non-discovery boots don't carry this ~44 KB in the object. */
+   * non-discovery boots don't carry the ~52 KB of run allocations in the object. */
   uint8_t* decomp_buf;
 
   /* Line parsing buffer. Heap-allocated only while a discovery run is active. */

@@ -254,3 +254,59 @@ TEST(ha_discovery_manager_data_hash, custom_and_availability_combine)
     CHECK(both != custom_only);
     CHECK(both != HA_DISCOVERY_DATA_HASH);
 }
+
+/* The discovery run's large allocations — the three buffers plus the ~8 KB
+ * tinfl decompressor state — live on the heap only between start() and
+ * cleanup()/init(). Repeated refresh-button cycles must not orphan them. */
+TEST_GROUP(ha_discovery_manager_run_memory)
+{
+    ha_discovery_manager_t manager;
+    erd_cache_t cache;
+
+    void setup()
+    {
+        memset(&manager, 0, sizeof(manager));
+        erd_cache_init(&cache);
+        ha_discovery_manager_init(&manager);
+        ha_discovery_manager_configure(&manager, "run-mem", NULL, NULL, 0, false, &cache, NULL);
+    }
+
+    void teardown()
+    {
+        ha_discovery_manager_cleanup(&manager);
+        erd_cache_destroy(&cache);
+    }
+
+    bool all_run_memory_allocated()
+    {
+        return manager.decomp_state != NULL && manager.decomp_buf != NULL &&
+               manager.line_buf != NULL && manager.payload_buf != NULL;
+    }
+
+    bool all_run_memory_released()
+    {
+        return manager.decomp_state == NULL && manager.decomp_buf == NULL &&
+               manager.line_buf == NULL && manager.payload_buf == NULL;
+    }
+};
+
+TEST(ha_discovery_manager_run_memory, start_allocates_all_run_memory)
+{
+    CHECK_TRUE(all_run_memory_released());
+
+    ha_discovery_manager_start(&manager);
+
+    LONGS_EQUAL(ha_discovery_state_building, manager.state);
+    CHECK_TRUE(all_run_memory_allocated());
+}
+
+TEST(ha_discovery_manager_run_memory, reinit_after_start_releases_the_run_memory)
+{
+    ha_discovery_manager_start(&manager);
+    CHECK_TRUE(all_run_memory_allocated());
+
+    ha_discovery_manager_init(&manager);
+
+    LONGS_EQUAL(ha_discovery_state_idle, manager.state);
+    CHECK_TRUE(all_run_memory_released());
+}
