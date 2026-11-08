@@ -38,6 +38,17 @@ INC_FLAGS := $(addprefix -I,$(INC_DIRS))
 
 SANITIZE_FLAGS := -fsanitize=address -fsanitize=undefined
 
+# Leak detection is on for both suites: no test owns memory that outlives its
+# teardown, so a leak is a real leak — e.g. a discovery run orphaning its
+# ~52 KB of buffers and tinfl state.
+#
+# halt_on_error must stay at its default (1) here: with halt_on_error=0
+# AddressSanitizer prints the LeakSanitizer report but still exits 0, so a leak
+# would not fail CI. Debug with halting disabled when you want to see several
+# mid-run ASan errors at once (leaks then only print, never fail):
+#   make test ASAN_OPTIONS="detect_leaks=1 halt_on_error=0"
+ASAN_OPTIONS ?= detect_leaks=1:detect_stack_use_after_return=0
+
 # CppUTest installation paths — auto-detect common locations
 # Override with: make CPPUTEST_PREFIX=/path/to/cpputest
 #   macOS (Apple Silicon):  /opt/homebrew  (default)
@@ -74,7 +85,7 @@ BUILD_DEPS += $(MAKEFILE_LIST)
 .PHONY: test
 test: $(BUILD_DIR)/$(TARGET)
 	@echo Running tests...
-	@ASAN_OPTIONS=detect_leaks=0:detect_stack_use_after_return=0 halt_on_error=0 $(BUILD_DIR)/$(TARGET)
+	@ASAN_OPTIONS='$(ASAN_OPTIONS)' $(BUILD_DIR)/$(TARGET)
 
 $(BUILD_DIR)/$(TARGET): $(OBJS)
 	@echo Linking $@...
@@ -114,7 +125,7 @@ integration-test:
 	@echo Building integration tests...
 	@$(MAKE) $(BUILD_DIR)/$(TARGET_INTEGRATION) TARGET="$(TARGET_INTEGRATION)" SRCS="$(SRCS_INTEGRATION)"
 	@echo Running integration tests...
-	@ASAN_OPTIONS=detect_leaks=0:detect_stack_use_after_return=0 halt_on_error=0 $(BUILD_DIR)/$(TARGET_INTEGRATION)
+	@ASAN_OPTIONS='$(ASAN_OPTIONS)' $(BUILD_DIR)/$(TARGET_INTEGRATION)
 
 -include $(DEPS)
 
