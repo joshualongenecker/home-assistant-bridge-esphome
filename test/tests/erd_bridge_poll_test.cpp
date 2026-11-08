@@ -739,17 +739,23 @@ TEST(erd_bridge_poll_default_wiring, init_installs_hal_defaults_and_null_setter_
   mock().enable();
 
   // Defaults: the exact HAL millis symbol and a non-NULL yield wrapper.
+  // The yield default is a file-static wrapper in erd_bridge_poll.cpp, so it
+  // is captured by value here instead of being named.
+  void (*default_yield_fn)(void) = self.yield_fn;
   POINTERS_EQUAL(esphome::millis, self.get_time_ms);
-  CHECK_TRUE(self.yield_fn != nullptr);
+  CHECK_TRUE(default_yield_fn != nullptr);
 
-  // Override, then NULL-restore.
+  // Override, then NULL-restore.  NULL must put the init default back — not
+  // retain the fake and not leave the field NULL.
   erd_bridge_poll_set_time_fn(&self, budgeted_clock_advance_10);
   POINTERS_EQUAL(budgeted_clock_advance_10, self.get_time_ms);
   erd_bridge_poll_set_time_fn(&self, nullptr);
   POINTERS_EQUAL(esphome::millis, self.get_time_ms);
 
+  erd_bridge_poll_set_yield_fn(&self, budgeted_yield_count);
+  POINTERS_EQUAL(budgeted_yield_count, self.yield_fn);
   erd_bridge_poll_set_yield_fn(&self, nullptr);
-  CHECK_TRUE(self.yield_fn != nullptr);
+  POINTERS_EQUAL(default_yield_fn, self.yield_fn);
 }
 
 // ============================================================================
