@@ -39,14 +39,6 @@ TEST_GROUP(autodiscovery_manager)
   tiny_gea2_erd_client_double_t gea2_client;
   tiny_gea3_erd_client_double_t gea2_adapter;
   tiny_timer_group_t timer_group;
-  bool callback_called;
-
-  /* Completion callback for the function-pointer API: the context pointer
-   * is the test group's callback_called flag. */
-  static void mark_complete(void* context)
-  {
-    *reinterpret_cast<bool*>(context) = true;
-  }
 
   void setup()
   {
@@ -54,7 +46,6 @@ TEST_GROUP(autodiscovery_manager)
     tiny_gea3_erd_client_double_init(&gea3_client);
     tiny_gea2_erd_client_double_init(&gea2_client);
     tiny_gea3_erd_client_double_init(&gea2_adapter);
-    callback_called = false;
     esphome_hal_double_set_millis(0);
 
     // Initialize a minimal time source for the timer group.
@@ -76,8 +67,7 @@ TEST_GROUP(autodiscovery_manager)
                  nullptr,  /* gea2_uart_adapter (not mocked in tests) */
                  true,     /* has_gea3_uart */
                  true,     /* has_gea2_uart */
-                 0xE4,     /* client_address */
-                 mark_complete, &callback_called);
+                 0xE4);     /* client_address */
   }
 
   void init_gea3_only()
@@ -90,8 +80,7 @@ TEST_GROUP(autodiscovery_manager)
                  nullptr,  /* gea2_uart_adapter (not mocked in tests) */
                  true,     /* has_gea3_uart */
                  false,    /* has_gea2_uart */
-                 0xE4,     /* client_address */
-                 mark_complete, &callback_called);
+                 0xE4);     /* client_address */
   }
 
   void init_gea2_only()
@@ -104,8 +93,7 @@ TEST_GROUP(autodiscovery_manager)
                  nullptr,  /* gea2_uart_adapter (not mocked in tests) */
                  false,    /* has_gea3_uart */
                  true,     /* has_gea2_uart */
-                 0xE4,     /* client_address */
-                 mark_complete, &callback_called);
+                 0xE4);     /* client_address */
   }
 
   /* Expect the GEA3 client to accept a broadcast read. */
@@ -280,7 +268,6 @@ TEST(autodiscovery_manager, gea3_discovery_completes_on_broadcast_response)
   CHECK_EQUAL(0xB8, manager.get_host_address());
   CHECK_EQUAL(&gea3_client.interface, manager.get_active_erd_client());
   CHECK_FALSE(manager.is_gea2_protocol());
-  CHECK_TRUE(callback_called);
 }
 
 /* ------------------------------------------------------------------ */
@@ -314,7 +301,6 @@ TEST(autodiscovery_manager, gea2_discovery_after_gea3_timeout)
   CHECK_EQUAL(0xB8, manager.get_host_address());
   CHECK_EQUAL(&gea2_adapter.interface, manager.get_active_erd_client());
   CHECK_TRUE(manager.is_gea2_protocol());
-  CHECK_TRUE(callback_called);
 }
 
 /* ------------------------------------------------------------------ */
@@ -355,14 +341,13 @@ TEST(autodiscovery_manager, gea3_only_retries_gea3)
   // Should be back in GEA3_BROADCAST_WAITING (after sending another read).
   CHECK(manager.get_state() == AUTODISCOVERY_GEA3_BROADCAST_WAITING);
   CHECK(manager.get_active_erd_client() == nullptr);
-  CHECK_FALSE(callback_called);
 }
 
 /* ------------------------------------------------------------------ */
-/* Completion with null callback                                        */
+/* GEA3 completes, both UARTs on                                        */
 /* ------------------------------------------------------------------ */
 
-TEST(autodiscovery_manager, completion_with_null_callback_does_not_crash)
+TEST(autodiscovery_manager, gea3_completes_with_both_uart_adapters_configured)
 {
   manager.init(&timer_group,
                &gea3_client.interface,
@@ -371,9 +356,7 @@ TEST(autodiscovery_manager, completion_with_null_callback_does_not_crash)
                nullptr,  /* gea3_uart_adapter (not mocked) */
                nullptr,  /* gea2_uart_adapter (not mocked) */
                true, true,
-               0xE4,     /* client_address */
-               nullptr,  /* No callback */
-               nullptr);
+               0xE4);     /* client_address */
 
   expect_gea3_broadcast_read();
   manager.start();
@@ -458,8 +441,7 @@ TEST(autodiscovery_manager, non_default_client_address_accepts_response)
                &gea2_adapter.interface,
                nullptr, nullptr,
                true, true,
-               0xE5,     /* client_address — non-default */
-               mark_complete, &callback_called);
+               0xE5);     /* client_address — non-default */
 
   expect_gea3_broadcast_read();
   manager.start();
@@ -471,7 +453,6 @@ TEST(autodiscovery_manager, non_default_client_address_accepts_response)
 
   CHECK_EQUAL(AUTODISCOVERY_COMPLETE, manager.get_state());
   CHECK_EQUAL(0xB8, manager.get_host_address());
-  CHECK_TRUE(callback_called);
 }
 
 TEST(autodiscovery_manager, non_default_client_address_rejects_wrong_destination)
@@ -484,8 +465,7 @@ TEST(autodiscovery_manager, non_default_client_address_rejects_wrong_destination
                &gea2_adapter.interface,
                nullptr, nullptr,
                true, true,
-               0xE5,     /* client_address */
-               mark_complete, &callback_called);
+               0xE5);     /* client_address */
 
   expect_gea3_broadcast_read();
   manager.start();
@@ -498,7 +478,6 @@ TEST(autodiscovery_manager, non_default_client_address_rejects_wrong_destination
 
   // Discovery should have timed out (no valid response received).
   CHECK(manager.get_state() != AUTODISCOVERY_COMPLETE);
-  CHECK_FALSE(callback_called);
 }
 
 /* ------------------------------------------------------------------ */
@@ -515,7 +494,6 @@ TEST(autodiscovery_manager, set_target_address_stores_target_without_completing)
   // set_target_address only stores the target — state remains IDLE.
   CHECK_EQUAL(AUTODISCOVERY_IDLE, manager.get_state());
   CHECK(manager.get_active_erd_client() == nullptr);
-  CHECK_FALSE(callback_called);
 }
 
 TEST(autodiscovery_manager, targeted_gea3_probe_sends_to_configured_address)
@@ -560,7 +538,6 @@ TEST(autodiscovery_manager, targeted_probe_completes_on_response)
   CHECK_EQUAL(0xC0, manager.get_host_address());
   CHECK_EQUAL(&gea3_client.interface, manager.get_active_erd_client());
   CHECK_FALSE(manager.is_gea2_protocol());
-  CHECK_TRUE(callback_called);
 }
 
 TEST(autodiscovery_manager, targeted_probe_falls_back_to_gea2)
@@ -604,7 +581,6 @@ TEST(autodiscovery_manager, targeted_probe_falls_back_to_gea2)
   CHECK_EQUAL(0xC0, manager.get_host_address());
   CHECK_EQUAL(&gea2_adapter.interface, manager.get_active_erd_client());
   CHECK_TRUE(manager.is_gea2_protocol());
-  CHECK_TRUE(callback_called);
 }
 
 TEST(autodiscovery_manager, targeted_probe_with_zero_address)
@@ -655,5 +631,4 @@ TEST(autodiscovery_manager, targeted_probe_rejects_wrong_source_address)
 
   // Discovery should NOT have completed — wrong source address was ignored.
   CHECK(manager.get_state() != AUTODISCOVERY_COMPLETE);
-  CHECK_FALSE(callback_called);
 }

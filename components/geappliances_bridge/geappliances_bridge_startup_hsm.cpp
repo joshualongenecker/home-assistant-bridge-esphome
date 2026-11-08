@@ -108,14 +108,6 @@ tiny_hsm_result_t startup_state_autodiscovery(tiny_hsm_t* hsm, tiny_hsm_signal_t
       }
       break;
 
-    case signal_autodiscovery_complete:
-      // External signal from autodiscovery callback — transition only if
-      // a board was actually discovered (not on failure/no-response).
-      if (svc->is_autodiscovery_complete()) {
-        tiny_hsm_transition(hsm, startup_state_device_id);
-      }
-      break;
-
     case tiny_hsm_signal_exit:
       break;
 
@@ -145,10 +137,6 @@ tiny_hsm_result_t startup_state_device_id(tiny_hsm_t* hsm, tiny_hsm_signal_t sig
       if (svc->is_device_id_complete()) {
         tiny_hsm_transition(hsm, startup_state_mqtt_client_init);
       }
-      break;
-
-    case signal_device_id_complete:
-      tiny_hsm_transition(hsm, startup_state_mqtt_client_init);
       break;
 
     case tiny_hsm_signal_exit:
@@ -205,18 +193,6 @@ tiny_hsm_result_t startup_state_feature_bits(tiny_hsm_t* hsm, tiny_hsm_signal_t 
       if (feature_bits_done) {
         tiny_hsm_transition(hsm, startup_state_bridge_init);
       }
-      }
-      break;
-
-    case signal_mqtt_connected:
-      if (svc->is_feature_bits_complete()) {
-        tiny_hsm_transition(hsm, startup_state_bridge_init);
-      }
-      break;
-
-    case signal_feature_bits_complete:
-      {
-        tiny_hsm_transition(hsm, startup_state_bridge_init);
       }
       break;
 
@@ -292,10 +268,6 @@ tiny_hsm_result_t startup_state_subscription_watch(tiny_hsm_t* hsm, tiny_hsm_sig
           tiny_hsm_transition(hsm, startup_state_running);
         }
       }
-      break;
-
-    case signal_subscription_fallback:
-      tiny_hsm_transition(hsm, startup_state_running);
       break;
 
     case tiny_hsm_signal_exit:

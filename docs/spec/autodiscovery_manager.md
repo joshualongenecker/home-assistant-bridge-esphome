@@ -4,7 +4,7 @@
 
 ### 1.1 Purpose
 
-The Autodiscovery Manager locates the connected appliance on the GEA bus by broadcasting to address `0xFF` and recording the first responding device's address, protocol type, and active ERD client. It is fully self-driving: owns its own timers and event subscriptions. The bridge calls `start()` to begin discovery; the manager fires `on_complete_cb` when a board is found.
+The Autodiscovery Manager locates the connected appliance on the GEA bus by broadcasting to address `0xFF` and recording the first responding device's address, protocol type, and active ERD client. It is fully self-driving: owns its own timers and event subscriptions. The bridge calls `start()` to begin discovery; the startup HSM polls `get_state()` for completion.
 
 ### 1.2 Responsibilities
 
@@ -37,9 +37,7 @@ void init(tiny_timer_group_t* timer_group,
           esphome_uart_adapter_t* gea2_uart_adapter,
           bool has_gea3_uart,
           bool has_gea2_uart,
-          uint8_t client_address,
-          void (*on_complete_cb)(void* context),
-          void* on_complete_ctx);
+          uint8_t client_address);
 ```
 
 | Parameter | Description |
@@ -50,7 +48,6 @@ void init(tiny_timer_group_t* timer_group,
 | `gea2_adapter_client` | GEA2 adapter — a GEA3-compatible client wrapping the GEA2 ERD client. Used as the `active_erd_client_` return value when a GEA2 board is discovered. |
 | `has_gea3_uart` | Whether a GEA3 UART is configured. Determines if GEA3 broadcast is attempted. |
 | `has_gea2_uart` | Whether a GEA2 UART is configured. Determines if GEA2 broadcast is attempted. |
-| `on_complete_cb` | Completion callback invoked once when transitioning to `AUTODISCOVERY_COMPLETE`. Function pointer + `on_complete_ctx`, per the component's no-`std::function` convention. |
 
 **Init behavior:**
 - Subscribes to `tiny_gea3_erd_client_on_activity` on the GEA3 client (if `has_gea3_uart` and client non-null)
@@ -213,7 +210,7 @@ If all conditions pass, calls `on_broadcast_response(address, app_type, false)`.
 ### 5.4 Timer-Based Transitions
 
 The broadcast window timer (`broadcast_window_timer_`) fires after `AUTODISCOVERY_BROADCAST_WINDOW_MS` (1000 ms). The timer callback (`timer_callback_`) checks:
-- If `active_erd_client_ != nullptr`: a response was received during the window. Sets `gea2_protocol_active_` if in GEA2 waiting state, transitions to `AUTODISCOVERY_COMPLETE`, and fires `on_complete_cb_`.
+- If `active_erd_client_ != nullptr`: a response was received during the window. Sets `gea2_protocol_active_` if in GEA2 waiting state and transitions to `AUTODISCOVERY_COMPLETE`.
 - If `active_erd_client_ == nullptr`: no response. Calls `schedule_next_broadcast_()` to retry with fallback logic.
 
 The timer fires **after** the response is received to ensure the response is fully recorded before transitioning to complete. This prevents a race where the timer fires before the event subscription callback has set `active_erd_client_`.
@@ -255,8 +252,6 @@ class AutodiscoveryManager {
     i_tiny_gea3_erd_client_t* gea2_adapter_client_;
     bool has_gea3_uart_;
     bool has_gea2_uart_;
-    void (*on_complete_cb_)(void* context);
-    void* on_complete_ctx_;
 
     AutodiscoveryState state_;
     tiny_timer_t broadcast_window_timer_;
@@ -280,7 +275,7 @@ class AutodiscoveryManager {
 
 3. **Separate GEA3/GEA2 callbacks:** Two distinct subscription callbacks (`on_gea3_activity_` and `on_gea2_activity_`) ensure a response on one protocol is not misattributed to the other. Each callback also checks that the current state matches its protocol's waiting state.
 
-4. **Completion callback fires once:** `on_complete_cb_` is invoked exactly once when transitioning to `AUTODISCOVERY_COMPLETE`. The terminal state prevents re-entry.
+4. **Completion is terminal:** `state_` is set to `AUTODISCOVERY_COMPLETE` exactly once and never leaves it, so the startup HSM can poll `get_state()` without a completion callback.
 
 5. **Response marked before timer fires:** A response received during the broadcast window sets `active_erd_client_` immediately. The timer callback checks this flag — if set, it completes; if not, it retries. This ensures the response is captured even if it arrives just before the timer fires.
 

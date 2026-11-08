@@ -199,9 +199,9 @@ class DeviceIdentityManager {
 
 The bridge calls `init()` during startup, passing the configured device ID (if any), the active ERD client from the autodiscovery manager, and the host address.
 
-### 9.2 Completion Signal
+### 9.2 Completion Detection
 
-After `on_erd_read_completed()` transitions to `DEVICE_ID_STATE_COMPLETE`, the bridge signals the startup HSM via `tiny_hsm_send_signal(signal_device_id_complete, nullptr)`.
+The startup HSM notices completion by polling: `startup_state_device_id`'s `signal_run_loop` handler checks `is_device_id_complete()`, which is true once the state is `DEVICE_ID_STATE_COMPLETE`. The bridge does not signal the HSM when a read completes.
 
 ### 9.3 Accessors
 

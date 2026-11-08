@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Manages the appliance autodiscovery process on the GEA bus. Fully self-driving: owns its own timers and event subscriptions. The bridge calls `start()` to begin discovery; the manager fires `on_complete_cb` when a board is found, with retry logic and protocol fallback.
+Manages the appliance autodiscovery process on the GEA bus. Fully self-driving: owns its own timers and event subscriptions. The bridge calls `start()` to begin discovery; the startup HSM polls `get_state()` for completion, with retry logic and protocol fallback.
 
 ## Public API
 
 | Method | Description |
 |--------|-------------|
-| `init(timer_group, gea3_client, gea2_client, gea2_adapter, gea3_uart_adapter, gea2_uart_adapter, has_gea3, has_gea2, client_address, on_complete_cb, on_complete_ctx)` | Initialize with timer group, ERD clients, UART availability flags, and a function-pointer completion callback with context |
+| `init(timer_group, gea3_client, gea2_client, gea2_adapter, gea3_uart_adapter, gea2_uart_adapter, has_gea3, has_gea2, client_address)` | Initialize with timer group, ERD clients, and UART availability flags |
 | `start()` | Begin autodiscovery. Idempotent if already past IDLE. |
 | `get_host_address()` | Returns the discovered appliance address |
 | `get_active_erd_client()` | Returns the ERD client for the discovered protocol |
@@ -54,7 +54,7 @@ Constants:
 - **Infinite retries**: The manager never gives up — if no board responds, it keeps retrying indefinitely, alternating between GEA3 and GEA2 (if both UARTs are configured). The startup HSM will not transition past the autodiscovery phase until a valid board is discovered.
 - **Protocol fallback**: If both GEA3 and GEA2 UARTs are configured, failure to find a GEA3 board falls back to GEA2 (and vice versa) before retrying the same protocol.
 - **Single response wins**: The first valid broadcast response sets the host address; subsequent responses are ignored.
-- **Completion callback**: The `on_complete_cb` is invoked once when transitioning to `AUTODISCOVERY_COMPLETE`, allowing the bridge to proceed to device ID generation.
+- **Completion is terminal**: `AUTODISCOVERY_COMPLETE` is entered once and never left, so the startup HSM polls `get_state()` to advance to device ID generation.
 
 ## Testing
 

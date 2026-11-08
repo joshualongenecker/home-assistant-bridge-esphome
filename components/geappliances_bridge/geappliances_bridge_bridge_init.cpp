@@ -324,8 +324,9 @@ void GeappliancesBridge::handle_subscription_failed()
 
   this->init_polling_bridge_(true);
 
-  tiny_hsm_send_signal(&this->startup_hsm_wrapper_.hsm, signal_subscription_fallback, nullptr);
-
+  // The startup HSM owns the subscription_watch → running transition (its
+  // run_loop handler transitions right after calling this); this handler only
+  // rebuilds the data path.
   ESP_LOGI(TAG, "Successfully switched to polling mode");
 }
 

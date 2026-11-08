@@ -2,8 +2,8 @@
  * @brief AutodiscoveryManager - appliance autodiscovery state machine.
  *
  * Self-driving: owns its own timers and event subscriptions; the bridge
- * calls start() and the manager fires on_complete_cb when a board is
- * found. Retries indefinitely with GEA3 <-> GEA2 fallback if both UARTs
+ * calls start(); the startup HSM polls get_state() to advance past
+ * discovery.  Retries indefinitely with GEA3 <-> GEA2 fallback if both UARTs
  * are configured.
  *
  * Subscribes to UART byte-level receive events and assembles packets
@@ -57,9 +57,7 @@ class AutodiscoveryManager {
             esphome_uart_adapter_t* gea2_uart_adapter,
             bool has_gea3_uart,
             bool has_gea2_uart,
-            uint8_t client_address,
-            void (*on_complete_cb)(void* context),
-            void* on_complete_ctx);
+            uint8_t client_address);
 
   /// Safe to call multiple times.
   void cleanup();
@@ -103,8 +101,6 @@ class AutodiscoveryManager {
   esphome_uart_adapter_t* gea2_uart_adapter_ = nullptr;
   bool has_gea3_uart_ = false;
   bool has_gea2_uart_ = false;
-  void (*on_complete_cb_)(void* context) = nullptr;
-  void* on_complete_ctx_ = nullptr;
 
   AutodiscoveryState state_ = AUTODISCOVERY_IDLE;
   tiny_timer_t broadcast_window_timer_;
