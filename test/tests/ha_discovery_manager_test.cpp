@@ -290,7 +290,7 @@ TEST_GROUP(ha_discovery_manager_run_memory)
     }
 };
 
-TEST(ha_discovery_manager_run_memory, start_allocates_the_decompressor_state)
+TEST(ha_discovery_manager_run_memory, start_allocates_all_run_memory)
 {
     CHECK_TRUE(all_run_memory_released());
 

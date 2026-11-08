@@ -40,7 +40,7 @@ SANITIZE_FLAGS := -fsanitize=address -fsanitize=undefined
 
 # Leak detection is on for both suites: no test owns memory that outlives its
 # teardown, so a leak is a real leak — e.g. a discovery run orphaning its
-# ~52 KB of buffers and tinfl state.
+# ~52 KB of run allocations (buffers + tinfl state).
 #
 # halt_on_error must stay at its default (1) here: with halt_on_error=0
 # AddressSanitizer prints the LeakSanitizer report but still exits 0, so a leak

@@ -89,7 +89,7 @@ typedef struct {
    * for every chunk, so it earns no space outside a run. */
   tinfl_decompressor* decomp_state;
   /* Heap-allocated only while a discovery run is active; NULL otherwise, so
-   * non-discovery boots don't carry the ~52 KB of buffers in the object. */
+   * non-discovery boots don't carry the ~52 KB of run allocations in the object. */
   uint8_t* decomp_buf;
 
   /* Line parsing buffer. Heap-allocated only while a discovery run is active. */

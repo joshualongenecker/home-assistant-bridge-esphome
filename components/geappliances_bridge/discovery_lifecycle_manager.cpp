@@ -296,8 +296,8 @@ void DiscoveryLifecycleManager::finish_publish_() {
 
   if (discovery_failed) {
     // Reset the manager to idle: this frees the discovery allocations (so the
-    // ~52 KB of buffers plus the tinfl state does not linger for the rest of
-    // the boot) and clears run state.
+    // ~52 KB of run allocations, buffers plus tinfl state, do not linger for
+    // the rest of the boot) and clears run state.
     // Also do not save the discovery record and do not arm the reboot:
     // leaving the stored record stale/absent is what makes
     // check_discovery_changes() re-trigger discovery on the next boot.

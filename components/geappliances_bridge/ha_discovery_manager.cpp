@@ -1068,7 +1068,7 @@ void ha_discovery_manager_start(ha_discovery_manager_t* self)
     self->payload_buf = (char*)malloc(HA_DISCOVERY_PAYLOAD_BUF_SIZE);
     self->decomp_state = (tinfl_decompressor*)malloc(sizeof(tinfl_decompressor));
     if (!self->decomp_buf || !self->line_buf || !self->payload_buf || !self->decomp_state) {
-        ESP_LOGE(TAG, "Discovery: failed to allocate discovery buffers (free heap=%u)", (unsigned)free_heap);
+        ESP_LOGE(TAG, "Discovery: failed to allocate discovery run memory (free heap=%u)", (unsigned)free_heap);
         free(self->decomp_buf);
         self->decomp_buf = NULL;
         free(self->line_buf);
