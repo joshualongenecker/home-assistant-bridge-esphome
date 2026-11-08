@@ -249,11 +249,11 @@ Regardless of mode, the method MUST:
 - Reset `last_logged_poll_state_` to `polling_state_none` and `last_logged_subscribe_state_` to `subscription_state_none`.
 - Destroy any existing polling bridge (e.g., from custom ERD polling) to avoid leaking heap allocations, resetting `custom_erd_polling_started_` and `polling_bridge_initialized_`.
 - Call `init_polling_bridge_(true)` to re-initialize the polling bridge as the full data path.
-- Send `signal_subscription_fallback` to the startup HSM.
+- Leave the state transition to the caller: `startup_state_subscription_watch` invokes this handler from its `signal_run_loop` branch and transitions to `startup_state_running` itself.
 
 **Rationale:** In AUTO mode, subscription failure is expected (the appliance may not support it). Falling back to polling ensures the bridge still functions. Destroying the old polling bridge before re-initialization prevents memory leaks from the `erd_bridge_poll_init()` heap allocations.
 
-**Implementation:** `geappliances_bridge_bridge_init.cpp` lines 347–374.
+**Implementation:** `geappliances_bridge_bridge_init.cpp` lines 306–331.
 
 ---
 

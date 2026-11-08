@@ -9,14 +9,20 @@ extern "C" {
 #include "tiny_hsm.h"
 }
 
+// Startup sequencing is driven by polling: loop() sends signal_run_loop on every
+// iteration, and each state's run_loop handler polls the IBridgeServices
+// completion predicate that owns its transition.  There is deliberately no
+// per-phase completion signal — a duplicate event path would let the same
+// transition be triggered two ways.
+//
+// signal_bridge_ready is the single exception: the bridge_init ->
+// subscription_watch transition fires when ERD discovery finishes, and no
+// IBridgeServices predicate describes "discovery finished" (is_bridge_initialized()
+// goes true before the probe phase completes in polling mode), so that one
+// transition stays event-driven.
 enum {
   signal_run_loop = tiny_hsm_signal_user_start,
-  signal_autodiscovery_complete,
-  signal_device_id_complete,
-  signal_mqtt_connected,
-  signal_feature_bits_complete,
-  signal_bridge_ready,
-  signal_subscription_fallback
+  signal_bridge_ready
 };
 
 namespace esphome {

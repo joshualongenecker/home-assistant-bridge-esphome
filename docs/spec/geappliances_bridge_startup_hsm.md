@@ -62,13 +62,14 @@ Defines the state descriptors and parent hierarchy for the startup HSM. All stat
 
 | Signal | Description |
 |--------|-------------|
-| `signal_run_loop` | Sent every `loop()` call to drive ongoing work in the current state. The primary mechanism for polling completion flags and advancing phases. |
-| `signal_autodiscovery_complete` | Fired when the AutodiscoveryManager finds (or gives up on) an appliance. |
-| `signal_device_id_complete` | Fired when the DeviceIdentityManager has read or pre-configured the device ID. |
-| `signal_mqtt_connected` | Fired when the MQTT broker connection is established. |
-| `signal_feature_bits_complete` | Fired when all feature bit ERDs are read and parsed. |
-| `signal_bridge_ready` | Fired when the ERD bridge (poll/subscribe) finishes initialization. |
-| `signal_subscription_fallback` | Fired in AUTO mode when the subscription watchdog times out and falls back to polling. |
+| `signal_run_loop` | Sent every `loop()` call. The only driving signal: each state's handler polls the `IBridgeServices` completion predicate that owns its transition. |
+| `signal_bridge_ready` | Fired when ERD discovery finishes (polling bridge) or the subscription bridge is initialized (subscription bridge has no discovery phase). The one event-driven transition. |
+
+There is deliberately no per-phase completion signal. A transition reachable from
+`signal_run_loop` needs no event: the event only saves one loop iteration while creating a second
+path through the same transition. `signal_bridge_ready` survives because no `IBridgeServices`
+predicate describes "ERD discovery finished" — `is_bridge_initialized()` goes true before the probe
+phase completes in polling mode.
 
 ---
 
@@ -96,7 +97,6 @@ Runs the AutodiscoveryManager, which is fully self-driving (owns its own timers 
 
 - **On entry:** Logs phase entry. Calls `svc->run_autodiscovery()` to start the manager.
 - **On `signal_run_loop`:** Checks `svc->is_autodiscovery_complete()`. If true, logs the discovered host address and protocol, transitions to `startup_state_device_id`.
-- **On `signal_autodiscovery_complete`:** Checks `svc->is_autodiscovery_complete()` and transitions to `startup_state_device_id` if true. This provides an immediate transition path without waiting for the next loop iteration.
 - **On exit:** No action.
 
 **Note:** The AutodiscoveryManager retries indefinitely if no board responds. This state will not transition until a valid board address is found.
@@ -107,7 +107,6 @@ Runs the DeviceIdentityManager to read the appliance identity ERDs. Supports bot
 
 - **On entry:** Calls `svc->init_device_id_reading()`. If a device ID is pre-configured and the manager completes synchronously during init, transitions immediately to `startup_state_mqtt_client_init`.
 - **On `signal_run_loop`:** Checks `svc->is_device_id_complete()`. If true, transitions to `startup_state_mqtt_client_init`.
-- **On `signal_device_id_complete`:** Transitions to `startup_state_mqtt_client_init`.
 - **On exit:** No action.
 
 #### `startup_state_mqtt_client_init`
@@ -127,11 +126,9 @@ Waits for feature bit ERDs to be read and parsed. Transitions when `is_feature_b
 
 - **On entry:** Logs phase entry.
 - **On `signal_run_loop`:** Checks `svc->is_feature_bits_complete()`. If true, transitions to `startup_state_bridge_init`.
-- **On `signal_mqtt_connected`:** Checks `svc->is_feature_bits_complete()`. If true, transitions to `startup_state_bridge_init`.
-- **On `signal_feature_bits_complete`:** Transitions to `startup_state_bridge_init`.
 - **On exit:** No action.
 
-**Note:** The implementation transitions as soon as feature bits are complete or failed, regardless of MQTT connection status. `is_feature_bits_complete()` returns true for both `FEATURE_BIT_STATE_COMPLETE` and `FEATURE_BIT_STATE_FAILED` (the latter triggers fallback to full polling). The `signal_mqtt_connected` handler provides an additional transition path if MQTT connects before feature bits finish.
+**Note:** The implementation transitions as soon as feature bits are complete or failed, regardless of MQTT connection status. `is_feature_bits_complete()` returns true for both `FEATURE_BIT_STATE_COMPLETE` and `FEATURE_BIT_STATE_FAILED` (the latter triggers fallback to full polling).
 
 #### `startup_state_bridge_init`
 
@@ -151,7 +148,6 @@ In AUTO mode, monitors subscription activity and falls back to polling if no act
   - Checks `svc->get_subscription_state()`. If `subscription_state_failed`, calls `svc->handle_subscription_failed()` and transitions to `startup_state_running`.
   - Calls `svc->log_poll_state_transitions()`, `svc->handle_polling_failed()`, and `svc->maybe_start_custom_erd_polling()`.
   - If not AUTO mode or subscription is not active, transitions to `startup_state_running`.
-- **On `signal_subscription_fallback`:** Transitions to `startup_state_running`.
 - **On exit:** No action.
 
 
@@ -235,11 +231,11 @@ Each state function receives `tiny_hsm_t* hsm`, `tiny_hsm_signal_t signal`, and 
 
 1. **Flat hierarchy:** All states are direct children of `startup_state_top`. No intermediate parent states exist. This simplifies signal routing — any unhandled signal bubbles to the top and is deferred.
 
-2. **Signal-driven transitions:** Each state handles specific signals for transition triggers. The `signal_run_loop` signal drives ongoing work and polls completion flags. Manager-specific signals (`signal_autodiscovery_complete`, `signal_device_id_complete`, etc.) provide immediate transition paths without waiting for the next loop iteration.
+2. **Polled transitions:** `signal_run_loop` is the single driving signal. Each state's handler polls the `IBridgeServices` predicate for its own transition, so completion is noticed within one loop iteration and every transition has exactly one trigger. The sole exception is `signal_bridge_ready` (see section 3).
 
 3. **container_of for IBridgeServices:** The HSM accesses bridge operations through `services_from_hsm()`, which uses `container_of` to recover the `IBridgeServices` pointer from the embedded HSM pointer. This decouples the HSM from the concrete `GeappliancesBridge` class at compile time and makes the HSM reentrant — each wrapper instance carries its own services pointer.
 
-4. **Feature bits completion gate:** The `feature_bits` state accepts three transition triggers — `signal_run_loop` (polls feature bits completion), `signal_mqtt_connected` (checks feature bits completion), and `signal_feature_bits_complete` (unconditional transition). `is_feature_bits_complete()` returns true for both COMPLETE and FAILED states.
+4. **Feature bits completion gate:** The `feature_bits` state transitions only from `signal_run_loop`, when `is_feature_bits_complete()` returns true — true for both `FEATURE_BIT_STATE_COMPLETE` and `FEATURE_BIT_STATE_FAILED`.
 
 5. **Linear progression:** States transition forward only. There is no mechanism to go back to a previous phase. Once a phase completes, it cannot be re-entered.
 

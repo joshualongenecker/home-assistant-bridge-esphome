@@ -26,11 +26,11 @@ sequenceDiagram
     HSM->>HSM: Wait for appliance to stabilize
 
     HSM->>AD: run_autodiscovery()
-    AD-->>HSM: signal_autodiscovery_complete
+    HSM->>HSM: run_loop polls is_autodiscovery_complete()
     AD->>AD: Broadcast scan, retry indefinitely
 
     HSM->>DI: init_device_id_reading()
-    DI-->>HSM: signal_device_id_complete
+    HSM->>HSM: run_loop polls is_device_id_complete()
     DI->>DI: Read ERDs 0x0008, 0x0001, 0x0002
 
     HSM->>MQTT: initialize_mqtt_client()
@@ -38,7 +38,7 @@ sequenceDiagram
     MQTT->>MQTT: Adapter init (does not wait for connection)
     HSM->>FB: start_feature_bit_reading()
 
-    FB-->>HSM: signal_feature_bits_complete
+    HSM->>HSM: run_loop polls is_feature_bits_complete()
     FB->>FB: Parse ERDs 0x0092-0x0097, 0x0109-0x010D
 
     HSM->>BR: initialize_erd_bridge()
@@ -46,7 +46,7 @@ sequenceDiagram
     BR->>BR: Polling or subscription mode
 
     HSM->>SW: Monitor subscription state
-    SW-->>HSM: signal_subscription_fallback
+    HSM->>HSM: run_loop polls get_subscription_state()
     SW->>SW: AUTO mode only, no-op for POLL—SUBSCRIBE
 
     HSM->>RUN: Entering steady-state operation
@@ -81,7 +81,7 @@ this state will not transition until a valid board address is found.
 | **Source** | `geappliances_bridge_startup_hsm.cpp` `startup_state_autodiscovery` |
 | **Duration** | Variable (retries indefinitely until a board responds) |
 | **Failure behavior** | Retries indefinitely; never gives up |
-| **Signals** | `signal_autodiscovery_complete` |
+| **Signals** | `signal_run_loop` polls `is_autodiscovery_complete()` |
 | **Transition** | `device_id` |
 
 ### Phase 3: Device Identity
@@ -99,7 +99,7 @@ read failure, the manager retries indefinitely.
 | **Source** | `geappliances_bridge_startup_hsm.cpp` `startup_state_device_id` |
 | **Duration** | Variable (typically seconds; retries indefinitely on failure) |
 | **Failure behavior** | Retries indefinitely; never gives up |
-| **Signals** | `signal_device_id_complete` |
+| **Signals** | `signal_run_loop` polls `is_device_id_complete()` |
 | **Transition** | `mqtt_client_init` |
 
 ### Phase 4: MQTT Client Init
@@ -128,7 +128,7 @@ client queue is full, it schedules a retry timer (`QUEUE_RETRY_MS = 50 ms`).
 | **Source** | `geappliances_bridge_startup_hsm.cpp` `startup_state_feature_bits` |
 | **Duration** | Variable (depends on queue availability and appliance response) |
 | **Failure behavior** | Queue-full retries at 50 ms intervals; otherwise retries indefinitely |
-| **Signals** | `signal_feature_bits_complete` |
+| **Signals** | `signal_run_loop` polls `is_feature_bits_complete()` |
 | **Transition** | `bridge_init` |
 
 ### Phase 6: Bridge Init
@@ -161,7 +161,7 @@ transitions immediately.
 | **Source** | `geappliances_bridge_startup_hsm.cpp` `startup_state_subscription_watch` |
 | **Duration** | Variable (AUTO mode); immediate (POLL/SUBSCRIBE modes) |
 | **Failure behavior** | On subscription failure, falls back to polling mode |
-| **Signals** | `signal_subscription_fallback` |
+| **Signals** | `signal_run_loop` polls `get_subscription_state()` |
 | **Transition** | `running` |
 
 ### Phase 8: Running
@@ -218,12 +218,8 @@ graph TB
 
 | Signal | Source | Consumed By |
 |---|---|---|
-| `signal_run_loop` | HSM `loop()` dispatch | All states (drives ongoing work) |
-| `signal_autodiscovery_complete` | `AutodiscoveryManager` callback | `startup_state_autodiscovery` |
-| `signal_device_id_complete` | `DeviceIdentityManager` callback | `startup_state_device_id` |
-| `signal_feature_bits_complete` | `FeatureBitManager` callback | `startup_state_feature_bits` |
-| `signal_bridge_ready` | ERD polling bridge | `startup_state_bridge_init` |
-| `signal_subscription_fallback` | Subscription watchdog | `startup_state_subscription_watch` |
+| `signal_run_loop` | HSM `loop()` dispatch | All states — the only driving signal; each state polls its own completion predicate |
+| `signal_bridge_ready` | ERD polling bridge on discovery complete, or `initialize_erd_bridge()` in subscription modes | `startup_state_bridge_init` |
 
 ## Dependencies
 

@@ -16,13 +16,8 @@ Hierarchical state machine that drives the linear startup sequence of the GE App
 
 | Signal | Description |
 |--------|-------------|
-| `signal_run_loop` | Drive ongoing work in the current state (sent every `loop()`) |
-| `signal_autodiscovery_complete` | Autodiscovery found (or gave up on) appliance |
-| `signal_device_id_complete` | Device ID ready (read or pre-configured) |
-| `signal_mqtt_connected` | MQTT broker connection established |
-| `signal_feature_bits_complete` | All feature bit ERDs read and parsed |
-| `signal_bridge_ready` | ERD bridge (poll/subscribe) initialized |
-| `signal_subscription_fallback` | AUTO mode: subscription timed out, fell back to polling |
+| `signal_run_loop` | Drive ongoing work in the current state (sent every `loop()`); the only driving signal — each state polls its own completion predicate here |
+| `signal_bridge_ready` | ERD discovery finished (polling bridge) or subscription bridge initialized; the one event-driven transition |
 
 ## State Machine
 

@@ -222,12 +222,7 @@ void GeappliancesBridge::setup() {
       this->gea2_uart_ != nullptr ? &this->gea2_uart_adapter_ : nullptr,
       this->uart_ != nullptr,
       this->gea2_uart_ != nullptr,
-      this->client_address_,
-      +[](void* context) {
-        auto self = reinterpret_cast<GeappliancesBridge*>(context);
-        tiny_hsm_send_signal(&self->startup_hsm_wrapper_.hsm, signal_autodiscovery_complete, nullptr);
-      },
-      this);
+      this->client_address_);
 
   if (this->configured_device_id_[0] != '\0') {
     ESP_LOGI(TAG, "Device ID configured: %s (will be applied after autodiscovery)", this->configured_device_id_);
@@ -474,9 +469,6 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
       uint8_t size = args->read_completed.data_size;
       if (!this->should_route_to_feature_bits_(erd)) {
         this->device_identity_manager_.on_erd_read_completed(erd, data, size);
-        if (this->device_identity_manager_.get_state() == DEVICE_ID_STATE_COMPLETE) {
-          tiny_hsm_send_signal(&this->startup_hsm_wrapper_.hsm, signal_device_id_complete, nullptr);
-        }
       }
     } else if (args->type == tiny_gea3_erd_client_activity_type_read_failed) {
       tiny_erd_t erd = args->read_failed.erd;
