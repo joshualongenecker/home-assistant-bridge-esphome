@@ -81,8 +81,8 @@ The bridge is expected to outlive the button in normal operation, as both are ma
 
 When `press_action()` delegates to `bridge_->trigger_discovery_refresh()`, the bridge delegates to `discovery_lifecycle_manager_.trigger_discovery_refresh()`. The `DiscoveryLifecycleManager` performs:
 
-1. **Idempotency guard:** If `phase_` (owned by `DiscoveryLifecycleManager`) is anything other than `kPhaseIdle`, log a warning naming the request and the current phase ("Discovery refresh ignored: discovery is publishing") and return. Prevents concurrent requests.
-2. **Queue the request:** Set `trigger_` to `kTriggerDiscoveryRefresh` and `phase_` to `kPhaseQueuedCleanup`, then log "Discovery refresh queued, will execute when appliance is ready".
+1. **Idempotency guard (atomic claim):** `phase_` (owned by `DiscoveryLifecycleManager`) is an atomic byte. The manager atomically compares-and-swaps it from `kPhaseIdle` to the transient `kPhaseClaimed`; any other value logs a warning naming the request and the current phase ("Discovery refresh ignored: discovery is publishing") and returns. The claimer then writes `trigger_` and publishes `phase_` as the queued phase, so the release store publishes the trigger with it. The claim is atomic because `press_action()` is MQTT-command-driven and may run off the main loop: a plain check-then-act could let two concurrent triggers both pass the Idle check and overwrite each other's trigger.
+2. **Queue the request:** On a successful claim, `trigger_` is set to `kTriggerDiscoveryRefresh` and `phase_` to `kPhaseQueuedCleanup`, then "Discovery refresh queued, will execute when appliance is ready" is logged. `loop()` treats the transient `kPhaseClaimed` as busy and waits one iteration for the queued phase to appear.
 
 No guard checks for steady state, MQTT readiness, or device ID are performed at press time. The request is queued and will execute in `DiscoveryLifecycleManager::loop()` once all prerequisites are met. This allows the user to press the button at any time, even during startup.
 
@@ -92,11 +92,11 @@ The bridge's `loop()` calls `discovery_lifecycle_manager_.loop()`, which advance
 
 1. **Wait for readiness:** The manager calls the `is_ready` callback the bridge passed to `init()` — `GeappliancesBridge::discovery_is_ready_`, which reports `steady_state_reached_` and `mqtt_client_adapter_initialized_` — and checks `device_identity_manager_.get_state() == DEVICE_ID_STATE_COMPLETE`. It stays in `kPhaseQueuedCleanup` until both hold.
 2. **Start cleanup:** Once ready, `ha_discovery_cleanup_configure()` and `ha_discovery_cleanup_start()` are called and `phase_` moves to `kPhaseCleaning`. This hands off to the shared cleanup → publish → reboot path.
-3. **Drive cleanup:** `ha_discovery_cleanup_run()` is called each loop iteration. When done, the cleanup module is destroyed and `phase_` moves to `kPhasePublishing`, where fresh discovery topics are published.
-4. **Drive discovery publishing:** `ha_discovery_manager_run()` publishes discovery payloads. When the run completes, `finish_publish_()` calls the `confirm_firmware` hook (clears the safe-mode counter and cancels OTA rollback), saves the discovery record, and moves `phase_` to `kPhaseRebootPending`. A failed run skips the record and the reboot and returns `phase_` to `kPhaseIdle`.
+3. **Drive cleanup:** `ha_discovery_cleanup_run()` is called each loop iteration. When done, the cleanup module is destroyed and `phase_` moves to `kPhasePublishing`, where fresh discovery topics are published. If the cleanup module never reports done (e.g. the broker connection drops mid-run), the phase is aborted after `kPhaseTimeoutMs` (5 minutes): the cleanup module is destroyed, no record is saved, and `phase_` returns to `kPhaseIdle` so a later Discovery Refresh or the next boot can retry.
+4. **Drive discovery publishing:** `ha_discovery_manager_run()` publishes discovery payloads. When the run completes, `finish_publish_()` calls the `confirm_firmware` hook (clears the safe-mode counter and cancels OTA rollback), saves the discovery record, and moves `phase_` to `kPhaseRebootPending`. A failed run skips the record and the reboot and returns `phase_` to `kPhaseIdle`. A run that never settles is aborted by the same `kPhaseTimeoutMs` budget: the firmware is still confirmed (the discovery outcome does not invalidate the OTA), the manager is reset to idle to release the run's allocations, no record is saved, and `phase_` returns to `kPhaseIdle`.
 5. **Wait then reboot:** After a 5-second delay (`kRebootDelayMs`), `phase_` returns to `kPhaseIdle` and the `reboot` hook (`esphome::App.safe_reboot()` in production) performs a graceful reboot.
 
-**Note:** A request is accepted only from `kPhaseIdle`, so a Discovery Refresh pressed while an OTA-triggered cleanup is running is rejected by the same guard — one phase at a time.
+**Note:** A request is accepted only from `kPhaseIdle` (via the atomic claim), so a Discovery Refresh pressed while an OTA-triggered cleanup is running is rejected by the same guard — one phase at a time.
 
 ---
 
@@ -144,7 +144,7 @@ The guard is silent — no log message is emitted when `bridge_` is null.
 
 ### 6.2 Idempotency
 
-`trigger_discovery_refresh()` delegates to `discovery_lifecycle_manager_.trigger_discovery_refresh()`, which guards against concurrent execution via `phase_` (owned by `DiscoveryLifecycleManager`): a request is accepted only from `kPhaseIdle`. Multiple rapid presses of the button are safely ignored after the first press queues the request.
+`trigger_discovery_refresh()` delegates to `discovery_lifecycle_manager_.trigger_discovery_refresh()`, which guards against concurrent execution via an atomic claim of `phase_` (owned by `DiscoveryLifecycleManager`): a request is accepted only by the thread that swaps `phase_` from `kPhaseIdle`, so the guard holds even when the press arrives off the main loop. Multiple rapid presses of the button are safely ignored after the first press queues the request.
 
 ### 6.3 Queued Execution
 
