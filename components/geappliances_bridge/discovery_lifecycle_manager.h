@@ -30,7 +30,8 @@
 // is read from NVS through the injected hooks, not here.
 #pragma once
 
-#include <cstdint>
+#include <atomic>
+#include <cstddef>
 
 extern "C" {
 #include "ha_discovery_manager.h"
@@ -57,6 +58,20 @@ class DiscoveryLifecycleManager {
     bool filter_config_topics;
   };
 
+  // The on-NVS layout is an OTA-compatibility contract: records written by a
+  // previous firmware must load with the same field offsets, so the layout is
+  // pinned here. A static_assert failure means either the record changed
+  // intentionally (bump kRecordVersion so old records are republished once)
+  // or accidentally (fix the field).
+  static_assert(sizeof(DiscoveryRecord) == 104, "DiscoveryRecord on-NVS size changed");
+  static_assert(offsetof(DiscoveryRecord, version) == 0, "DiscoveryRecord::version moved");
+  static_assert(offsetof(DiscoveryRecord, hash) == 4, "DiscoveryRecord::hash moved");
+  static_assert(offsetof(DiscoveryRecord, device_id) == 8, "DiscoveryRecord::device_id moved");
+  static_assert(offsetof(DiscoveryRecord, appliance_api_parsing) == 100,
+                "DiscoveryRecord::appliance_api_parsing moved");
+  static_assert(offsetof(DiscoveryRecord, filter_config_topics) == 101,
+                "DiscoveryRecord::filter_config_topics moved");
+
   // Version 3 adds persisted discovery-affecting config flags. Version 4 adds
   // the availability topic to every payload.
   static constexpr uint32_t kRecordVersion = 4;
@@ -64,6 +79,15 @@ class DiscoveryLifecycleManager {
   // Grace period between a successful publish and the reboot, so the last
   // discovery packets leave through MQTT before the reset.
   static constexpr uint32_t kRebootDelayMs = 5000;
+
+  // Upper bound on how long Cleaning or Publishing may stay in flight. Both
+  // phases depend on the broker settling; if the underlying module never
+  // reports done, the machine would otherwise reject every later request for
+  // the rest of the boot. On timeout the phase is aborted back to Idle with
+  // no record saved, so the next request (or the next boot's change check)
+  // retries. Generous enough that no healthy run comes close: a full
+  // cleanup + publish converges in seconds.
+  static constexpr uint32_t kPhaseTimeoutMs = 5u * 60u * 1000u;
 
   // Why the current phase was entered. Orthogonal to the phase: the same
   // cleanup -> publish -> reboot sequence runs for every trigger, and a few
@@ -79,12 +103,13 @@ class DiscoveryLifecycleManager {
   // class used to carry, which were only valid in the handful of combinations
   // the loop() source order happened to produce.
   //
-  //   Idle --trigger_initial_discovery()--> QueuedInitial
-  //   Idle --trigger_ota_cleanup()/trigger_discovery_refresh()--> QueuedCleanup
+  //   Idle --trigger_*()--> Claimed --(trigger recorded)--> QueuedInitial / QueuedCleanup
   //   QueuedInitial --ready--> Publishing
   //   QueuedCleanup --ready--> Cleaning
   //   Cleaning --cleanup done--> Publishing
-  //   Publishing --run failed--> Idle            (no record saved, no reboot)
+  //   Cleaning --kPhaseTimeoutMs elapsed--> Idle   (aborted, no record)
+  //   Publishing --run failed--> Idle              (no record saved, no reboot)
+  //   Publishing --kPhaseTimeoutMs elapsed--> Idle (aborted, no record)
   //   Publishing --run complete--> RebootPending
   //   RebootPending --kRebootDelayMs elapsed--> Idle
   enum Phase : uint8_t {
@@ -94,6 +119,12 @@ class DiscoveryLifecycleManager {
     kPhaseCleaning,       // deleting stale discovery topics
     kPhasePublishing,     // a discovery run is in flight
     kPhaseRebootPending,  // published and recorded; rebooting after the delay
+    // Transient: a trigger won the atomic claim from Idle and is writing
+    // trigger_ before publishing the queued phase. Only observable from
+    // loop() if a trigger runs off the main loop; it exists so the
+    // check-then-act of "accept only from Idle" cannot let two triggers both
+    // be accepted. loop() treats it as busy and waits one iteration.
+    kPhaseClaimed,
   };
 
   // Host-environment effects. Every entry has a production default (installed
@@ -137,26 +168,35 @@ class DiscoveryLifecycleManager {
 
   void trigger_discovery_refresh();
 
+  // Main-loop-only: reads the plain initial_publish_done_ latch before the
+  // claim, so it must not run beside loop() on another core.
   void trigger_initial_discovery();
 
-  // Compares the persisted record with the current discovery inputs and queues
-  // the matching action: initial publish when nothing is stored, cleanup +
-  // republish when the version, hash, device ID or flags changed.
+  // Main-loop-only: compares the persisted record with the current discovery
+  // inputs and queues the matching action: initial publish when nothing is
+  // stored, cleanup + republish when the version, hash, device ID or flags
+  // changed.
   void check_discovery_changes(const char* current_device_id);
 
   // Bridge readiness plus a completed device identity.
   bool is_ready() const;
 
-  Phase phase() const { return phase_; }
+  Phase phase() const { return static_cast<Phase>(phase_.load(std::memory_order_acquire)); }
+  // Main-loop-only diagnostic read: unlike phase(), this plain read has no
+  // acquire edge of its own. Call it only from the main loop, or — as the
+  // concurrency test does — only while phase() reports a queued or active
+  // phase, whose acquire load orders the claimer's trigger_ write.
   Trigger trigger() const { return trigger_; }
   bool initial_publish_done() const { return initial_publish_done_; }
 
   static const char* phase_name(Phase phase);
-  const char* phase_name() const { return phase_name(phase_); }
+  const char* phase_name() const { return phase_name(phase()); }
 
  private:
-  // False, and logs why, when a phase is already running.
-  bool accept_request_(const char* request);
+  // Atomically claims the machine from Idle: on success trigger_ is set and
+  // the phase is published as target; on failure logs why and returns false.
+  bool claim_request_(Phase target, Trigger trigger, const char* request);
+  void set_phase_(Phase phase);
   // Configures and starts the topic cleanup; stays QueuedCleanup if not ready.
   void begin_cleanup_();
   // Resets, configures and starts a discovery run.
@@ -164,6 +204,9 @@ class DiscoveryLifecycleManager {
   // Drives a run to completion; records the outcome and either returns to
   // Idle (failure) or arms the reboot (success).
   void finish_publish_();
+  // Releases the run's allocations and returns to Idle without saving a
+  // record; the caller has already confirmed the firmware and logged why.
+  void abort_publish_run_();
 
   ha_discovery_manager_t* ha_discovery_manager_{nullptr};
   DeviceIdentityManager* device_identity_manager_{nullptr};
@@ -178,12 +221,19 @@ class DiscoveryLifecycleManager {
   uint32_t (*get_time_ms_)(void) = nullptr;
   Hooks hooks_{};
 
-  Phase phase_{kPhaseIdle};
+  // Written through claim_request_/set_phase_ only. Atomic because
+  // trigger_discovery_refresh() may run off the main loop (the Discovery
+  // Refresh button's press_action is MQTT-command-driven), while loop() and
+  // every other transition run on it. trigger_ is published by the release
+  // store on phase_; readers acquire first.
+  std::atomic<uint8_t> phase_{static_cast<uint8_t>(kPhaseIdle)};
   Trigger trigger_{kTriggerNone};
   // Sticky: set once a publish has succeeded, so a fresh install is not
   // republished a second time in the same boot.
   bool initial_publish_done_{false};
   uint32_t reboot_start_ms_{0};
+  // When Cleaning/Publishing was entered; basis for the kPhaseTimeoutMs check.
+  uint32_t phase_start_ms_{0};
 };
 
 }  // namespace geappliances_bridge

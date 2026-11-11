@@ -1,5 +1,18 @@
 TARGET := home-assistant-bridge_tests
 BUILD_DIR := ./build
+
+# ThreadSanitizer variant for the concurrency tests: `make test TSAN=1`.
+# TSan cannot share a binary with ASan, so it gets its own build dir (set
+# here, before OBJS expands BUILD_DIR). It checks the happens-before edges
+# of the discovery lifecycle claim protocol (the release store on phase_
+# publishing trigger_) the way the dual-core device will; the plain ASan
+# build only catches invariant violations that happen to manifest.
+# TSan does not run LeakSanitizer: leak detection stays with the ASan
+# variants (the ASAN_OPTIONS export below is inert under TSAN=1).
+TSAN ?= 0
+ifeq ($(TSAN),1)
+BUILD_DIR := ./build-tsan
+endif
 # The integration build links a separate binary so the two targets can never
 # run each other's stale binary (make cannot tell which source set produced a
 # shared output path).
@@ -36,7 +49,12 @@ DEPS := $(OBJS:.o=.d)
 INC_DIRS += $(shell find $(SRC_DIRS) -type d)
 INC_FLAGS := $(addprefix -I,$(INC_DIRS))
 
+ifeq ($(TSAN),1)
+SANITIZE_FLAGS := -fsanitize=thread
+else
 SANITIZE_FLAGS := -fsanitize=address -fsanitize=undefined
+endif
+
 
 # Leak detection is on for both suites: no test owns memory that outlives its
 # teardown, so a leak is a real leak — e.g. a discovery run orphaning its
@@ -57,6 +75,9 @@ ASAN_OPTIONS ?= detect_leaks=1:detect_stack_use_after_return=0
 #   Linux (local build):    /path/to/CppUTest
 UNAME_S := $(shell uname -s)
 UNAME_P := $(shell uname -p)
+ifeq ($(TSAN)$(UNAME_S),1Darwin)
+$(error TSAN=1 is unsupported on Darwin: clang ships no macOS ThreadSanitizer runtime)
+endif
 ifeq ($(UNAME_S),Darwin)
   # Apple Silicon → homebrew at /opt/homebrew; Intel → /usr/local
   ifeq ($(UNAME_P),arm)
@@ -74,8 +95,8 @@ CPPUTEST_LIB := -L$(CPPUTEST_PREFIX)/lib
 CFLAGS += -std=c11 -pedantic
 CPPFLAGS += $(SANITIZE_FLAGS) -fno-omit-frame-pointer -fprofile-arcs -ftest-coverage -DUSE_ESP_IDF -DUSE_ESP_IDF_STUBS -DUNIT_TEST_BUILD -DHA_DISCOVERY_TEST_EXPORT -DHA_DISCOVERY_CLEANUP_TEST_BUF_SIZE=512 -DHA_CLEANUP_TEST_BUF_SIZE=512 -DHA_DISCOVERY_CLEANUP_TEST_EXPORT 
 CPPFLAGS += $(INC_FLAGS) $(CPPUTEST_INC) -MMD -MP -g -Wall -Wextra -Wcast-qual -Werror
-CXXFLAGS += -std=c++17
-LDFLAGS := $(SANITIZE_FLAGS) $(CPPUTEST_LIB) --coverage
+CXXFLAGS += -std=c++17 -pthread
+LDFLAGS := $(SANITIZE_FLAGS) $(CPPUTEST_LIB) --coverage -pthread
 LDLIBS := -lstdc++ -lCppUTest -lCppUTestExt -lm --coverage
 
 BUILD_DEPS += $(MAKEFILE_LIST)
@@ -110,7 +131,7 @@ $(BUILD_DIR)/%.cpp.o: %.cpp $(BUILD_DEPS)
 .PHONY: clean
 clean:
 	@echo Cleaning...
-	@rm -rf $(BUILD_DIR)
+	@rm -rf $(BUILD_DIR) ./build ./build-tsan
 
 .PHONY: pytest
 pytest:
@@ -139,6 +160,7 @@ coverage: $(BUILD_DIR)/$(TARGET)
 		--exclude "*/lib/tiny/test/*" \
 		--exclude "*/lib/tiny-gea-api/test/*" \
 		--exclude "*/build/*" \
+		--exclude "*/build-tsan/*" \
 		--exclude "*/miniz.h" \
 		--exclude "*/esphome_stubs.cpp" \
 		--exclude "*/mqtt_client_double.cpp" \

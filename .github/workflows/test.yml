@@ -28,6 +28,10 @@ jobs:
 
     - run: make test -j${{ steps.cpu-cores.outputs.count }}
     - run: make integration-test -j${{ steps.cpu-cores.outputs.count }}
+    # The deterministic gate for the discovery lifecycle claim protocol:
+    # ThreadSanitizer catches the check-then-act race that the plain ASan
+    # stress misses (see test/tests/discovery_lifecycle_concurrency_test.cpp).
+    - run: make test TSAN=1 -j${{ steps.cpu-cores.outputs.count }}
 
   pytest:
     runs-on: ubuntu-latest

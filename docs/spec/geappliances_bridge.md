@@ -226,6 +226,7 @@ The following state variables were previously members of `GeappliancesBridge` bu
 | `trigger_` | `DiscoveryLifecycleManager` |
 | `initial_publish_done_` | `DiscoveryLifecycleManager` |
 | `reboot_start_ms_` | `DiscoveryLifecycleManager` |
+| `phase_start_ms_` | `DiscoveryLifecycleManager` |
 | `last_erd_publish_rate_publish_` | `DiagnosticSensorPublisher` |
 | `last_erd_cache_stats_publish_` | `DiagnosticSensorPublisher` |
 | `last_mqtt_disconnect_stats_publish_` | `DiagnosticSensorPublisher` |
@@ -240,14 +241,17 @@ The following state variables were previously members of `GeappliancesBridge` bu
 | `kPhaseCleaning` | Deleting stale discovery topics |
 | `kPhasePublishing` | A discovery run is in flight |
 | `kPhaseRebootPending` | Published and recorded; rebooting after the delay |
+| `kPhaseClaimed` | Transient: a trigger won the atomic claim from Idle and is recording `trigger_` before publishing the queued phase; `loop()` treats it as busy |
 
 ```text
-Idle --trigger_initial_discovery()--> QueuedInitial
-Idle --trigger_ota_cleanup() / trigger_discovery_refresh()--> QueuedCleanup
+Idle --trigger_initial_discovery()--> Claimed --(trigger recorded)--> QueuedInitial
+Idle --trigger_ota_cleanup() / trigger_discovery_refresh()--> Claimed --(trigger recorded)--> QueuedCleanup
 QueuedInitial --ready--> Publishing
 QueuedCleanup --ready--> Cleaning
 Cleaning --cleanup done--> Publishing
+Cleaning --kPhaseTimeoutMs elapsed--> Idle   (aborted, no record)
 Publishing --run failed--> Idle               (no record saved, no reboot)
+Publishing --kPhaseTimeoutMs elapsed--> Idle  (aborted, firmware confirmed, no record)
 Publishing --run complete--> RebootPending
 RebootPending --5 s elapsed--> Idle
 ```
@@ -282,8 +286,8 @@ Each `loop()` iteration delegates discovery and diagnostic work to the extracted
 
 The actual behavior is implemented in `DiscoveryLifecycleManager`:
 
-1. **Idempotency guard:** If any phase other than `kPhaseIdle` is active, log a warning naming the request and the current phase and return. "One phase at a time" is the invariant the enum enforces.
-2. **Queue the request:** Set `trigger_` to `kTriggerDiscoveryRefresh`, move the phase to `kPhaseQueuedCleanup`, and log "Discovery refresh queued, will execute when appliance is ready".
+1. **Atomic claim:** CAS `phase_` from `kPhaseIdle` to the transient `kPhaseClaimed`. If the CAS fails (any other phase, including a concurrent claim that won first), log a warning naming the request and the current phase and return. "One phase at a time" is the invariant the enum enforces, and the CAS makes it hold across cores.
+2. **Queue the request:** Set `trigger_` to `kTriggerDiscoveryRefresh`, then publish it with a release store of `kPhaseQueuedCleanup`, and log "Discovery refresh queued, will execute when appliance is ready".
 
 No guard checks for steady state, MQTT readiness, or device ID are performed at press time. The request is queued and will execute in `loop()` once all prerequisites are met. This allows the user to press the button at any time, even during startup.
 

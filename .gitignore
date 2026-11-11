@@ -11,6 +11,7 @@ gea-esphome-zonelinec6.yaml
 
 # Test build artifacts
 build/
+build-tsan/
 logs/
 my_configs/
 configuration_files/

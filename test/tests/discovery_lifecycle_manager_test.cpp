@@ -167,7 +167,8 @@ TEST_GROUP(discovery_lifecycle_manager)
 
   /* Both discovery-affecting config flags are on; tests that need other
    * values re-init with them. */
-  void init_lifecycle(bool generate_device_config = true)
+  void init_lifecycle(bool generate_device_config = true,
+                      DeviceIdentityManager* identity = nullptr)
   {
     DiscoveryLifecycleManager::Hooks hooks{};
     hooks.apply_mqtt_availability = &hook_availability;
@@ -177,7 +178,7 @@ TEST_GROUP(discovery_lifecycle_manager)
     hooks.feed_watchdog = &hook_watchdog;
     hooks.reboot = &hook_reboot;
     hooks.context = &hooks_;
-    lifecycle_.init(&manager_, identity_, adapter_, &cache_,
+    lifecycle_.init(&manager_, identity != nullptr ? *identity : identity_, adapter_, &cache_,
                     generate_device_config, true, true,
                     &stub_is_ready, nullptr, hooks);
   }
@@ -236,6 +237,24 @@ TEST(discovery_lifecycle_manager, is_ready_requires_bridge_and_device_identity)
   CHECK(lifecycle_.is_ready());
 }
 
+TEST(discovery_lifecycle_manager, is_ready_requires_complete_device_identity)
+{
+  /* A fresh identity manager that has only started reading the identity ERDs:
+   * bridge readiness alone must not report ready. */
+  /* Local on purpose: init_lifecycle() re-points lifecycle_ at identity_ in
+   * the next test's setup, so the stale reference this test leaves behind is
+   * never used. */
+  DeviceIdentityManager pending_identity;
+  expect_read(ERD_APPLIANCE_TYPE);
+  pending_identity.init("", &erd_client_.interface, 0xC0);
+  mock().checkExpectations();
+  CHECK_TRUE(pending_identity.get_state() != DEVICE_ID_STATE_COMPLETE);
+
+  init_lifecycle(true, &pending_identity);
+
+  CHECK(!lifecycle_.is_ready());
+}
+
 TEST(discovery_lifecycle_manager, every_phase_has_a_distinct_name)
 {
   const Phase phases[] = {
@@ -245,6 +264,7 @@ TEST(discovery_lifecycle_manager, every_phase_has_a_distinct_name)
     DiscoveryLifecycleManager::kPhaseCleaning,
     DiscoveryLifecycleManager::kPhasePublishing,
     DiscoveryLifecycleManager::kPhaseRebootPending,
+    DiscoveryLifecycleManager::kPhaseClaimed,
   };
   for (size_t i = 0; i < sizeof(phases) / sizeof(phases[0]); i++) {
     const char* name = DiscoveryLifecycleManager::phase_name(phases[i]);
@@ -446,6 +466,39 @@ TEST(discovery_lifecycle_manager, requests_are_rejected_while_a_phase_runs)
   CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerInitial, lifecycle_.trigger());
 }
 
+TEST(discovery_lifecycle_manager, requests_are_rejected_while_cleaning)
+{
+  enter_cleaning();
+
+  lifecycle_.trigger_discovery_refresh();
+  lifecycle_.trigger_ota_cleanup();
+  lifecycle_.trigger_initial_discovery();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerOta, lifecycle_.trigger());
+}
+
+TEST(discovery_lifecycle_manager, requests_are_rejected_while_publishing_or_reboot_pending)
+{
+  enter_publishing();
+
+  lifecycle_.trigger_discovery_refresh();
+  lifecycle_.trigger_ota_cleanup();
+  lifecycle_.trigger_initial_discovery();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhasePublishing, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerInitial, lifecycle_.trigger());
+
+  end_publish_run(ha_discovery_state_complete);
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
+
+  lifecycle_.trigger_discovery_refresh();
+  lifecycle_.trigger_ota_cleanup();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+}
+
 TEST(discovery_lifecycle_manager, refresh_and_ota_cleanup_share_the_cleanup_phase)
 {
   lifecycle_.trigger_discovery_refresh();
@@ -564,9 +617,9 @@ TEST(discovery_lifecycle_manager, initial_publish_is_not_repeated_in_the_same_bo
   CHECK(lifecycle_.initial_publish_done());
 
   /* The reboot is expected never to return, but if the record never reached
-   * NVS (a failed write, for example) the latch is the only thing left that
-   * keeps a second initial publish from going out in the same boot. */
-  hooks_.has_stored = false;
+   * NVS (a failed write, for example — here nothing was ever stored) the
+   * latch is the only thing left that keeps a second initial publish from
+   * going out in the same boot. */
   lifecycle_.check_discovery_changes(identity_.get_device_id());
 
   CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
@@ -582,10 +635,18 @@ TEST(discovery_lifecycle_manager, reboot_waits_out_the_delay_and_feeds_the_watch
   enter_publishing();
   end_publish_run(ha_discovery_state_complete);
 
+  /* Every loop iteration while waiting out the delay feeds the watchdog. */
+  esphome_hal_double_set_millis(10000 + DiscoveryLifecycleManager::kRebootDelayMs / 5);
+  lifecycle_.loop();
+  esphome_hal_double_set_millis(10000 + DiscoveryLifecycleManager::kRebootDelayMs / 2);
+  lifecycle_.loop();
+  CHECK_EQUAL(0, hooks_.reboot_calls);
+  CHECK_EQUAL(2, hooks_.watchdog_calls);
+
   esphome_hal_double_set_millis(10000 + DiscoveryLifecycleManager::kRebootDelayMs - 1);
   lifecycle_.loop();
   CHECK_EQUAL(0, hooks_.reboot_calls);
-  CHECK_EQUAL(1, hooks_.watchdog_calls);
+  CHECK_EQUAL(3, hooks_.watchdog_calls);
   CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
 
   esphome_hal_double_set_millis(10000 + DiscoveryLifecycleManager::kRebootDelayMs);
@@ -605,6 +666,69 @@ TEST(discovery_lifecycle_manager, reboot_happens_once)
 
   CHECK_EQUAL(1, hooks_.reboot_calls);
   CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+}
+
+/* ------------------------------------------------------------------ */
+/* hung modules: the phase timeout returns the machine to Idle         */
+/* ------------------------------------------------------------------ */
+
+TEST(discovery_lifecycle_manager, cleaning_phase_times_out_and_can_be_retried)
+{
+  enter_cleaning();
+  /* Steer the cleanup module into a run that never reports done, e.g. a
+   * broker connection dropped mid-run. */
+  manager_.cleanup.state = ha_cleanup_state_cleaning;
+
+  /* Just under the budget: still cleaning. */
+  esphome_hal_double_set_millis(DiscoveryLifecycleManager::kPhaseTimeoutMs - 1);
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
+
+  esphome_hal_double_set_millis(DiscoveryLifecycleManager::kPhaseTimeoutMs);
+  lifecycle_.loop();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+  /* destroy() memsets the cleanup struct back to idle. */
+  CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
+  /* No publish ran, so nothing is recorded and the firmware is not
+   * confirmed: confirmation belongs to the publish outcome. */
+  CHECK_EQUAL(0, hooks_.save_calls);
+  CHECK_EQUAL(0, hooks_.confirm_calls);
+  CHECK(!lifecycle_.initial_publish_done());
+
+  /* A fresh request is accepted again and reaches Cleaning: the abort left
+   * the cleanup module reusable. */
+  lifecycle_.trigger_discovery_refresh();
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
+}
+
+TEST(discovery_lifecycle_manager, publishing_phase_times_out_and_retries_next_boot)
+{
+  enter_publishing();
+
+  /* Just under the budget: the run is still in flight. */
+  esphome_hal_double_set_millis(DiscoveryLifecycleManager::kPhaseTimeoutMs - 1);
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhasePublishing, lifecycle_.phase());
+
+  esphome_hal_double_set_millis(DiscoveryLifecycleManager::kPhaseTimeoutMs);
+  lifecycle_.loop();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+  CHECK_EQUAL(0, hooks_.save_calls);
+  CHECK_EQUAL(0, hooks_.reboot_calls);
+  /* The firmware is still confirmed, same contract as a failed run. */
+  CHECK_EQUAL(1, hooks_.confirm_calls);
+  /* The run's allocations are released by resetting the manager to idle. */
+  CHECK_EQUAL(ha_discovery_state_idle, manager_.state);
+  CHECK(!lifecycle_.initial_publish_done());
+
+  /* Nothing was recorded, so the next boot's change check retries. */
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedInitial, lifecycle_.phase());
 }
 
 /* ------------------------------------------------------------------ */

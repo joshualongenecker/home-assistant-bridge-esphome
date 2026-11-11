@@ -31,10 +31,6 @@ namespace geappliances_bridge {
 
 namespace {
 
-// NVS key for the persisted DiscoveryRecord ("disc").
-constexpr uint32_t kDiscoveryNvsKey = 0x64697363u;
-// ESPHome's own safe-mode counter; zeroing it marks the running firmware good.
-constexpr uint32_t kSafeModeRtcKey = 233825507UL;
 
 #if defined(USE_ESP_IDF_STUBS)
 
@@ -51,6 +47,10 @@ void feed_watchdog(void*) {}
 void reboot(void*) {}
 
 #else
+// NVS key for the persisted DiscoveryRecord ("disc").
+constexpr uint32_t kDiscoveryNvsKey = 0x64697363u;
+// ESPHome's own safe-mode counter; zeroing it marks the running firmware good.
+constexpr uint32_t kSafeModeRtcKey = 233825507UL;
 
 void apply_mqtt_availability(void*, ha_discovery_manager_t* manager) {
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
@@ -149,10 +149,11 @@ void DiscoveryLifecycleManager::init(
   }
   this->get_time_ms_ = &esphome::millis;
 
-  this->phase_ = kPhaseIdle;
+  this->set_phase_(kPhaseIdle);
   this->trigger_ = kTriggerNone;
   this->initial_publish_done_ = false;
   this->reboot_start_ms_ = 0;
+  this->phase_start_ms_ = 0;
 }
 
 const char* DiscoveryLifecycleManager::phase_name(Phase phase) {
@@ -163,6 +164,7 @@ const char* DiscoveryLifecycleManager::phase_name(Phase phase) {
     case kPhaseCleaning: return "cleaning topics";
     case kPhasePublishing: return "publishing";
     case kPhaseRebootPending: return "reboot pending";
+    case kPhaseClaimed: return "request in progress";
   }
   return "unknown";
 }
@@ -174,30 +176,51 @@ bool DiscoveryLifecycleManager::is_ready() const {
          this->device_identity_manager_->get_state() == DEVICE_ID_STATE_COMPLETE;
 }
 
-bool DiscoveryLifecycleManager::accept_request_([[maybe_unused]] const char* request) {
-  if (this->phase_ == kPhaseIdle) return true;
-  ESP_LOGW(TAG, "%s ignored: discovery is %s", request, phase_name(this->phase_));
-  return false;
+void DiscoveryLifecycleManager::set_phase_(Phase phase)
+{
+  this->phase_.store(static_cast<uint8_t>(phase), std::memory_order_release);
+}
+
+bool DiscoveryLifecycleManager::claim_request_(Phase target, Trigger trigger,
+                                               [[maybe_unused]] const char* request)
+{
+  // Accept only from Idle, atomically: trigger_discovery_refresh() can run
+  // off the main loop, so a plain check-then-act could let two triggers both
+  // pass the Idle check and overwrite each other's trigger. The claim lands
+  // in kPhaseClaimed first so loop() never observes a queued phase whose
+  // trigger_ is still stale; the release store publishes trigger_ with it.
+  uint8_t expected = static_cast<uint8_t>(kPhaseIdle);
+  if (!this->phase_.compare_exchange_strong(expected, static_cast<uint8_t>(kPhaseClaimed),
+                                            std::memory_order_acq_rel,
+                                            std::memory_order_acquire)) {
+    ESP_LOGW(TAG, "%s ignored: discovery is %s", request,
+             phase_name(static_cast<Phase>(expected)));
+    return false;
+  }
+  this->trigger_ = trigger;
+  this->set_phase_(target);
+  return true;
 }
 
 void DiscoveryLifecycleManager::trigger_ota_cleanup() {
-  if (!accept_request_("Discovery cleanup")) return;
-  this->trigger_ = kTriggerOta;
-  this->phase_ = kPhaseQueuedCleanup;
+  if (!this->claim_request_(kPhaseQueuedCleanup, kTriggerOta, "Discovery cleanup")) {
+    return;
+  }
+  ESP_LOGI(TAG, "OTA discovery cleanup queued, will execute when appliance is ready");
 }
 
 void DiscoveryLifecycleManager::trigger_discovery_refresh() {
-  if (!accept_request_("Discovery refresh")) return;
-  this->trigger_ = kTriggerDiscoveryRefresh;
-  this->phase_ = kPhaseQueuedCleanup;
+  if (!this->claim_request_(kPhaseQueuedCleanup, kTriggerDiscoveryRefresh, "Discovery refresh")) {
+    return;
+  }
   ESP_LOGI(TAG, "Discovery refresh queued, will execute when appliance is ready");
 }
 
 void DiscoveryLifecycleManager::trigger_initial_discovery() {
   if (this->initial_publish_done_) return;
-  if (!accept_request_("Initial discovery")) return;
-  this->trigger_ = kTriggerInitial;
-  this->phase_ = kPhaseQueuedInitial;
+  if (!this->claim_request_(kPhaseQueuedInitial, kTriggerInitial, "Initial discovery")) {
+    return;
+  }
   ESP_LOGI(TAG, "Initial HA discovery publish queued, will execute when appliance is ready");
 }
 
@@ -205,8 +228,9 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
   if (current_device_id == nullptr) {
     return;
   }
-  if (this->phase_ != kPhaseIdle) {
-    ESP_LOGW(TAG, "Discovery change check skipped: discovery is %s", phase_name(this->phase_));
+  const Phase current = this->phase();
+  if (current != kPhaseIdle) {
+    ESP_LOGW(TAG, "Discovery change check skipped: discovery is %s", phase_name(current));
     return;
   }
   if (!this->generate_device_config_) {
@@ -251,6 +275,10 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
 }
 
 void DiscoveryLifecycleManager::begin_cleanup_() {
+  // Unlike the automatic initial publish, an explicit cleanup trigger (an OTA
+  // version change or the Discovery Refresh button) intentionally proceeds
+  // even when generate_device_config_ is off: stale topics from an earlier
+  // firmware still need removing.
   if (!is_ready()) {
     return;
   }
@@ -263,7 +291,8 @@ void DiscoveryLifecycleManager::begin_cleanup_() {
   } else {
     ESP_LOGI(TAG, "Starting OTA-triggered HA discovery cleanup...");
   }
-  this->phase_ = kPhaseCleaning;
+  this->phase_start_ms_ = this->get_time_ms_();
+  this->set_phase_(kPhaseCleaning);
 }
 
 void DiscoveryLifecycleManager::begin_publish_() {
@@ -280,7 +309,8 @@ void DiscoveryLifecycleManager::begin_publish_() {
       &this->mqtt_client_adapter_->interface);
   this->hooks_.apply_mqtt_availability(this->hooks_.context, this->ha_discovery_manager_);
   ha_discovery_manager_start(this->ha_discovery_manager_);
-  this->phase_ = kPhasePublishing;
+  this->phase_start_ms_ = this->get_time_ms_();
+  this->set_phase_(kPhasePublishing);
 }
 
 void DiscoveryLifecycleManager::finish_publish_() {
@@ -301,9 +331,7 @@ void DiscoveryLifecycleManager::finish_publish_() {
     // Also do not save the discovery record and do not arm the reboot:
     // leaving the stored record stale/absent is what makes
     // check_discovery_changes() re-trigger discovery on the next boot.
-    ha_discovery_manager_init(this->ha_discovery_manager_);
-    this->trigger_ = kTriggerNone;
-    this->phase_ = kPhaseIdle;
+    this->abort_publish_run_();
     ESP_LOGE(TAG, "HA discovery failed; not saving discovery state, will retry on next boot");
     return;
   }
@@ -311,7 +339,9 @@ void DiscoveryLifecycleManager::finish_publish_() {
   if (this->trigger_ == kTriggerInitial) {
     this->initial_publish_done_ = true;
   }
-  [[maybe_unused]] const bool was_initial = (this->trigger_ == kTriggerInitial);
+  [[maybe_unused]] const char* trigger_kind = this->trigger_ == kTriggerInitial
+      ? "Initial"
+      : (this->trigger_ == kTriggerDiscoveryRefresh ? "Refresh" : "OTA");
   this->trigger_ = kTriggerNone;
 
   DiscoveryRecord record{};
@@ -325,16 +355,29 @@ void DiscoveryLifecycleManager::finish_publish_() {
   record.filter_config_topics = this->filter_config_topics_;
   this->hooks_.save_discovery_record(this->hooks_.context, record);
 
-  ESP_LOGI(TAG, "%s HA discovery publish complete, preparing reboot...",
-           was_initial ? "Initial" : "OTA");
+  ESP_LOGI(TAG, "%s HA discovery publish complete, preparing reboot...", trigger_kind);
 
-  this->phase_ = kPhaseRebootPending;
+  this->set_phase_(kPhaseRebootPending);
   this->reboot_start_ms_ = this->get_time_ms_();
+}
+// Failed-run contract shared by the publish-timeout abort and a FAILED run:
+// the run's allocations are released and no record is saved, so the next
+// boot's change check retries. The caller has already confirmed the firmware
+// (it is confirmed on success too) and logged the reason.
+void DiscoveryLifecycleManager::abort_publish_run_() {
+  ha_discovery_manager_init(this->ha_discovery_manager_);
+  this->trigger_ = kTriggerNone;
+  this->set_phase_(kPhaseIdle);
 }
 
 void DiscoveryLifecycleManager::loop() {
-  switch (this->phase_) {
+  switch (this->phase()) {
     case kPhaseIdle:
+      return;
+
+    case kPhaseClaimed:
+      // A trigger is between the claim and publishing its queued phase; the
+      // next iteration will see QueuedInitial/QueuedCleanup.
       return;
 
     case kPhaseQueuedInitial:
@@ -350,6 +393,19 @@ void DiscoveryLifecycleManager::loop() {
       return;
 
     case kPhaseCleaning: {
+      if (this->get_time_ms_() - this->phase_start_ms_ >= kPhaseTimeoutMs) {
+        // The cleanup module never settled (e.g. the broker connection
+        // dropped mid-run). Aborting is the only way the machine can accept
+        // another request in this boot; the record was never saved, so the
+        // next boot's change check retries too.
+        ESP_LOGE(TAG, "HA discovery cleanup did not finish within %" PRIu32
+                 " ms; aborting. Discovery Refresh or a reboot will retry.",
+                 kPhaseTimeoutMs);
+        ha_discovery_cleanup_destroy(&this->ha_discovery_manager_->cleanup);
+        this->trigger_ = kTriggerNone;
+        this->set_phase_(kPhaseIdle);
+        return;
+      }
       ha_discovery_cleanup_run(&this->ha_discovery_manager_->cleanup);
       if (!ha_discovery_cleanup_is_done(&this->ha_discovery_manager_->cleanup)) {
         return;
@@ -362,6 +418,17 @@ void DiscoveryLifecycleManager::loop() {
 
     case kPhasePublishing:
       if (ha_discovery_manager_is_processing(this->ha_discovery_manager_)) {
+        if (this->get_time_ms_() - this->phase_start_ms_ >= kPhaseTimeoutMs) {
+          ESP_LOGE(TAG, "HA discovery publish did not finish within %" PRIu32
+                   " ms; aborting. Discovery Refresh or a reboot will retry.",
+                   kPhaseTimeoutMs);
+          // Same contract as the failed-run path: the firmware is confirmed
+          // regardless of the discovery outcome, the run's allocations are
+          // released, and no record is saved so the next boot retries.
+          this->hooks_.confirm_firmware(this->hooks_.context);
+          this->abort_publish_run_();
+          return;
+        }
         ha_discovery_manager_run(this->ha_discovery_manager_);
         return;
       }
@@ -375,7 +442,7 @@ void DiscoveryLifecycleManager::loop() {
         return;
       }
       ESP_LOGI(TAG, "Rebooting after discovery cleanup + republish...");
-      this->phase_ = kPhaseIdle;
+      this->set_phase_(kPhaseIdle);
       this->hooks_.reboot(this->hooks_.context);
       return;
     }
