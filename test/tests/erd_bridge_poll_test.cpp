@@ -561,7 +561,7 @@ TEST(erd_bridge_poll, should_not_crash_on_destroy_with_null_erd_client)
 //
 // These paths — the POLL_YIELD_MS batch break inside send_poll_read_requests_bounded,
 // the POLL_CYCLE_SEND_BUDGET_MS early return in send_cycle_reads, and the
-// cycle_sending_in_progress resume — were previously unreachable in unit tests:
+// sending-phase resume — were previously unreachable in unit tests:
 // the HAL double's millis() is frozen at 0 unless a test sets it, so elapsed
 // time was always 0 and send_cycle_reads always queued the whole cycle in one
 // batch (and last_cycle_time_ms was always 0).
@@ -675,16 +675,15 @@ TEST(erd_bridge_poll_budgeted_send, should_stop_at_send_budget_and_resume_withou
   after(polling_interval);
   CHECK_EQUAL(1u, s_budgeted_yield_calls);
 
-  CHECK_TRUE(self.cycle_sending_in_progress);
+  CHECK_EQUAL(poll_cycle_phase_sending, self.cycle_phase);
   CHECK_EQUAL(self.erd_index, 10);
-  CHECK_TRUE(self.polling_timer_armed);
 
   // The resume pass continues from erd_index — it must NOT restart the
   // cycle from 0 and must queue the remaining ERDs exactly once.
   should_request_reads(10, 2);
   after(100);
 
-  CHECK_FALSE(self.cycle_sending_in_progress);
+  CHECK_EQUAL(poll_cycle_phase_awaiting, self.cycle_phase);
   CHECK_EQUAL(2u, s_budgeted_yield_calls);
   CHECK_EQUAL(self.erd_index, 12);
 
@@ -696,6 +695,7 @@ TEST(erd_bridge_poll_budgeted_send, should_stop_at_send_budget_and_resume_withou
   }
   CHECK_EQUAL(1u, self.cycle_count);
   CHECK_TRUE(self.last_cycle_time_ms > 0);
+  CHECK_EQUAL(poll_cycle_phase_idle, self.cycle_phase);
   mock().checkExpectations();
 }
 
@@ -759,11 +759,11 @@ TEST(erd_bridge_poll_default_wiring, init_installs_hal_defaults_and_null_setter_
 }
 
 // ============================================================================
-// restart_pending: timer expiry mid-cycle defers the restart until the
+// awaiting_restart: timer expiry mid-cycle defers the restart until the
 // in-flight cycle completes, then restarts immediately.
 // ============================================================================
 
-TEST_GROUP_BASE(erd_bridge_poll_restart_pending, simulation_test_base)
+TEST_GROUP_BASE(erd_bridge_poll_awaiting_restart, simulation_test_base)
 {
   enum {
     polling_interval = 1000,
@@ -799,7 +799,7 @@ TEST_GROUP_BASE(erd_bridge_poll_restart_pending, simulation_test_base)
   }
 };
 
-TEST(erd_bridge_poll_restart_pending, should_defer_restart_until_cycle_completes_then_restart_immediately)
+TEST(erd_bridge_poll_awaiting_restart, should_defer_restart_until_cycle_completes_then_restart_immediately)
 {
   mock().disable();
   erd_bridge_poll_init(
@@ -822,7 +822,7 @@ TEST(erd_bridge_poll_restart_pending, should_defer_restart_until_cycle_completes
 
   // Timer fires again while both reads are in flight: defer, don't restart.
   after(polling_interval);
-  CHECK_TRUE(self.restart_pending);
+  CHECK_EQUAL(poll_cycle_phase_awaiting_restart, self.cycle_phase);
   CHECK_EQUAL(self.erd_index, 2);
 
   // The last completion must start the next cycle immediately.
@@ -833,8 +833,83 @@ TEST(erd_bridge_poll_restart_pending, should_defer_restart_until_cycle_completes
   trigger_read_completed(0xC0, erd_1, &a, sizeof(a));
   trigger_read_completed(0xC0, erd_2, &b, sizeof(b));
 
-  CHECK_FALSE(self.restart_pending);
+  CHECK_EQUAL(poll_cycle_phase_awaiting, self.cycle_phase);
   CHECK_EQUAL(self.erd_index, 2);
   CHECK_EQUAL(1u, self.cycle_count);
+  mock().checkExpectations();
+}
+
+// ============================================================================
+// queue-full mid-drive completion: a dropped read counts toward cycle
+// completion; the drive settles to idle and the next cycle starts on the
+// interval timer, retrying the ERD.
+// ============================================================================
+
+TEST_GROUP_BASE(erd_bridge_poll_queue_full, simulation_test_base)
+{
+  enum { polling_interval = 1000 };
+
+  erd_bridge_poll_t self;
+  const probe_entry_t probe_list[1] = {{0x4001, PROBE_ENTRY_DEFAULT_ADDRESS}};
+
+  void setup()
+  {
+    simulation_test_base_setup();
+  }
+
+  void teardown()
+  {
+    mock().disable();
+    erd_bridge_poll_destroy(&self);
+    simulation_test_base_teardown();
+    mock().enable();
+  }
+};
+
+TEST(erd_bridge_poll_queue_full, should_complete_cycle_when_client_queue_is_full_and_wait_for_interval)
+{
+  mock().disable();
+  erd_bridge_poll_init(
+    &self,
+    &timer_group.timer_group,
+    &erd_client.interface,
+    polling_interval,
+    0xC0, probe_list, 1,
+    &test_cache);
+
+  uint8_t probe_val = 0x01;
+  trigger_read_completed(0xC0, 0x4001, &probe_val, sizeof(probe_val));
+  mock().enable();
+
+  CHECK_EQUAL(polling_state_polling, self.current_state);
+  CHECK_EQUAL(poll_cycle_phase_idle, self.cycle_phase);
+
+  // Client queue full: the read is dropped, which counts the ERD as
+  // completed and completes the cycle mid-drive.
+  mock()
+    .expectOneCall("read")
+    .onObject(&erd_client)
+    .withParameter("address", 0xC0)
+    .withParameter("erd", 0x4001)
+    .ignoreOtherParameters()
+    .andReturnValue(false);
+  after(polling_interval);
+
+  // The cycle completed mid-drive: back to idle with the interval timer
+  // armed — the next cycle starts on the next expiry and retries the ERD.
+  CHECK_EQUAL(poll_cycle_phase_idle, self.cycle_phase);
+  CHECK_EQUAL(1u, self.cycle_count);
+
+  mock()
+    .expectOneCall("read")
+    .onObject(&erd_client)
+    .withParameter("address", 0xC0)
+    .withParameter("erd", 0x4001)
+    .ignoreOtherParameters()
+    .andReturnValue(false);
+  after(polling_interval);
+
+  CHECK_EQUAL(2u, self.cycle_count);
+  CHECK_EQUAL(poll_cycle_phase_idle, self.cycle_phase);
   mock().checkExpectations();
 }

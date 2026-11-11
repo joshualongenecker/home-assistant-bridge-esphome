@@ -15,13 +15,41 @@ extern "C" {
 //      are filtered out in the same pass (feature-bit filtering happens at list-build time).
 //   2. Poll: steady-state polling of the verified list.
 //
-// Poll-phase timer semantics:
-//   Timer fires mid-cycle (cycle not yet complete): set restart_pending=true;
-//   let the cycle finish naturally.
-//   Timer fires after cycle already complete: start next cycle immediately;
-//   re-arm timer.
-//   Cycle completes with restart_pending=true: start next cycle immediately;
-//   re-arm timer; clear restart_pending.
+// Poll-phase cycle machine (cycle_phase — exactly one phase active at a time):
+//   idle              interval timer armed, no cycle in flight; timer expiry
+//                     starts the next cycle.
+//   sending           budgeted sends in progress, resume timer armed; timer
+//                     expiry resumes sending.
+//   awaiting          all reads queued, interval timer armed; timer expiry
+//                     means the interval elapsed mid-cycle → awaiting_restart.
+//   awaiting_restart  interval timer fired while reads were in flight; the
+//                     cycle finishes naturally, then the next cycle starts
+//                     immediately (no timer armed until the restart).
+//   A cycle completing in `awaiting` returns to `idle` (the interval timer is
+//   still armed, so the next cycle waits for it to fire); a cycle completing
+//   in `awaiting_restart` restarts immediately.
+
+/* Cycle phase within state_polling.  Replaces the former polling_timer_armed /
+ * restart_pending / cycle_sending_in_progress flag cluster: the phase
+ * enumerates exactly the valid timer/cycle combinations, so an invalid
+ * combination is unrepresentable. */
+typedef enum {
+  poll_cycle_phase_idle,
+  poll_cycle_phase_sending,
+  poll_cycle_phase_awaiting,
+  poll_cycle_phase_awaiting_restart
+} poll_cycle_phase_t;
+
+static inline const char* poll_cycle_phase_name(poll_cycle_phase_t phase)
+{
+  switch(phase) {
+    case poll_cycle_phase_idle: return "idle";
+    case poll_cycle_phase_sending: return "sending";
+    case poll_cycle_phase_awaiting: return "awaiting";
+    case poll_cycle_phase_awaiting_restart: return "awaiting_restart";
+    default: return "unknown";
+  }
+}
 
 typedef struct {
   tiny_erd_t erd_polling_list[POLLING_LIST_MAX_SIZE];
@@ -43,24 +71,26 @@ typedef struct {
   uint16_t erd_index;
   /* Number of ERDs in the current polling cycle that have completed (success
    * or failure).  Used together with erd_index to determine when a full cycle
-   * has finished — the cycle only restarts when cycle_completed_count equals
-   * polling_list_count AND the polling timer has expired. */
+   * has finished — the cycle restarts once cycle_completed_count equals
+   * polling_list_count; the cycle phase then decides idle vs immediate restart. */
   uint16_t cycle_completed_count;
-  /* Set to true once the HSM transitions into state_polling (all ERD
-   * discovery phases have completed). Reset to false on appliance loss/
-   * reconnect. */
-  bool polling_list_complete;
   /* Current HSM state as an enum (see polling_state_t).
    * Callers may watch this for state transitions to emit
    * diagnostic log messages without coupling to ESP logging headers. */
   polling_state_t current_state;
+  /* Cycle phase within state_polling (see poll_cycle_phase_t).  Encodes
+   * exactly which timer is armed and whether a cycle is in flight,
+   * replacing the former polling_timer_armed / restart_pending /
+   * cycle_sending_in_progress flag cluster (and polling_list_complete,
+   * which duplicated current_state == polling_state_polling). */
+  poll_cycle_phase_t cycle_phase;
   /* Consecutive cycle failure counter. Incremented on each full cycle where
    * all ERDs fail. Reset on any successful read. Transitions to state_failed
    * when this reaches 3, matching the subscription bridge's failure threshold. */
   uint8_t polling_failure_count;
   /* True if any ERD in the current polling cycle has failed.
-   * Reset at the start of each cycle; checked on cycle completion
-   * to increment the consecutive failure counter. */
+   * Cleared at cycle completion; checked there to increment the
+   * consecutive failure counter. */
   bool cycle_has_failure;
   /* Pre-built list of ERDs to probe during discovery.
    * Set by the caller before erd_bridge_poll_init(); the bridge copies
@@ -77,20 +107,6 @@ typedef struct {
   uint32_t cycle_start_ms;
   uint32_t last_cycle_time_ms;
   uint32_t cycle_count;
-  /* True while the polling timer is armed (between arm_polling_timer and the
-   * next signal_polling_timer_expired).  Used to decide whether to restart
-   * polling immediately when a cycle finishes: if the timer is armed, wait for
-   * it to fire; if not, start the next cycle right away. */
-  bool polling_timer_armed;
-  /* Set to true when the polling_interval timer fires while a cycle is still
-   * in progress (cycle_completed_count < polling_list_count).  The in-progress
-   * cycle is allowed to finish, then the cycle-completion handler restarts
-   * immediately instead of waiting for another timer interval. */
-  bool restart_pending;
-  /* True while a cycle's read requests are being sent in budgeted chunks.
-   * When set, the polling timer handler resumes sending instead of starting
-   * a new cycle.  Cleared once all ERD reads for the cycle are queued. */
-  bool cycle_sending_in_progress;
   /* Called once when the HSM enters state_polling (discovery complete).
    * The callback may send a signal to the startup HSM to transition to the
    * next phase.  Set after erd_bridge_poll_init() and before the HSM
@@ -100,7 +116,7 @@ typedef struct {
   /* Time and yield injection — mirrors erd_cache_mqtt_publisher_t::get_time_ms.
    * Defaults are set in erd_bridge_poll_init() (esphome::millis / delay(0));
    * tests install fakes via the setters so the budgeted send/resume paths
-   * (POLL_YIELD_MS, POLL_CYCLE_SEND_BUDGET_MS, cycle_sending_in_progress)
+   * (POLL_YIELD_MS, POLL_CYCLE_SEND_BUDGET_MS, the sending phase)
    * are exercised against a deterministic clock instead of the HAL double's
    * frozen counter. */
   uint32_t (*get_time_ms)(void);
