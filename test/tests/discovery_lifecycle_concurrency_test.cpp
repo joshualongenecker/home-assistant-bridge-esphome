@@ -16,9 +16,18 @@
  *   - a queued or active phase is never paired with kTriggerNone;
  *   - trigger_ never changes while a cycle is in flight (a losing trigger
  *     must not be able to write it, and a mid-cycle re-queue would
- *     necessarily rewrite trigger_). Sampling is once per loop() call, so a
- *     completed cycle that is immediately re-claimed between samples is
- *     legitimately seen as active -> queued; there is no phase-edge check.
+ *     necessarily rewrite trigger_).
+ *
+ * Sampling is once per loop() call. A completed cycle always shows at least
+ * one RebootPending sample (the delay cannot elapse in the call that enters
+ * the phase), which clears the in-cycle flag, so a fresh claim after the
+ * reboot is never mistaken for a mid-cycle change even when the Idle sample
+ * is skipped by a fast claimer. The one window that could false-positive is
+ * an abort that leaves a phase inside a single loop() call (the
+ * kPhaseTimeoutMs aborts, or a FAILED run) being immediately re-claimed
+ * before the next sample; neither abort is reachable in this test (the
+ * stepped clock never comes near the 5-minute budget, and publish runs are
+ * steered to COMPLETE), so the counter stays exact here.
  *
  * Under `make test TSAN=1` ThreadSanitizer additionally checks the
  * happens-before edges: the claimer's write to trigger_ must be published by

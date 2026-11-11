@@ -74,6 +74,7 @@ ASAN_OPTIONS ?= detect_leaks=1:detect_stack_use_after_return=0
 #   Linux (system pkg):     /usr
 #   Linux (local build):    /path/to/CppUTest
 UNAME_S := $(shell uname -s)
+UNAME_P := $(shell uname -p)
 ifeq ($(TSAN)$(UNAME_S),1Darwin)
 $(error TSAN=1 is unsupported on Darwin: clang ships no macOS ThreadSanitizer runtime)
 endif
@@ -160,6 +161,7 @@ coverage: $(BUILD_DIR)/$(TARGET)
 		--exclude "*/lib/tiny-gea-api/test/*" \
 		--exclude "*/build/*" \
 		--exclude "*/build-tsan/*" \
+		--exclude "*/miniz.h" \
 		--exclude "*/esphome_stubs.cpp" \
 		--exclude "*/mqtt_client_double.cpp" \
 		--exclude "*/tiny_*_double.cpp" \
