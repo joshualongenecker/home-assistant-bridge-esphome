@@ -469,7 +469,6 @@ TEST(discovery_lifecycle_manager, requests_are_rejected_while_a_phase_runs)
 TEST(discovery_lifecycle_manager, requests_are_rejected_while_cleaning)
 {
   enter_cleaning();
-  manager_.cleanup.state = ha_cleanup_state_cleaning;
 
   lifecycle_.trigger_discovery_refresh();
   lifecycle_.trigger_ota_cleanup();

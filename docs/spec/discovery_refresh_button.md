@@ -107,8 +107,8 @@ The bridge's `loop()` calls `discovery_lifecycle_manager_.loop()`, which advance
 | Condition | Result |
 |-----------|--------|
 | `bridge_ != nullptr` | Delegates to `trigger_discovery_refresh()`, which forwards to `discovery_lifecycle_manager_.trigger_discovery_refresh()` |
-| `phase_` (in `DiscoveryLifecycleManager`) == `kPhaseIdle` | Passes idempotency guard |
-| **Outcome** | `trigger_` set to `kTriggerDiscoveryRefresh` and `phase_` to `kPhaseQueuedCleanup` in `DiscoveryLifecycleManager`. The manager's `loop()` moves to `kPhaseCleaning` immediately (bridge is already ready), then proceeds through cleanup → publish → reboot. |
+| `phase_` (in `DiscoveryLifecycleManager`) == `kPhaseIdle` | Wins the atomic claim (`phase_` transiently `kPhaseClaimed`) |
+| **Outcome** | `trigger_` set to `kTriggerDiscoveryRefresh` and `phase_` to `kPhaseQueuedCleanup` in `DiscoveryLifecycleManager`. The manager's `loop()` treats the transient `kPhaseClaimed` as busy and moves to `kPhaseCleaning` on the next call (bridge is already ready), then proceeds through cleanup → publish → reboot. |
 
 ### 5.2 Press While Refresh Already In Progress
 

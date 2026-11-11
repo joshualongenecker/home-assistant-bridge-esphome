@@ -228,8 +228,9 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
   if (current_device_id == nullptr) {
     return;
   }
-  if (this->phase() != kPhaseIdle) {
-    ESP_LOGW(TAG, "Discovery change check skipped: discovery is %s", phase_name(this->phase()));
+  const Phase current = this->phase();
+  if (current != kPhaseIdle) {
+    ESP_LOGW(TAG, "Discovery change check skipped: discovery is %s", phase_name(current));
     return;
   }
   if (!this->generate_device_config_) {

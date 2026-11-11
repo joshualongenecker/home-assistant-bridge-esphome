@@ -31,7 +31,7 @@ class DiscoveryRefreshButton : public button::Button {
 
 ## Trigger Flow
 
-`GeappliancesBridge::trigger_discovery_refresh()` is a **public** method (no `friend` declaration needed). It delegates to `discovery_lifecycle_manager_.trigger_discovery_refresh()`, which accepts the request only when `phase_` (owned by `DiscoveryLifecycleManager`) is `kPhaseIdle`, then sets `trigger_` to `kTriggerDiscoveryRefresh` and `phase_` to `kPhaseQueuedCleanup` and logs that the request is queued. It does **not** perform guard checks or start cleanup immediately — the request is queued and will execute once the bridge is ready.
+`GeappliancesBridge::trigger_discovery_refresh()` is a **public** method (no `friend` declaration needed). It delegates to `discovery_lifecycle_manager_.trigger_discovery_refresh()`, which atomically claims the machine: a CAS moves `phase_` (owned by `DiscoveryLifecycleManager`) from `kPhaseIdle` to the transient `kPhaseClaimed`, then sets `trigger_` to `kTriggerDiscoveryRefresh` and publishes `kPhaseQueuedCleanup` with a release store on `phase_`, logging that the request is queued. If the CAS fails (any other phase, including a concurrent claim), it logs a warning and returns. It does **not** perform readiness checks or start cleanup immediately — the request is queued and will execute once the bridge is ready.
 
 In the bridge's `loop()`, `discovery_lifecycle_manager_.loop()` is called, which advances the phase machine by at most one transition per call:
 

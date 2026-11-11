@@ -8,7 +8,7 @@ BUILD_DIR := ./build
 # publishing trigger_) the way the dual-core device will; the plain ASan
 # build only catches invariant violations that happen to manifest.
 # TSan does not run LeakSanitizer: leak detection stays with the ASan
-# variants (ASAN_OPTIONS below applies to the run lines of both suites).
+# variants (the ASAN_OPTIONS export below is inert under TSAN=1).
 TSAN ?= 0
 ifeq ($(TSAN),1)
 BUILD_DIR := ./build-tsan
@@ -131,7 +131,7 @@ $(BUILD_DIR)/%.cpp.o: %.cpp $(BUILD_DEPS)
 .PHONY: clean
 clean:
 	@echo Cleaning...
-	@rm -rf ./build ./build-tsan
+	@rm -rf $(BUILD_DIR) ./build ./build-tsan
 
 .PHONY: pytest
 pytest:
