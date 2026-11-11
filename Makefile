@@ -1,5 +1,16 @@
 TARGET := home-assistant-bridge_tests
 BUILD_DIR := ./build
+
+# ThreadSanitizer variant for the concurrency tests: `make test TSAN=1`.
+# TSan cannot share a binary with ASan, so it gets its own build dir (set
+# here, before OBJS expands BUILD_DIR). It checks the happens-before edges
+# of the discovery lifecycle claim protocol (the release store on phase_
+# publishing trigger_) the way the dual-core device will; the plain ASan
+# build only catches invariant violations that happen to manifest.
+TSAN ?= 0
+ifeq ($(TSAN),1)
+BUILD_DIR := ./build-tsan
+endif
 # The integration build links a separate binary so the two targets can never
 # run each other's stale binary (make cannot tell which source set produced a
 # shared output path).
@@ -36,7 +47,12 @@ DEPS := $(OBJS:.o=.d)
 INC_DIRS += $(shell find $(SRC_DIRS) -type d)
 INC_FLAGS := $(addprefix -I,$(INC_DIRS))
 
+ifeq ($(TSAN),1)
+SANITIZE_FLAGS := -fsanitize=thread
+else
 SANITIZE_FLAGS := -fsanitize=address -fsanitize=undefined
+endif
+
 
 # Leak detection is on for both suites: no test owns memory that outlives its
 # teardown, so a leak is a real leak — e.g. a discovery run orphaning its
@@ -74,8 +90,8 @@ CPPUTEST_LIB := -L$(CPPUTEST_PREFIX)/lib
 CFLAGS += -std=c11 -pedantic
 CPPFLAGS += $(SANITIZE_FLAGS) -fno-omit-frame-pointer -fprofile-arcs -ftest-coverage -DUSE_ESP_IDF -DUSE_ESP_IDF_STUBS -DUNIT_TEST_BUILD -DHA_DISCOVERY_TEST_EXPORT -DHA_DISCOVERY_CLEANUP_TEST_BUF_SIZE=512 -DHA_CLEANUP_TEST_BUF_SIZE=512 -DHA_DISCOVERY_CLEANUP_TEST_EXPORT 
 CPPFLAGS += $(INC_FLAGS) $(CPPUTEST_INC) -MMD -MP -g -Wall -Wextra -Wcast-qual -Werror
-CXXFLAGS += -std=c++17
-LDFLAGS := $(SANITIZE_FLAGS) $(CPPUTEST_LIB) --coverage
+CXXFLAGS += -std=c++17 -pthread
+LDFLAGS := $(SANITIZE_FLAGS) $(CPPUTEST_LIB) --coverage -pthread
 LDLIBS := -lstdc++ -lCppUTest -lCppUTestExt -lm --coverage
 
 BUILD_DEPS += $(MAKEFILE_LIST)
