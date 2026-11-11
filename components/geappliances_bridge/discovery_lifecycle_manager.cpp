@@ -31,10 +31,6 @@ namespace geappliances_bridge {
 
 namespace {
 
-// NVS key for the persisted DiscoveryRecord ("disc").
-constexpr uint32_t kDiscoveryNvsKey = 0x64697363u;
-// ESPHome's own safe-mode counter; zeroing it marks the running firmware good.
-constexpr uint32_t kSafeModeRtcKey = 233825507UL;
 
 #if defined(USE_ESP_IDF_STUBS)
 
@@ -51,6 +47,10 @@ void feed_watchdog(void*) {}
 void reboot(void*) {}
 
 #else
+// NVS key for the persisted DiscoveryRecord ("disc").
+constexpr uint32_t kDiscoveryNvsKey = 0x64697363u;
+// ESPHome's own safe-mode counter; zeroing it marks the running firmware good.
+constexpr uint32_t kSafeModeRtcKey = 233825507UL;
 
 void apply_mqtt_availability(void*, ha_discovery_manager_t* manager) {
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
@@ -203,7 +203,10 @@ bool DiscoveryLifecycleManager::claim_request_(Phase target, Trigger trigger,
 }
 
 void DiscoveryLifecycleManager::trigger_ota_cleanup() {
-  this->claim_request_(kPhaseQueuedCleanup, kTriggerOta, "Discovery cleanup");
+  if (!this->claim_request_(kPhaseQueuedCleanup, kTriggerOta, "Discovery cleanup")) {
+    return;
+  }
+  ESP_LOGI(TAG, "OTA discovery cleanup queued, will execute when appliance is ready");
 }
 
 void DiscoveryLifecycleManager::trigger_discovery_refresh() {
@@ -271,6 +274,10 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
 }
 
 void DiscoveryLifecycleManager::begin_cleanup_() {
+  // Unlike the automatic initial publish, an explicit cleanup trigger (an OTA
+  // version change or the Discovery Refresh button) intentionally proceeds
+  // even when generate_device_config_ is off: stale topics from an earlier
+  // firmware still need removing.
   if (!is_ready()) {
     return;
   }
@@ -323,9 +330,7 @@ void DiscoveryLifecycleManager::finish_publish_() {
     // Also do not save the discovery record and do not arm the reboot:
     // leaving the stored record stale/absent is what makes
     // check_discovery_changes() re-trigger discovery on the next boot.
-    ha_discovery_manager_init(this->ha_discovery_manager_);
-    this->trigger_ = kTriggerNone;
-    this->set_phase_(kPhaseIdle);
+    this->abort_publish_run_();
     ESP_LOGE(TAG, "HA discovery failed; not saving discovery state, will retry on next boot");
     return;
   }
@@ -353,6 +358,15 @@ void DiscoveryLifecycleManager::finish_publish_() {
 
   this->set_phase_(kPhaseRebootPending);
   this->reboot_start_ms_ = this->get_time_ms_();
+}
+// Failed-run contract shared by the publish-timeout abort and a FAILED run:
+// the run's allocations are released and no record is saved, so the next
+// boot's change check retries. The caller has already confirmed the firmware
+// (it is confirmed on success too) and logged the reason.
+void DiscoveryLifecycleManager::abort_publish_run_() {
+  ha_discovery_manager_init(this->ha_discovery_manager_);
+  this->trigger_ = kTriggerNone;
+  this->set_phase_(kPhaseIdle);
 }
 
 void DiscoveryLifecycleManager::loop() {
@@ -411,9 +425,7 @@ void DiscoveryLifecycleManager::loop() {
           // regardless of the discovery outcome, the run's allocations are
           // released, and no record is saved so the next boot retries.
           this->hooks_.confirm_firmware(this->hooks_.context);
-          ha_discovery_manager_init(this->ha_discovery_manager_);
-          this->trigger_ = kTriggerNone;
-          this->set_phase_(kPhaseIdle);
+          this->abort_publish_run_();
           return;
         }
         ha_discovery_manager_run(this->ha_discovery_manager_);

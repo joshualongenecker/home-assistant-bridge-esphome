@@ -241,6 +241,9 @@ TEST(discovery_lifecycle_manager, is_ready_requires_complete_device_identity)
 {
   /* A fresh identity manager that has only started reading the identity ERDs:
    * bridge readiness alone must not report ready. */
+  /* Local on purpose: init_lifecycle() re-points lifecycle_ at identity_ in
+   * the next test's setup, so the stale reference this test leaves behind is
+   * never used. */
   DeviceIdentityManager pending_identity;
   expect_read(ERD_APPLIANCE_TYPE);
   pending_identity.init("", &erd_client_.interface, 0xC0);
@@ -634,9 +637,9 @@ TEST(discovery_lifecycle_manager, reboot_waits_out_the_delay_and_feeds_the_watch
   end_publish_run(ha_discovery_state_complete);
 
   /* Every loop iteration while waiting out the delay feeds the watchdog. */
-  esphome_hal_double_set_millis(10000 + 1000);
+  esphome_hal_double_set_millis(10000 + DiscoveryLifecycleManager::kRebootDelayMs / 5);
   lifecycle_.loop();
-  esphome_hal_double_set_millis(10000 + 2000);
+  esphome_hal_double_set_millis(10000 + DiscoveryLifecycleManager::kRebootDelayMs / 2);
   lifecycle_.loop();
   CHECK_EQUAL(0, hooks_.reboot_calls);
   CHECK_EQUAL(2, hooks_.watchdog_calls);

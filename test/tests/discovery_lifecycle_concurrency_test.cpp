@@ -160,12 +160,14 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
   std::thread refresh([&] {
     while (!stop.load(std::memory_order_relaxed)) {
       lifecycle_.trigger_discovery_refresh();
+      std::this_thread::yield();
       refresh_calls.fetch_add(1, std::memory_order_relaxed);
     }
   });
   std::thread ota([&] {
     while (!stop.load(std::memory_order_relaxed)) {
       lifecycle_.trigger_ota_cleanup();
+      std::this_thread::yield();
       ota_calls.fetch_add(1, std::memory_order_relaxed);
     }
   });
@@ -174,9 +176,11 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
   bool in_cycle = false;
   unsigned int cycles = 0;
   unsigned int unpaired_phase = 0;
+  unsigned int refresh_cycles = 0;
+  unsigned int ota_cycles = 0;
   unsigned int mid_cycle_trigger_change = 0;
-  Phase previous = lifecycle_.phase();
 
+  Phase previous = lifecycle_.phase();
   int i = 0;
   for (; i < kMaxIterations && cycles < kTargetCycles; i++) {
     /* Step the fake clock so cleanup converges and the reboot delay
@@ -217,6 +221,14 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
       if (previous == DiscoveryLifecycleManager::kPhaseRebootPending &&
           now == DiscoveryLifecycleManager::kPhaseIdle) {
         cycles++;
+        /* Attempts are not enough: a regression that drops, say, OTA claims
+         * from Idle must fail here, so both trigger kinds must actually win
+         * full cycles. */
+        if (cycle_trigger == DiscoveryLifecycleManager::kTriggerDiscoveryRefresh) {
+          refresh_cycles++;
+        } else if (cycle_trigger == DiscoveryLifecycleManager::kTriggerOta) {
+          ota_cycles++;
+        }
       }
       in_cycle = false;
     }
@@ -231,7 +243,8 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
    * counters above are vacuous. */
   CHECK_TRUE(cycles >= kTargetCycles);
   CHECK_TRUE(refresh_calls.load() > 0);
-  CHECK_TRUE(ota_calls.load() > 0);
+  CHECK_TRUE(refresh_cycles > 0);
+  CHECK_TRUE(ota_cycles > 0);
   CHECK_EQUAL(0u, unpaired_phase);
   CHECK_EQUAL(0u, mid_cycle_trigger_change);
 }

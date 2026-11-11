@@ -168,17 +168,24 @@ class DiscoveryLifecycleManager {
 
   void trigger_discovery_refresh();
 
+  // Main-loop-only: reads the plain initial_publish_done_ latch before the
+  // claim, so it must not run beside loop() on another core.
   void trigger_initial_discovery();
 
-  // Compares the persisted record with the current discovery inputs and queues
-  // the matching action: initial publish when nothing is stored, cleanup +
-  // republish when the version, hash, device ID or flags changed.
+  // Main-loop-only: compares the persisted record with the current discovery
+  // inputs and queues the matching action: initial publish when nothing is
+  // stored, cleanup + republish when the version, hash, device ID or flags
+  // changed.
   void check_discovery_changes(const char* current_device_id);
 
   // Bridge readiness plus a completed device identity.
   bool is_ready() const;
 
   Phase phase() const { return static_cast<Phase>(phase_.load(std::memory_order_acquire)); }
+  // Main-loop-only diagnostic read: unlike phase(), this plain read has no
+  // acquire edge of its own. Call it only from the main loop, or — as the
+  // concurrency test does — only while phase() reports a queued or active
+  // phase, whose acquire load orders the claimer's trigger_ write.
   Trigger trigger() const { return trigger_; }
   bool initial_publish_done() const { return initial_publish_done_; }
 
@@ -197,6 +204,9 @@ class DiscoveryLifecycleManager {
   // Drives a run to completion; records the outcome and either returns to
   // Idle (failure) or arms the reboot (success).
   void finish_publish_();
+  // Releases the run's allocations and returns to Idle without saving a
+  // record; the caller has already confirmed the firmware and logged why.
+  void abort_publish_run_();
 
   ha_discovery_manager_t* ha_discovery_manager_{nullptr};
   DeviceIdentityManager* device_identity_manager_{nullptr};

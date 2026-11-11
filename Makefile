@@ -7,6 +7,8 @@ BUILD_DIR := ./build
 # of the discovery lifecycle claim protocol (the release store on phase_
 # publishing trigger_) the way the dual-core device will; the plain ASan
 # build only catches invariant violations that happen to manifest.
+# TSan does not run LeakSanitizer: leak detection stays with the ASan
+# variants (ASAN_OPTIONS below applies to the run lines of both suites).
 TSAN ?= 0
 ifeq ($(TSAN),1)
 BUILD_DIR := ./build-tsan
@@ -72,7 +74,9 @@ ASAN_OPTIONS ?= detect_leaks=1:detect_stack_use_after_return=0
 #   Linux (system pkg):     /usr
 #   Linux (local build):    /path/to/CppUTest
 UNAME_S := $(shell uname -s)
-UNAME_P := $(shell uname -p)
+ifeq ($(TSAN)$(UNAME_S),1Darwin)
+$(error TSAN=1 is unsupported on Darwin: clang ships no macOS ThreadSanitizer runtime)
+endif
 ifeq ($(UNAME_S),Darwin)
   # Apple Silicon → homebrew at /opt/homebrew; Intel → /usr/local
   ifeq ($(UNAME_P),arm)
@@ -126,7 +130,7 @@ $(BUILD_DIR)/%.cpp.o: %.cpp $(BUILD_DEPS)
 .PHONY: clean
 clean:
 	@echo Cleaning...
-	@rm -rf $(BUILD_DIR)
+	@rm -rf ./build ./build-tsan
 
 .PHONY: pytest
 pytest:
@@ -155,7 +159,7 @@ coverage: $(BUILD_DIR)/$(TARGET)
 		--exclude "*/lib/tiny/test/*" \
 		--exclude "*/lib/tiny-gea-api/test/*" \
 		--exclude "*/build/*" \
-		--exclude "*/miniz.h" \
+		--exclude "*/build-tsan/*" \
 		--exclude "*/esphome_stubs.cpp" \
 		--exclude "*/mqtt_client_double.cpp" \
 		--exclude "*/tiny_*_double.cpp" \
