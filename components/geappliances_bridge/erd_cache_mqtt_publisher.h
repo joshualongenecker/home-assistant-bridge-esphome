@@ -43,6 +43,15 @@ typedef struct {
    * connection is not held back by a stale backoff.  Aligned uint32_t — the
    * cross-context clear is a benign race, same treatment as publish_index. */
   uint32_t retry_backoff_until_ms;
+  /* Backlog pacing: last time signal_work() actually woke the publish task while
+   * the dirty backlog was above PUBLISH_PACE_BACKLOG_THRESHOLD.  Written from the
+   * main loop and, through on_connected, from the MQTT connect callback - esp-mqtt
+   * delivers that on its own task, not ESPHome's loop.  Aligned uint32_t, so the
+   * cross-context access is a benign race like retry_backoff_until_ms, and the
+   * direction is safe: a stale value is always older, which makes the pacing window
+   * look longer and lets an extra coalesced wake through.  It can never make the
+   * window look shorter, so pacing is never tighter than the real timestamp. */
+  uint32_t last_work_signal_ms;
   bool mqtt_connected;
   bool paused;
   bool first_round_done;

@@ -55,6 +55,8 @@ The disconnect start time is recorded in `disconnect_start_ms` when `on_disconne
 
 The `on_connected()` callback sets `mqtt_connected = true`, resets `first_round_done` to `false`, and signals the background task. It checks the disconnect duration against the 60-second threshold. When the threshold is exceeded, `erd_cache_mark_all_updated()` is called to trigger a full re-publish. The `on_disconnected()` callback sets `mqtt_connected = false` and records `disconnect_start_ms` via the configured time function (`get_time_ms`, defaulting to `esphome::millis`).
 
+The re-publish it triggers is a burst: every cached entry becomes dirty at once, and the publisher emits one entry per wake. `erd_cache_mqtt_publisher_signal_work()` rate-limits those wakes while the backlog is large, so the burst drains at roughly 10 entries per second instead of at main-loop rate and does not overflow ESPHome's 30-slot outbound MQTT queue (see the publisher spec, §2.5). This does not change *what* is re-published, only how fast; because `update_required` is a flag and each snapshot copies the newest bytes, a slower drain delivers fresher values rather than fewer of them.
+
 ### Verification
 
 - Tests verify that after a simulated disconnect/reconnect cycle with a short gap (&lt; 60 s), only entries with new data changes are published — not a full cache flush.
