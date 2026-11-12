@@ -270,15 +270,21 @@ TEST(erd_cache_mqtt_publisher, publish_retries_after_drop)
     &adapter.interface,
     "device",
     0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
   erd_cache_mqtt_publisher_on_connected(&publisher);
+  esphome_hal_double_set_millis(1000);
 
   uint8_t data = 0x42;
   erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
-  /* First attempt fails. */
+  /* First attempt fails and arms the retry backoff. */
   mqtt_double.publish_should_fail_ = true;
   erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_EQUAL(0u, publisher.total_published);
+
+  /* Step past the backoff window so the calls below are real attempts
+   * (this test pins the iterator semantics, not the backoff). */
+  esphome_hal_double_set_millis(1300);
 
   /* Second call: iterator has advanced past the entry, so it scans
    * the rest of the cache, resets to 0, and returns NULL. */
@@ -291,6 +297,48 @@ TEST(erd_cache_mqtt_publisher, publish_retries_after_drop)
 
   /* Entry is now published — no more pending. */
   CHECK_FALSE(erd_cache_mqtt_publisher_publish_one(&publisher));
+}
+
+/* ------------------------------------------------------------------ */
+/* publish_one - backoff after a dropped publish                       */
+/* ------------------------------------------------------------------ */
+
+TEST(erd_cache_mqtt_publisher, publish_backoff_suppresses_attempts_until_window_elapses)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+  erd_cache_mqtt_publisher_on_connected(&publisher);
+  esphome_hal_double_set_millis(1000);
+
+  uint8_t data = 0x42;
+  erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
+
+  /* A dropped publish (broker outbound queue full) arms the backoff. */
+  mqtt_double.publish_should_fail_ = true;
+  CHECK_FALSE(erd_cache_mqtt_publisher_publish_one(&publisher));
+  CHECK_EQUAL(1, mqtt_double.publish_calls_);
+  CHECK(publisher.retry_backoff_until_ms > 0);
+
+  /* While the window is open, publish_one must not attempt at all —
+   * retrying at main-loop rate against a full queue is what floods the
+   * backend's drop counter and flaps the MQTT component warning flag. */
+  mqtt_double.publish_should_fail_ = false;
+  CHECK_FALSE(erd_cache_mqtt_publisher_publish_one(&publisher));
+  CHECK_EQUAL(1, mqtt_double.publish_calls_);
+
+  /* Once the window elapses the dirty entry is retried and goes through
+   * (one scan wraps the iterator to 0, the next finds the entry). */
+  esphome_hal_double_set_millis(1300);
+  CHECK_FALSE(erd_cache_mqtt_publisher_publish_one(&publisher));
+  CHECK_TRUE(erd_cache_mqtt_publisher_publish_one(&publisher));
+  CHECK_EQUAL(2, mqtt_double.publish_calls_);
+  CHECK_EQUAL(1u, publisher.total_published);
+  CHECK_EQUAL(0u, publisher.retry_backoff_until_ms);
 }
 
 /* ------------------------------------------------------------------ */
