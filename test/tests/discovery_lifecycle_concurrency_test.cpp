@@ -177,22 +177,27 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
   std::atomic<unsigned int> refresh_calls{0};
   std::atomic<unsigned int> ota_calls{0};
 
-  /* Which thread may claim the next Idle window; the main thread flips it
-   * when a cycle completes, and sets kTriggerNone - a value neither thread
-   * ever claims, so it means "both" - while a cycle is in flight.  Without
-   * the gate the both-kinds assertion below measures the host scheduler
-   * instead of the claim protocol: with two spinning threads on a two-core
-   * host one of them stays off-CPU long enough to lose all 100 claims
-   * (measured 13 failures in 150 full-suite runs under `taskset -c 0,1`, and
-   * either kind could be the starved one).  Gating the Idle windows alone
-   * would trade that for the mid-cycle check, whose only signal is trigger_
-   * differing from cycle_trigger: if only the winner ever calls a trigger, a
-   * regression that lets a losing trigger write trigger_ stores the value the
-   * winner already stored and the check cannot see it.  So the loser keeps
-   * hammering the reject path for the whole cycle.  The race stays live in
-   * both directions: the gate is read before the call, so a thread that
-   * passes it and is then preempted still lands its claim attempt on a phase
-   * the other thread already moved. */
+  /* Which thread may claim the next Idle window.  The main thread opens the
+   * gate to both kinds - kTriggerNone, a value neither thread ever claims -
+   * while a cycle is in flight, and closes it on the first sample outside a
+   * cycle, which hands the next Idle window to the kind that did not just
+   * run one.  One atomic carries both jobs on purpose: a separate "gate
+   * open" flag would need two stores, and a thread could read the gate
+   * closed before reading the new grant, leaving a window no kind owns.
+   *
+   * Without the gate the both-kinds assertion below measures the host
+   * scheduler instead of the claim protocol: with two spinning threads on a
+   * two-core host one of them stays off-CPU long enough to lose all 100
+   * claims (measured 13 failures in 150 full-suite runs under
+   * `taskset -c 0,1`, and either kind could be the starved one).  Gating the
+   * Idle windows alone would trade that for the mid-cycle check, whose only
+   * signal is trigger_ differing from cycle_trigger: if only the winner ever
+   * calls a trigger, a regression that lets a losing trigger write trigger_
+   * stores the value the winner already stored and the check cannot see it.
+   * So the loser keeps hammering the reject path for the whole cycle.  The
+   * race stays live in both directions: the gate is read before the call, so
+   * a thread that passes it and is then preempted still lands its claim
+   * attempt on a phase the other thread already moved. */
   std::atomic<Trigger> wanted{DiscoveryLifecycleManager::kTriggerDiscoveryRefresh};
 
   std::thread refresh([&] {
@@ -274,11 +279,14 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
         mid_cycle_trigger_change++;
       }
     } else {
-      /* Close the gate again as soon as the cycle is finishing.  A completed
-       * cycle always shows at least one RebootPending sample, so this lands
-       * before Idle is reachable and the next Idle window stays single-kind. */
-      if (now == DiscoveryLifecycleManager::kPhaseRebootPending &&
-          previous != DiscoveryLifecycleManager::kPhaseRebootPending) {
+      /* Outside a cycle the gate closes again, handing the next Idle window
+       * to the kind that did not just run one.  Keying on the open gate
+       * rather than on the phase is what makes this the backstop too: a
+       * cycle that ends without a RebootPending sample - a kPhaseTimeoutMs
+       * abort, a FAILED publish run - still gets its next Idle window
+       * granted to one kind instead of to both. */
+      if (wanted.load(std::memory_order_relaxed) ==
+          DiscoveryLifecycleManager::kTriggerNone) {
         wanted.store(cycle_trigger == DiscoveryLifecycleManager::kTriggerDiscoveryRefresh
                         ? DiscoveryLifecycleManager::kTriggerOta
                         : DiscoveryLifecycleManager::kTriggerDiscoveryRefresh,
@@ -295,14 +303,6 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
         } else if (cycle_trigger == DiscoveryLifecycleManager::kTriggerOta) {
           ota_cycles++;
         }
-        /* Hand the next Idle window to the other kind.  The RebootPending
-         * entry above already did it; this is the backstop for a cycle that
-         * ends without one, which would otherwise leave the gate open on
-         * Idle and put the both-kinds check back on the scheduler. */
-        wanted.store(cycle_trigger == DiscoveryLifecycleManager::kTriggerDiscoveryRefresh
-                        ? DiscoveryLifecycleManager::kTriggerOta
-                        : DiscoveryLifecycleManager::kTriggerDiscoveryRefresh,
-                     std::memory_order_relaxed);
       }
       in_cycle = false;
     }
