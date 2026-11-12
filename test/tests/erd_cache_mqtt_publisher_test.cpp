@@ -1338,3 +1338,36 @@ TEST(erd_cache_mqtt_publisher, signal_work_never_suppresses_the_first_wake)
   erd_cache_mqtt_publisher_signal_work(&publisher);
   CHECK_EQUAL(0, (int) xSemaphoreGive_double_count);
 }
+
+/* The publish task blocks on the work semaphore with NO timeout, so a pacing
+ * window that still reads as open when the stamp is ancient suppresses every wake
+ * forever: the stamp is only refreshed when a wake passes, so nothing can expire
+ * it.  A signed now-last comparison does exactly that for any idle gap above
+ * 2^31 ms (~24.9 days) - it goes negative, which is less than the 100 ms interval.
+ * A bridge that idles 25 days with a small backlog and then takes a >10-entry
+ * backlog (a reconnect republish is enough) would stop publishing ERDs until the
+ * millisecond counter rolls over. */
+TEST(erd_cache_mqtt_publisher, pacing_never_locks_out_after_a_long_idle_period)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+
+  uint8_t data = 0x42;
+  for (uint16_t i = 0; i < 20; i++) {
+    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
+  }
+
+  publisher.last_work_signal_ms = 5000;
+  const uint32_t much_later = 5000u + 2147485648u;  // 2^31 + 2000 ms of idle time
+
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(much_later);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(1, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL((unsigned long) much_later, (unsigned long) publisher.last_work_signal_ms);
+}

@@ -271,17 +271,27 @@ void erd_cache_mqtt_publisher_signal_work(erd_cache_mqtt_publisher_t* self)
 
   /* Pace only while a large backlog is queued up (see the constants above).
    * Below the threshold the task is woken every loop, so ordinary one-or-two-value
-   * changes keep their latency.  The signed diff is rollover-safe.  A zero
-   * last_work_signal_ms means "nothing has been paced yet", so the first wake is
-   * never suppressed: without that clause a backlog forming inside the first
-   * PUBLISH_PACE_INTERVAL_MS of uptime would be held back before the task has
-   * ever run.  Stamping a literal 0 would re-arm the same bypass, which costs at
-   * most one extra wake exactly once per boot. */
+   * changes keep their latency.  A zero last_work_signal_ms means "nothing has been
+   * paced yet", so the first wake is never suppressed: without that clause a
+   * backlog forming inside the first PUBLISH_PACE_INTERVAL_MS of uptime would be
+   * held back before the task has ever run.  Stamping a literal 0 would re-arm the
+   * same bypass, costing at most one extra wake exactly once per boot.
+   *
+   * The elapsed test is UNSIGNED deliberately.  The publish task takes the work
+   * semaphore with portMAX_DELAY, so a window that still reads as open against an
+   * ancient stamp suppresses every wake forever - only a wake that passes refreshes
+   * the stamp, so nothing can expire it.  A signed (now - last) comparison goes
+   * negative for any idle gap above 2^31 ms (~24.9 days), which would take a bridge
+   * that idles 25 days with a small backlog and then sees a >10-entry backlog (a
+   * reconnect republish is enough) out of publishing ERDs until the millisecond
+   * counter rolls over.  Unsigned, the modulo difference is the true gap for any
+   * idle period under 2^32 ms, and the only false suppression is a stamp exactly one
+   * wrap plus <100 ms old, which expires inside the window. */
   if (self->cache != NULL && self->get_time_ms != NULL &&
       erd_cache_get_dirty_count(self->cache) > PUBLISH_PACE_BACKLOG_THRESHOLD) {
     uint32_t now = self->get_time_ms();
     if (self->last_work_signal_ms != 0 &&
-        (int32_t)(now - self->last_work_signal_ms) < (int32_t)PUBLISH_PACE_INTERVAL_MS) {
+        (now - self->last_work_signal_ms) < PUBLISH_PACE_INTERVAL_MS) {
       return;
     }
     self->last_work_signal_ms = now;
