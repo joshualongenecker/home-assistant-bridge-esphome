@@ -305,7 +305,7 @@ void erd_cache_mqtt_publisher_resume(erd_cache_mqtt_publisher_t* self);
 ```
 
 - Sets `paused = false`
-- **Thread-safe**: acquires `state_mutex` (100 ms timeout) before modifying state; falls back to unprotected write if mutex creation failed
+- **Thread-safe**: acquires `state_mutex` (100 ms timeout) before modifying state; falls back to unprotected write if mutex creation failed. If the mutex exists but the take times out, `resume()` does nothing at all — `paused` stays set and no wake is signalled (`erd_cache_mqtt_publisher.cpp:512-523`). Nothing retries inside the call; recovery comes from the main loop, which calls `resume()` on every iteration while a cache is attached and discovery is idle (`geappliances_bridge.cpp:331`)
 - After clearing `paused`, calls `erd_cache_mqtt_publisher_signal_work()` so the background task can resume draining. That call is gated: while more than `PUBLISH_PACE_BACKLOG_THRESHOLD` entries are dirty the wake can be deferred by up to `PUBLISH_PACE_INTERVAL_MS` (see §2.5), so `resume()` does not guarantee a give — the main loop calls `signal_work()` again on its next iteration
 - Does **not** reset `first_round_done` — the flag is set by the publish loop itself when a full round completes
 

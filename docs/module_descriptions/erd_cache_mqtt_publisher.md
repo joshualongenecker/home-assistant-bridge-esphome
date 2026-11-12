@@ -65,6 +65,7 @@ Scans the shared ERD cache and publishes updated ERDs to MQTT topics with `retai
 | `first_round_done` | `bool` | True after the publisher has scanned the full cache with no pending entries since the last `pause()` or `on_connected()`. Set when the snapshot returns no entry. |
 | `get_time_ms` | `uint32_t (*)(void)` | Time source function pointer. Defaults to `esphome::millis`. |
 | `disconnect_start_ms` | `uint32_t` | `millis()` when MQTT disconnected; 0 if connected. Used to determine if a full republish is needed on reconnect. |
+| `last_work_signal_ms` | `uint32_t` | `get_time_ms()` at the last backlog-paced `signal_work()` that actually gave the semaphore. A zero stamp means "never stamped" and disengages the gate, so at boot and at each 2^32 ms wrap calls pass through until one records a non-zero time. Read without the state mutex: a stale read is always an older stamp, so it can only ever admit one extra wake. |
 
 ## MQTT Connect/Disconnect Handling
 
