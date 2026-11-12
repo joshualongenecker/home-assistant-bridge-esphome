@@ -806,3 +806,107 @@ TEST(erd_cache, update_existing_entry_by_erd_and_address)
   CHECK_EQUAL(0x02, d1[0]);
   CHECK_EQUAL(0x02, d2[0]);
 }
+
+/* ---------- dirty_count: the publish backlog the MQTT publisher paces on ---------- */
+
+TEST(erd_cache, dirty_count_counts_new_entries)
+{
+  CHECK_EQUAL(0, erd_cache_get_dirty_count(&cache));
+
+  uint8_t d = 0x01;
+  erd_cache_update(&cache, 0x0001, 0xFF, &d, 1);
+  CHECK_EQUAL(1, erd_cache_get_dirty_count(&cache));
+
+  erd_cache_update(&cache, 0x0002, 0xFF, &d, 1);
+  CHECK_EQUAL(2, erd_cache_get_dirty_count(&cache));
+}
+
+TEST(erd_cache, dirty_count_counts_a_dirty_entry_once)
+{
+  uint8_t d1 = 0x01;
+  uint8_t d2 = 0x02;
+  erd_cache_update(&cache, 0x0001, 0xFF, &d1, 1);
+
+  /* Unchanged data marks nothing, so the backlog is unchanged. */
+  CHECK_FALSE(erd_cache_update(&cache, 0x0001, 0xFF, &d1, 1));
+  CHECK_EQUAL(1, erd_cache_get_dirty_count(&cache));
+
+  /* Changed data on an entry that is still waiting to be published is still
+   * one backlog item, not two (the cache coalesces to the newest value). */
+  CHECK_TRUE(erd_cache_update(&cache, 0x0001, 0xFF, &d2, 1));
+  CHECK_EQUAL(1, erd_cache_get_dirty_count(&cache));
+}
+
+TEST(erd_cache, dirty_count_drops_when_snapshot_claims_an_entry)
+{
+  uint8_t d = 0x01;
+  erd_cache_update(&cache, 0x0001, 0xFF, &d, 1);
+  erd_cache_update(&cache, 0x0002, 0xFF, &d, 1);
+  CHECK_EQUAL(2, erd_cache_get_dirty_count(&cache));
+
+  uint16_t iter = 0;
+  erd_cache_entry_t* entry = NULL;
+  tiny_erd_t erd = 0;
+  uint8_t addr = 0;
+  uint8_t size = 0;
+  uint8_t buf[8];
+
+  CHECK_TRUE(erd_cache_snapshot_next_updated(&cache, &iter, &entry, &erd, &addr, buf, &size));
+  CHECK_EQUAL(1, erd_cache_get_dirty_count(&cache));
+
+  CHECK_TRUE(erd_cache_snapshot_next_updated(&cache, &iter, &entry, &erd, &addr, buf, &size));
+  CHECK_EQUAL(0, erd_cache_get_dirty_count(&cache));
+
+  /* Nothing left to claim. */
+  CHECK_FALSE(erd_cache_snapshot_next_updated(&cache, &iter, &entry, &erd, &addr, buf, &size));
+  CHECK_EQUAL(0, erd_cache_get_dirty_count(&cache));
+}
+
+TEST(erd_cache, dirty_count_recounts_a_republished_entry)
+{
+  uint8_t d = 0x01;
+  erd_cache_update(&cache, 0x0001, 0xFF, &d, 1);
+
+  uint16_t iter = 0;
+  erd_cache_entry_t* entry = NULL;
+  tiny_erd_t erd = 0;
+  uint8_t addr = 0;
+  uint8_t size = 0;
+  uint8_t buf[8];
+  CHECK_TRUE(erd_cache_snapshot_next_updated(&cache, &iter, &entry, &erd, &addr, buf, &size));
+  CHECK_EQUAL(0, erd_cache_get_dirty_count(&cache));
+
+  /* A dropped publish re-marks the entry: it is back in the backlog. */
+  erd_cache_mark_unpublished(&cache, entry);
+  CHECK_EQUAL(1, erd_cache_get_dirty_count(&cache));
+
+  /* Re-marking an entry that is already dirty must not double count it. */
+  erd_cache_mark_unpublished(&cache, entry);
+  CHECK_EQUAL(1, erd_cache_get_dirty_count(&cache));
+}
+
+TEST(erd_cache, mark_all_updated_sets_dirty_count_to_entry_count)
+{
+  uint8_t d = 0x01;
+  for (uint16_t i = 0; i < 5; i++) {
+    erd_cache_update(&cache, (tiny_erd_t)(0x0100 + i), 0xFF, &d, 1);
+  }
+
+  /* Drain the backlog through the production read path. */
+  uint16_t iter = 0;
+  erd_cache_entry_t* entry = NULL;
+  tiny_erd_t erd = 0;
+  uint8_t addr = 0;
+  uint8_t size = 0;
+  uint8_t buf[8];
+  while (erd_cache_snapshot_next_updated(&cache, &iter, &entry, &erd, &addr, buf, &size)) {
+  }
+  CHECK_EQUAL(0, erd_cache_get_dirty_count(&cache));
+
+  /* Reconnect republish: every valid entry is back in the backlog exactly once. */
+  erd_cache_mark_all_updated(&cache);
+  CHECK_EQUAL(5, erd_cache_get_dirty_count(&cache));
+
+  erd_cache_mark_all_updated(&cache);
+  CHECK_EQUAL(5, erd_cache_get_dirty_count(&cache));
+}

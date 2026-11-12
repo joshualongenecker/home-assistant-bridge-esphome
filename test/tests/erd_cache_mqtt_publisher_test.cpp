@@ -1174,3 +1174,69 @@ TEST(erd_cache_mqtt_publisher, secondary_address_publishes_with_prefix)
   CHECK_TRUE(published);
   STRCMP_EQUAL("geappliances/my_device/erd/0x10_0x0008/value", mqtt_double.last_published_topic_.c_str());
 }
+
+/* ---------- backlog pacing (signal_work) ----------
+ * The ESPHome MQTT backend queue is 30 deep with no depth accessor, so the
+ * publisher paces its own drain while a large backlog is queued up instead of
+ * letting a boot first round (or a post-reconnect republish) dump every cached
+ * ERD into the queue at main-loop rate.  last_work_signal_ms is only written
+ * when a wake is actually let through, so it is the observable gate. */
+
+TEST(erd_cache_mqtt_publisher, signal_work_paces_drain_while_backlog_is_large)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+
+  uint8_t data = 0x42;
+  for (uint16_t i = 0; i < 20; i++) {
+    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
+  }
+  CHECK_EQUAL(20, erd_cache_get_dirty_count(&cache));
+
+  /* The first signal passes immediately and stamps the pacing clock. */
+  esphome_hal_double_set_millis(1000);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(1000, (int)publisher.last_work_signal_ms);
+
+  /* Inside the 100 ms window the wake is suppressed: no give, no restamp. */
+  esphome_hal_double_set_millis(1050);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(1000, (int)publisher.last_work_signal_ms);
+
+  /* Once the interval elapses the next wake passes and restamps. */
+  esphome_hal_double_set_millis(1100);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(1100, (int)publisher.last_work_signal_ms);
+
+  /* Pacing does not drop work: the backlog is still fully queued for the task. */
+  CHECK_EQUAL(20, erd_cache_get_dirty_count(&cache));
+}
+
+TEST(erd_cache_mqtt_publisher, signal_work_does_not_pace_small_backlog)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+
+  uint8_t data = 0x42;
+  for (uint16_t i = 0; i < 3; i++) {
+    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
+  }
+
+  /* Below the threshold the gate never engages, so consecutive loop iterations
+   * both wake the task and the pacing clock is never written. */
+  esphome_hal_double_set_millis(1000);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  esphome_hal_double_set_millis(1005);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(0, (int)publisher.last_work_signal_ms);
+}

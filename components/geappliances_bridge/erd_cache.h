@@ -49,6 +49,10 @@ typedef struct erd_cache_t {
   uint32_t update_count_window;        /* updates since last get_update_rate() call */
   uint32_t required_update_count;      /* total updates setting update_required=true since init */
   uint32_t required_update_count_window; /* such updates since last get_required_update_rate() call */
+  /* Number of valid entries currently carrying update_required=true. Maintained
+   * under the cache lock at every site that sets/clears the flag; the MQTT
+   * publisher uses it to decide when a backlog justifies pacing its drain. */
+  uint16_t dirty_count;
   uint8_t max_cooldown;                /* configured rate limit in seconds; 0 = disabled */
   bool initialized;                    /* true after first successful erd_cache_init() */
   SemaphoreHandle_t lock;              /* guards entries[] + arena[] + arena_offset */
@@ -123,6 +127,10 @@ uint32_t erd_cache_get_required_update_rate(erd_cache_t* self);
 /* Mark all valid entries as needing republish. Used after a long MQTT
  * disconnect to force a full drain of retained values to the broker. */
 void erd_cache_mark_all_updated(erd_cache_t* self);
+
+/* Returns the number of valid entries currently marked update_required=true
+ * (the publish backlog). Takes the cache lock; safe to call from the main loop. */
+uint16_t erd_cache_get_dirty_count(erd_cache_t* self);
 
 /* Returns a pointer to the ERD data in the arena.
  * RAW accessor: does NOT take the lock. The caller must hold the cache lock

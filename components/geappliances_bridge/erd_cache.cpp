@@ -64,6 +64,7 @@ static void erd_cache_reset(erd_cache_t* self)
   self->update_count_window = 0;
   self->required_update_count = 0;
   self->required_update_count_window = 0;
+  self->dirty_count = 0;
   self->max_cooldown = 0;
 }
 
@@ -133,6 +134,11 @@ static bool erd_cache_update_locked(erd_cache_t* self, tiny_erd_t erd, uint8_t b
 
     memcpy(&self->arena[existing->data_offset], data, data_size);
 
+    /* Track the false->true transition only: an entry that is already dirty
+     * stays a single backlog item, so re-marking must not double count. */
+    if (data_changed && !existing->update_required) {
+      self->dirty_count++;
+    }
     existing->update_required = data_changed;
     if (existing->update_required) {
       self->required_update_count++;
@@ -180,6 +186,7 @@ static bool erd_cache_update_locked(erd_cache_t* self, tiny_erd_t erd, uint8_t b
   slot->data_size = data_size;
   slot->valid = true;
   slot->update_required = true;
+  self->dirty_count++;
 
   ESP_LOGD(TAG, "ERD 0x%04X at address 0x%02X added to cache (%u bytes, arena offset %u)",
            erd, board_address, data_size, slot->data_offset);
@@ -215,6 +222,7 @@ static erd_cache_entry_t* erd_cache_get_next_updated_locked(erd_cache_t* self, u
     /* Eligible — clear flag, return entry.
      * Cooldown reload happens in erd_cache_mark_published() after successful MQTT publish. */
     e->update_required = false;
+    self->dirty_count--;
     *iterator = i + 1;
     return e;
   }
@@ -294,12 +302,23 @@ uint32_t erd_cache_get_required_update_rate(erd_cache_t* self)
   return count;
 }
 
+uint16_t erd_cache_get_dirty_count(erd_cache_t* self)
+{
+  erd_cache_lock(self);
+  uint16_t count = self->dirty_count;
+  erd_cache_unlock(self);
+  return count;
+}
+
 void erd_cache_mark_all_updated(erd_cache_t* self)
 {
   erd_cache_lock(self);
   for (uint16_t i = 0; i < ERD_CACHE_CAPACITY; i++) {
     erd_cache_entry_t* e = &self->entries[i];
     if (e->valid) {
+      if (!e->update_required) {
+        self->dirty_count++;
+      }
       e->update_required = true;
       e->publish_cooldown = 0;
     }
@@ -325,6 +344,9 @@ void erd_cache_mark_unpublished(erd_cache_t* self, erd_cache_entry_t* entry)
 {
   if (entry == NULL) return;
   erd_cache_lock(self);
+  if (!entry->update_required) {
+    self->dirty_count++;
+  }
   entry->update_required = true;
   erd_cache_unlock(self);
 }

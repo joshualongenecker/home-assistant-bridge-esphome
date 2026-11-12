@@ -25,6 +25,17 @@ GEA_TAG(PUBLISHER_TAG) = "erd_cache_mqtt_publisher";
  * per ERD, so the retry delivers whatever is current once the queue drains. */
 static const uint32_t PUBLISH_RETRY_BACKOFF_MS = 250;
 
+/* Backlog pacing.  The ESPHome MQTT backend queue holds 30 messages and exposes
+ * no depth accessor, so overflow can only be observed as a failed publish — which
+ * PUBLISH_RETRY_BACKOFF_MS already handles reactively.  To keep the queue from
+ * filling in the first place, the drain is paced while the dirty backlog is large
+ * enough to threaten it: boot's first round and the post-reconnect drain both mark
+ * every cached ERD dirty at once.  Because the cache coalesces (the snapshot always
+ * copies the newest bytes), a slower drain delivers fresher values rather than
+ * fewer of them, so pacing costs only convergence time after boot. */
+static const uint16_t PUBLISH_PACE_BACKLOG_THRESHOLD = 10;
+static const uint32_t PUBLISH_PACE_INTERVAL_MS = 100;
+
 static void mqtt_publisher_task(void* arg)
 {
   erd_cache_mqtt_publisher_t* self = (erd_cache_mqtt_publisher_t*)arg;
@@ -254,9 +265,24 @@ void erd_cache_mqtt_publisher_stop(erd_cache_mqtt_publisher_t* self)
 
 void erd_cache_mqtt_publisher_signal_work(erd_cache_mqtt_publisher_t* self)
 {
-  if (self->work_semaphore != NULL) {
-    xSemaphoreGive(self->work_semaphore);
+  if (self->work_semaphore == NULL) {
+    return;
   }
+
+  /* Pace only while a large backlog is queued up (see the constants above).
+   * Below the threshold the task is woken every loop, so ordinary one-or-two-value
+   * changes keep their latency.  The signed diff is rollover-safe, and a zero or
+   * stale timestamp always lets the first signal through. */
+  if (self->cache != NULL && self->get_time_ms != NULL &&
+      erd_cache_get_dirty_count(self->cache) > PUBLISH_PACE_BACKLOG_THRESHOLD) {
+    uint32_t now = self->get_time_ms();
+    if ((int32_t)(now - self->last_work_signal_ms) < (int32_t)PUBLISH_PACE_INTERVAL_MS) {
+      return;
+    }
+    self->last_work_signal_ms = now;
+  }
+
+  xSemaphoreGive(self->work_semaphore);
 }
 
 bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self)

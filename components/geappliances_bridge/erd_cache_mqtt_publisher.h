@@ -43,6 +43,10 @@ typedef struct {
    * connection is not held back by a stale backoff.  Aligned uint32_t — the
    * cross-context clear is a benign race, same treatment as publish_index. */
   uint32_t retry_backoff_until_ms;
+  /* Backlog pacing: last time signal_work() actually woke the publish task while
+   * the dirty backlog was above PUBLISH_PACE_BACKLOG_THRESHOLD.  Written and read
+   * only from the main loop (signal_work's caller), so it needs no locking. */
+  uint32_t last_work_signal_ms;
   bool mqtt_connected;
   bool paused;
   bool first_round_done;
