@@ -81,14 +81,14 @@ If the polling timer fires while a cycle is still in progress (reads outstanding
 - `signal_polling_timer_expired` sends all reads via `send_cycle_reads()`.
 - `cycle_completed_count` increments on each `signal_read_completed` and `signal_read_failed`.
 - When `cycle_completed_count >= polling_list_count`, the cycle is complete.
-- If `restart_pending` is true (timer fired mid-cycle), the next cycle starts immediately.
-- If `polling_timer_armed` is true (timer hasn't fired yet), the code waits for the timer.
-- If `polling_timer_armed` is false and `restart_pending` is false, the next cycle starts immediately.
+- If the cycle completes in phase `awaiting_restart` (the timer fired mid-cycle), the next cycle starts immediately.
+- If the cycle completes in phase `awaiting` (the interval timer is still armed), the code waits for the timer to fire.
+- If the cycle completes in phase `sending` (queue-full drops finished the cycle mid-send), the next cycle starts on the interval timer.
 
 ### Prohibited
 
 - Starting a new polling cycle before all ERDs have responded.
-- Starting a new polling cycle before the polling timer has expired (unless `restart_pending` is set).
+- Starting a new polling cycle before the polling timer has expired (unless the cycle is in phase `awaiting_restart`).
 - Using retry timers for individual ERD reads in steady-state polling.
 - Allowing failed reads to stall the cycle indefinitely.
 

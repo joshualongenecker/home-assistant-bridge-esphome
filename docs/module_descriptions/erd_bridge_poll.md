@@ -22,12 +22,12 @@ poll_state_top (parent — handles appliance loss globally)
   │    └─ read_failed: exclude from polling list (insert into erd_set) → next ERD or state_polling
   │
   ├─ state_polling (steady state)
-  │    ├─ entry: arm polling timer, set polling_list_complete, fire on_discovery_complete callback
-  │    ├─ polling_timer_expired: start cycle via send_cycle_reads() (budgeted)
-  │    │   or set restart_pending if cycle in progress
+  │    ├─ entry: arm polling timer (cycle idle), fire on_discovery_complete callback
+  │    ├─ polling_timer_expired: idle → start cycle via send_cycle_reads() (budgeted);
+  │    │   sending → resume sends; awaiting → awaiting_restart (restart on completion)
   │    ├─ read_completed: update cache, count completion, maybe restart cycle
   │    ├─ read_failed: count completion, maybe restart cycle
-  │    ├─ cycle resume (budget exceeded): resume sending reads via resume timer
+  │    ├─ sending phase (budget exceeded): the resume timer continues the budgeted sends
   │    ├─ appliance_lost (60 s timeout) → state_probe_list
   │    └─ 3 consecutive full-cycle failures → state_failed
   │
@@ -36,9 +36,9 @@ poll_state_top (parent — handles appliance loss globally)
        └─ No automatic recovery — bridge must be reinitialized
 ```
 
-The `polling_timer_armed` flag gates cycle restarts: when the polling timer is armed, a completed cycle waits for the timer to fire before starting the next cycle (respecting the configured interval). When the timer is not armed (e.g., cycle finishes faster than the interval), the next cycle starts immediately. This prevents overlapping cycles while allowing fast cycles to chain together without unnecessary delay.
+The cycle machine (`cycle_phase`) gates cycle restarts: a cycle completing in `awaiting` returns to `idle` — the interval timer is still armed, so the next cycle waits for it to fire (respecting the configured interval). This prevents overlapping cycles while allowing fast cycles to chain together without unnecessary delay.
 
-The `restart_pending` flag handles the case where the timer fires mid-cycle: the in-progress cycle is allowed to finish, then the next cycle starts immediately without waiting for another timer interval.
+The `awaiting_restart` phase handles the case where the interval timer fires mid-cycle: the in-progress cycle is allowed to finish, then the next cycle starts immediately without waiting for another timer interval.
 
 ## Dependencies
 
@@ -56,7 +56,7 @@ The `restart_pending` flag handles the case where the timer fires mid-cycle: the
 - **Fixed-capacity ERD set**: `erd_set` is an `erd_set_t` (sorted array, capacity 649 via `POLLING_LIST_MAX_SIZE`). No heap allocation.
 - **ERD cache for "publish on change"**: The shared `erd_cache_t` always caches the last published value per ERD and only publishes changed values to MQTT.
 - **Simultaneous polling — all reads at once**: Each polling cycle sends reads for all ERDs in the list simultaneously via `send_cycle_reads()`, which uses `send_poll_read_requests_bounded()` to stay within a time budget (`POLL_CYCLE_SEND_BUDGET_MS = 100` ms). Per-batch yield is `POLL_YIELD_MS = 50` ms. If the budget is exceeded, a resume timer (100 ms) continues sending. This prevents blocking the ESPHome main loop long enough to trigger the ESP32 task watchdog timer.
-- **Cycle restarts only when complete AND timer expired (or timer not armed)**: A new polling cycle (resetting `erd_index` to 0) starts only when **all** ERDs in the current cycle have either read successfully or failed **and** the polling timer (default 10 s) has expired. The `polling_timer_armed` flag gates this: if the cycle finishes before the timer fires, the next cycle starts immediately (timer is not armed). If the timer is armed, the cycle waits for it to fire. This prevents overlapping cycles from building up pressure in the shared GEA3 ERD client queue while allowing fast cycles to chain together without delay.
+- **Cycle restarts only when complete AND the interval timer expired**: A new polling cycle (resetting `erd_index` to 0) starts only when **all** ERDs in the current cycle have either read successfully or failed **and** the polling timer (default 10 s) has expired. The `cycle_phase` machine gates this: a cycle that finishes before the timer fires returns to `idle` and waits for it; a cycle still in flight when the timer fires enters `awaiting_restart`, and the next cycle starts immediately at completion. This prevents overlapping cycles from building up pressure in the shared GEA3 ERD client queue while allowing fast cycles to chain together without delay.
 - **No overlapping polling cycles**: Because reads are sent in budgeted batches and cycles don't restart until complete, the GEA3 ERD client's fixed-size request queue cannot overflow — preventing heap corruption that previously manifested as FreeRTOS `prvCheckTasksWaitingTermination` crashes.
 - **60-second appliance lost timer**: If no read completes within 60 seconds, the bridge transitions back to `state_probe_list` to rediscover the appliance.
 - **Failed probe ERDs are excluded**: ERDs that fail during the probe phase (not_supported or retries_exhausted) are inserted into `erd_set` as exclusions, preventing them from being lazily registered in the polling state.
@@ -71,8 +71,8 @@ Beyond the core polling state, the struct tracks:
 | Field | Type | Description |
 |-------|------|-------------|
 | `polling_failure_count` | `uint8_t` | Consecutive cycle failure counter. Incremented when any ERD in the cycle fails. Reset on a cycle with no failures. Transitions to `state_failed` when reaching 3. |
-| `cycle_has_failure` | `bool` | True if any ERD in the current polling cycle has failed. Reset at cycle start; checked on cycle completion to increment `polling_failure_count`. |
-| `cycle_sending_in_progress` | `bool` | True while a cycle's read requests are being sent in budgeted chunks. When set, the polling timer handler resumes sending instead of starting a new cycle. |
+| `cycle_has_failure` | `bool` | True if any ERD in the current polling cycle has failed. Cleared at cycle completion; checked there to increment `polling_failure_count`. |
+| `cycle_phase` | `poll_cycle_phase_t` | Steady-state cycle machine (`idle`, `sending`, `awaiting`, `awaiting_restart`); encodes which timer is armed and whether a cycle is in flight. See the spec's §5.2. |
 | `on_discovery_complete` | `void (*)(void*)` | Callback invoked once when transitioning to `state_polling`. |
 | `on_discovery_complete_context` | `void*` | Context pointer for the discovery complete callback. |
 | `current_state` | `polling_state_t` | Current HSM state as an enum for external diagnostics. |

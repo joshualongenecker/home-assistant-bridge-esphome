@@ -35,8 +35,7 @@ void erd_bridge_poll_init(
     i_tiny_gea3_erd_client_t* erd_client,
     uint32_t polling_interval_ms,
     uint8_t host_address,
-    uint8_t appliance_type,
-    const tiny_erd_t* probe_list,
+    const probe_entry_t* probe_list,
     uint16_t probe_list_count,
     erd_cache_t* cache);
 ```
@@ -47,8 +46,7 @@ void erd_bridge_poll_init(
 | `erd_client` | GEA3 ERD client interface. |
 | `polling_interval_ms` | Interval between polling cycles (default 10000 ms). |
 | `host_address` | The appliance's GEA bus address. The bridge always receives a known host address from autodiscovery — broadcast discovery is the responsibility of `AutodiscoveryManager`. |
-| `appliance_type` | The appliance type byte from ERD 0x0008. Used for logging and health metrics. |
-| `probe_list` / `probe_list_count` | A pre-built array of ERDs to verify during the probe phase. Built by `erd_poll_list_builder` based on bridge mode and configuration. Each ERD is read once; successful reads are added to the polling list, failed reads are excluded. |
+| `probe_list` / `probe_list_count` | A pre-built array of probe entries (`erd` + `board_address`) to verify during the probe phase. Built by `erd_poll_list_builder` based on bridge mode and configuration. Each ERD is read once; successful reads are added to the polling list, failed reads are excluded. |
 | `cache` | Shared `erd_cache_t` for storing ERD values. |
 
 The probe list pointer must remain valid for the duration of the probe phase (typically the lifetime of the bridge instance). The caller is responsible for ensuring this — the bridge does not copy the probe list.
@@ -87,10 +85,10 @@ Probes each ERD in the pre-built probe list to verify support before adding to t
 
 **On entry:**
 - Sets `appliance_erd_list` to `probe_list` and `appliance_erd_list_count` to `probe_list_count`.
-- Sets `erd_index = (uint16_t)-1` (sentinel — `send_next_read_request` increments to 0 on first call).
+- Sets `erd_index = 0` (`send_next_read_request` post-increments it after queuing each read).
 - If re-entry (`polling_list_count > 0`): clears `erd_set` and `polling_list_count` via `clear_discovery_state()` (does NOT clear the ERD cache).
 - If `probe_list_count > 0`: sends the first read via `send_next_read_request`.
-- If `probe_list_count == 0`: sets `polling_list_complete = true` and transitions directly to `state_polling`.
+- If `probe_list_count == 0`: transitions directly to `state_polling`, which arms the polling timer with the cycle phase `idle`.
 
 **On `signal_read_completed`:**
 - Adds the ERD to the polling list via `add_erd_to_polling_list()` (deduped via `erd_set`).
@@ -120,8 +118,9 @@ poll_state_top (parent — handles appliance_lost globally)
   │    └─ read_failed: exclude from polling list → next ERD or state_polling
   │
   ├─ state_polling (steady state)
-  │    ├─ entry: arm polling timer, set polling_list_complete, fire callback
-  │    ├─ polling_timer_expired: start cycle (or set restart_pending)
+  │    ├─ entry: arm polling timer (cycle idle), fire callback
+  │    ├─ polling_timer_expired: idle → start cycle; sending → resume sends;
+  │    │   awaiting → awaiting_restart (restart when the cycle completes)
   │    ├─ read_completed: update cache, count completion, maybe restart cycle
   │    ├─ read_failed: track failure, count completion, maybe restart cycle;
   │    │               if 3 consecutive failed cycles → state_failed
@@ -171,9 +170,8 @@ If a probe read response arrives while `state_polling` is active (e.g., the appl
 ### 5.1 Entry
 
 On entering `state_polling`:
-- Resets `erd_index = 0`, `cycle_completed_count = 0`, `restart_pending = false`.
-- Arms the polling timer for `polling_interval_ms`.
-- Sets `polling_list_complete = true`.
+- Resets `erd_index = 0`, `cycle_completed_count = 0`.
+- Sets the cycle phase to `idle` and arms the polling timer for `polling_interval_ms`.
 - Sets `current_state = polling_state_polling`.
 - Calls `on_discovery_complete` callback if set.
 
@@ -181,25 +179,36 @@ On entering `state_polling`:
 
 A polling cycle consists of sending reads for all ERDs in `erd_polling_list` and waiting for all responses.
 
-**Cycle start:**
+**Cycle phases (`cycle_phase`):**
+
+The polling timer doubles as the cycle-start timer, the resume timer, and the in-flight wait timer; `cycle_phase` records which role it is playing:
+
+| Phase | Meaning | Timer expiry leads to |
+|-------|---------|----------------------|
+| `idle` | No cycle in flight; interval timer armed | Next cycle starts (`idle` → `sending`/`awaiting`) |
+| `sending` | Budgeted sends in progress; resume timer armed | Sending resumes (`sending` → `sending`/`awaiting`) |
+| `awaiting` | All reads queued; interval timer armed | Interval elapsed mid-cycle → `awaiting_restart` |
+| `awaiting_restart` | Interval elapsed while reads were in flight; no timer armed | — (the cycle completes, then restarts immediately) |
+
+**Cycle start** (from `idle`):
 - Triggered by `signal_polling_timer_expired`.
-- All reads are sent via `send_cycle_reads()`, which uses `send_poll_read_requests_bounded()` to stay within `POLL_CYCLE_SEND_BUDGET_MS` (500 ms). If the budget is exceeded, `cycle_sending_in_progress` is set and the function returns `false`; a resume timer (`POLL_CYCLE_RESUME_MS` = 100 ms) is armed to continue sending.
+- All reads are sent via `send_cycle_reads()`, which uses `send_poll_read_requests_bounded()` to stay within `POLL_CYCLE_SEND_BUDGET_MS` (100 ms). If the budget is exceeded, the phase stays `sending` and the function returns `false`; a resume timer (`POLL_CYCLE_RESUME_MS` = 100 ms) is armed to continue sending.
 - `cycle_start_ms` is set to `millis()`.
 
 **Cycle completion:**
 - `cycle_completed_count` increments on each `signal_read_completed` and `signal_read_failed`.
 - When `cycle_completed_count >= polling_list_count`, the cycle is complete.
 - `on_polling_cycle_complete()` tracks consecutive failures: if `cycle_has_failure` is true, `polling_failure_count` is incremented; otherwise it is reset to 0. `cycle_has_failure` is then cleared.
-- `on_polling_cycle_complete()` is called with `immediate = restart_pending || !polling_timer_armed`:
-  - If `immediate`: starts the next cycle immediately, arms the polling timer.
-  - If not `immediate` and `polling_timer_armed` is false: arms the polling timer (next cycle starts on timer expiry).
-  - If `polling_timer_armed` is still true: waits for the timer to fire.
+- The next phase depends on the phase the cycle completed in:
+  - From `awaiting`: returns to `idle` — the interval timer is still armed, so the next cycle waits for it to fire (respects the interval).
+  - From `awaiting_restart`: starts the next cycle immediately (the interval already elapsed mid-cycle).
+  - From `sending`: queue-full drops completed the cycle mid-send; returns to `idle` and arms the interval timer for the next cycle.
 
 **Timer mid-cycle:**
-- If the polling timer fires while reads are still in-flight (`erd_index >= polling_list_count` but `cycle_completed_count < polling_list_count`): sets `restart_pending = true` and lets the cycle finish. The cycle-completion handler then starts the next cycle immediately.
+- If the polling timer fires while reads are still in flight (phase `awaiting`): the phase becomes `awaiting_restart` and the cycle finishes naturally. The cycle-completion handler then starts the next cycle immediately.
 
 **Timer resume:**
-- If `cycle_sending_in_progress` is true when the timer fires: resumes sending reads via `send_cycle_reads()`. If all reads are sent, arms the polling timer; otherwise, arms the resume timer.
+- If the phase is `sending` when the (resume) timer fires: resumes sending reads via `send_cycle_reads()`. If all reads are sent, the phase becomes `awaiting` and the interval timer is armed; otherwise the phase stays `sending` and the resume timer is re-armed.
 
 ### 5.3 Read Completion
 
@@ -267,6 +276,7 @@ The ERD cache always publishes only on change. Unchanged polled values are silen
 ### 6.7 State Tracking
 
 - `current_state`: `polling_state_t` enum (`polling_state_none`, `polling_state_probing`, `polling_state_polling`, `polling_state_failed`). Updated on each state entry so callers can monitor bridge health without coupling to ESP logging headers.
+- `cycle_phase`: `poll_cycle_phase_t` enum (`idle`, `sending`, `awaiting`, `awaiting_restart`). Tracks the steady-state cycle machine; encodes which timer is armed. See §5.2.
 - `polling_failure_count`: consecutive cycle failure counter. Incremented when a cycle completes with `cycle_has_failure = true`; reset to 0 on a successful cycle. Triggers transition to `state_failed` when reaching 3.
 - `cycle_has_failure`: set to `true` when any ERD in the current cycle fails; reset at cycle completion in `on_polling_cycle_complete()`.
 
@@ -277,7 +287,7 @@ The ERD cache always publishes only on change. Unchanged polled values are silen
 | Constant | Value | Description |
 |----------|-------|-------------|
 | `POLL_YIELD_MS` | 50 ms | Per-batch time budget in `send_poll_read_requests_bounded()`. |
-| `POLL_CYCLE_SEND_BUDGET_MS` | 500 ms | Maximum time for `send_cycle_reads()` before yielding. |
+| `POLL_CYCLE_SEND_BUDGET_MS` | 100 ms | Maximum time for `send_cycle_reads()` before yielding. |
 | `POLL_CYCLE_RESUME_MS` | 100 ms | Timer interval when send budget is exceeded. |
 | `appliance_lost_timeout` | 60000 ms | Time without successful reads before triggering appliance loss. |
 | `POLLING_LIST_MAX_SIZE` | (from `erd_lists.h`) | Hard cap on polling list capacity. |
@@ -286,7 +296,7 @@ The ERD cache always publishes only on change. Unchanged polled values are silen
 
 ## 8. Invariants
 
-1. **No overlapping cycles:** A new cycle does not start until the previous one has completed (all ERDs have responded) and the timer has expired (or `restart_pending` is set).
+1. **No overlapping cycles:** A new cycle does not start until the previous one has completed (all ERDs have responded) and the interval timer has expired — or fired mid-cycle, which puts the machine in `awaiting_restart` so the next cycle starts as soon as the in-flight one completes.
 2. **One read at a time during probe:** The next probe read is issued only after the previous one has a definitive response.
 3. **No polling list growth on re-entry:** `erd_set` and `polling_list_count` are cleared on re-entry to `state_probe_list` after appliance loss, preventing duplicate ERD additions.
 4. **Failed probe ERDs are excluded:** In `state_probe_list`, failed ERDs are inserted into `erd_set` as exclusions, preventing them from being lazily registered in `state_polling`.

@@ -30,9 +30,11 @@ static void poll_default_yield(void)
   esphome::delay(0);
 }
 
+/* Arm the polling timer for `ticks`.  Whether a timer is armed is encoded by
+ * the cycle phase (idle/awaiting ⟹ interval timer, sending ⟹ resume timer),
+ * not tracked separately here. */
 static void arm_polling_timer(erd_bridge_poll_t* self, tiny_timer_ticks_t ticks)
 {
-  self->polling_timer_armed = true;
   tiny_timer_start(
     self->timer_group, &self->polling_timer, ticks, self, +[](void* context) {
       tiny_hsm_send_signal(&reinterpret_cast<erd_bridge_poll_t*>(context)->hsm, signal_polling_timer_expired, nullptr);
@@ -77,12 +79,49 @@ static void clear_discovery_state(erd_bridge_poll_t* self)
   self->polling_list_count = 0;
 }
 
-// 'immediate' controls how the next cycle is started:
-//   true  — start the next cycle right away (used when restart_pending is set
-//           or the timer has already expired).
-//   false — only arm the timer if it isn't already armed (used from
-//           send_next_poll_read_request, where restart_pending is never set).
-static void on_polling_cycle_complete(erd_bridge_poll_t* self, bool immediate)
+/* Cycle-phase transition helper.  The phase machine is intentionally not
+ * logged per transition: a steady-state cycle changes phase three times per
+ * interval, which floods debug builds.  The cycle machine is observable at
+ * startup through the "Entered steady-state polling" log and the
+ * current_state/cycle_phase fields. */
+static void set_cycle_phase(erd_bridge_poll_t* self, poll_cycle_phase_t phase)
+{
+  self->cycle_phase = phase;
+}
+
+/* Drive one round of budgeted cycle sends and arm the follow-up timer.
+ * Used to start a cycle (from idle) and to resume or restart one (from
+ * sending / awaiting_restart):
+ *   - all reads queued within budget → phase awaiting, interval timer armed
+ *   - budget exceeded → phase stays sending, resume timer armed
+ * If the drive itself completes the cycle (queue-full drops count the ERD as
+ * completed), the completion handler has already resolved the phase; the
+ * interval timer is armed for the next cycle and the phase stays idle. */
+static void drive_cycle_sends(erd_bridge_poll_t* self)
+{
+  bool all_sent = send_cycle_reads(self);
+  if (self->cycle_phase == poll_cycle_phase_idle) {
+    arm_polling_timer(self, self->polling_interval_ms);
+    return;
+  }
+  if (all_sent) {
+    set_cycle_phase(self, poll_cycle_phase_awaiting);
+    arm_polling_timer(self, self->polling_interval_ms);
+  } else {
+    arm_polling_timer(self, POLL_CYCLE_RESUME_MS);
+  }
+}
+
+/* Cycle completion: record health/failure bookkeeping, then resolve the next
+ * phase from the phase the cycle completed in:
+ *   awaiting          — the interval timer is still armed; return to idle and
+ *                       let it start the next cycle (respects the interval).
+ *   awaiting_restart  — the interval elapsed mid-cycle; start the next cycle
+ *                       immediately.
+ *   sending           — queue-full drops completed the cycle mid-send; return
+ *                       to idle (the drive tail arms the interval timer).
+ * Phase idle is unreachable here: a cycle completes only while in flight. */
+static void on_polling_cycle_complete(erd_bridge_poll_t* self)
 {
   uint32_t now = self->get_time_ms();
   self->last_cycle_time_ms = (uint32_t)(now - self->cycle_start_ms);
@@ -95,20 +134,22 @@ static void on_polling_cycle_complete(erd_bridge_poll_t* self, bool immediate)
   }
   self->cycle_has_failure = false;
 
-  if (immediate) {
-    self->restart_pending = false;
-    self->erd_index = 0;
-    self->cycle_completed_count = 0;
-    self->cycle_start_ms = now;
-    if (send_cycle_reads(self)) {
-      arm_polling_timer(self, self->polling_interval_ms);
-    } else {
-      arm_polling_timer(self, POLL_CYCLE_RESUME_MS);
-    }
-  } else if (!self->polling_timer_armed) {
-    arm_polling_timer(self, self->polling_interval_ms);
+  switch (self->cycle_phase) {
+    case poll_cycle_phase_awaiting:
+      set_cycle_phase(self, poll_cycle_phase_idle);
+      break;
+    case poll_cycle_phase_awaiting_restart:
+      self->erd_index = 0;
+      self->cycle_completed_count = 0;
+      self->cycle_start_ms = now;
+      drive_cycle_sends(self);
+      break;
+    case poll_cycle_phase_sending:
+      set_cycle_phase(self, poll_cycle_phase_idle);
+      break;
+    case poll_cycle_phase_idle:
+      break;
   }
-  // else: timer still armed — wait for it to fire and restart.
 }
 
 /* Send the next discovery-phase read request.  This operates on
@@ -149,7 +190,7 @@ static void send_next_poll_read_request(erd_bridge_poll_t* self)
        * next cycle. */
       self->cycle_completed_count++;
       if (self->cycle_completed_count >= self->polling_list_count) {
-        on_polling_cycle_complete(self, false);
+        on_polling_cycle_complete(self);
       }
     }
     if (elapsed >= 500) {
@@ -191,25 +232,36 @@ static void send_poll_read_requests_bounded(erd_bridge_poll_t* self, uint32_t bu
   }
 }
 
-/* Send cycle read requests within a time budget.  Does NOT arm any timer —
- * the caller is responsible for arming the next timer based on the return
- * value.  This prevents a single blocking call from holding the main loop
- * long enough to trigger the ESP32 task watchdog timer.
+/* Send cycle read requests within a time budget.  Arms no timer itself —
+ * drive_cycle_sends() arms the follow-up timer from the return value.  This
+ * prevents a single blocking call from holding the main loop long enough to
+ * trigger the ESP32 task watchdog timer.
+ *
+ * Phase: entry marks the cycle `sending`; when the loop exits with all reads
+ * queued and the cycle still in flight, the phase becomes `awaiting`.  If the
+ * drive itself completed the cycle (queue-full drops), the completion handler
+ * already resolved the phase and this tail re-asserts idle.
  *
  * Returns true if all reads were sent within budget, false if the budget
  * was exceeded and a resume timer should be armed. */
 static bool send_cycle_reads(erd_bridge_poll_t* self)
 {
+  set_cycle_phase(self, poll_cycle_phase_sending);
   uint32_t send_start = self->get_time_ms();
   while (self->erd_index < self->polling_list_count) {
     send_poll_read_requests_bounded(self, POLL_YIELD_MS);
     self->yield_fn();
     if ((self->get_time_ms() - send_start) >= POLL_CYCLE_SEND_BUDGET_MS) {
-      self->cycle_sending_in_progress = true;
       return false;
     }
   }
-  self->cycle_sending_in_progress = false;
+  if (self->cycle_completed_count >= self->polling_list_count) {
+    /* The drive completed the cycle (queue-full drops, or an empty polling
+     * list); the cycle is over — wait for the interval timer. */
+    set_cycle_phase(self, poll_cycle_phase_idle);
+  } else {
+    set_cycle_phase(self, poll_cycle_phase_awaiting);
+  }
   uint32_t elapsed = self->get_time_ms() - send_start;
   if (elapsed >= 1000) {
     ESP_LOGW(TAG, "Long cycle send: %lums for %u ERDs", (unsigned long)elapsed, self->polling_list_count);
@@ -309,7 +361,6 @@ static tiny_hsm_result_t state_probe_list(tiny_hsm_t* hsm, tiny_hsm_signal_t sig
     if (self->probe_list_count > 0) {
       send_next_read_request(self);
     } else {
-      self->polling_list_complete = true;
       tiny_hsm_transition(hsm, state_polling);
     }
     return tiny_hsm_result_signal_consumed;
@@ -342,9 +393,8 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
     case tiny_hsm_signal_entry:
       self->erd_index = 0;
       self->cycle_completed_count = 0;
-      self->restart_pending = false;
+      set_cycle_phase(self, poll_cycle_phase_idle);
       arm_polling_timer(self, self->polling_interval_ms);
-      self->polling_list_complete = true;
       self->current_state = polling_state_polling;
       ESP_LOGI(TAG, "Entered steady-state polling: %u ERDs, interval %lu ms",
                self->polling_list_count, (unsigned long)self->polling_interval_ms);
@@ -364,36 +414,29 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       }
       break;
     case signal_polling_timer_expired: {
-      self->polling_timer_armed = false;
-      if (self->erd_index >= self->polling_list_count && self->cycle_completed_count < self->polling_list_count) {
-        // Reads are in flight (erd_index reached the end of the list) but
-        // not all responses have arrived yet.  Per Phase 3 spec, let the
-        // current cycle finish naturally before restarting.  If erd_index
-        // Mark restart as pending so the cycle-completion handler kicks off
-        // the next cycle as soon as the last ERD responds.
-        self->restart_pending = true;
-        break;
-      }
-      bool all_sent;
-      if (self->cycle_sending_in_progress) {
-        all_sent = send_cycle_reads(self);
-        if (all_sent) {
-          arm_polling_timer(self, self->polling_interval_ms);
-        } else {
-          arm_polling_timer(self, POLL_CYCLE_RESUME_MS);
-        }
-      } else {
-        // Cycle was already complete when the timer fired — start next cycle.
-        self->erd_index = 0;
-        self->cycle_completed_count = 0;
-        uint32_t now = self->get_time_ms();
-        self->cycle_start_ms = now;
-        all_sent = send_cycle_reads(self);
-        if (all_sent) {
-          arm_polling_timer(self, self->polling_interval_ms);
-        } else {
-          arm_polling_timer(self, POLL_CYCLE_RESUME_MS);
-        }
+      // The polling timer doubles as the cycle-start timer (idle), the resume
+      // timer (sending), and the in-flight wait timer (awaiting) — the phase
+      // says which role it is playing here.
+      switch (self->cycle_phase) {
+        case poll_cycle_phase_idle:
+          // Interval elapsed with no cycle in flight — start the next cycle.
+          self->erd_index = 0;
+          self->cycle_completed_count = 0;
+          self->cycle_start_ms = self->get_time_ms();
+          drive_cycle_sends(self);
+          break;
+        case poll_cycle_phase_sending:
+          // Resume timer fired — continue sending where the last pass stopped.
+          drive_cycle_sends(self);
+          break;
+        case poll_cycle_phase_awaiting:
+          // Interval elapsed mid-cycle: let the in-flight cycle finish, then
+          // restart immediately (the completion handler drives it).
+          set_cycle_phase(self, poll_cycle_phase_awaiting_restart);
+          break;
+        case poll_cycle_phase_awaiting_restart:
+          // Unreachable: no timer is armed in this phase.
+          break;
       }
       break;
     }
@@ -416,7 +459,7 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       erd_cache_update(self->erd_cache, erd, addr, erd_data, data_size);
       self->cycle_completed_count++;
       if (self->cycle_completed_count >= self->polling_list_count) {
-        on_polling_cycle_complete(self, self->restart_pending || !self->polling_timer_armed);
+        on_polling_cycle_complete(self);
       }
       break;
     }
@@ -426,7 +469,7 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       self->cycle_has_failure = true;
       self->cycle_completed_count++;
       if (self->cycle_completed_count >= self->polling_list_count) {
-        on_polling_cycle_complete(self, self->restart_pending || !self->polling_timer_armed);
+        on_polling_cycle_complete(self);
         if (self->polling_failure_count >= 3) {
           ESP_LOGE(TAG, "Polling bridge failed after %u consecutive failed cycles",
                    self->polling_failure_count);
@@ -510,11 +553,8 @@ static void erd_bridge_poll_init_impl(
   self->probe_list             = probe_list;
   self->probe_list_count       = probe_list_count;
   self->polling_list_count     = 0;
-  self->restart_pending             = false;
-  self->cycle_sending_in_progress   = false;
-  self->polling_timer_armed         = false;
+  self->cycle_phase               = poll_cycle_phase_idle;
   self->current_state             = polling_state_none;
-  self->polling_list_complete       = false;
   self->cycle_start_ms              = 0;
   self->last_cycle_time_ms          = 0;
   self->cycle_count                 = 0;
@@ -610,4 +650,5 @@ void erd_bridge_poll_destroy(erd_bridge_poll_t* self)
   /* erd_set and erd_polling_list are fixed arrays embedded in the struct —
    * no heap cleanup needed. */
   self->current_state = polling_state_none;
+  self->cycle_phase = poll_cycle_phase_idle;
 }
