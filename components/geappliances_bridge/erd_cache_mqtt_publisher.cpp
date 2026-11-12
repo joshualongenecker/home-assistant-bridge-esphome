@@ -275,9 +275,11 @@ void erd_cache_mqtt_publisher_signal_work(erd_cache_mqtt_publisher_t* self)
    * paced yet", so the first wake is never suppressed: without that clause a
    * backlog forming inside the first PUBLISH_PACE_INTERVAL_MS of uptime would be
    * held back before the task has ever run.  Stamping a literal 0 would re-arm that
-   * bypass.  It can only happen during the first millisecond of uptime, and every
-   * loop iteration inside that millisecond then wakes the task unpaced - a handful
-   * of extra wakes, once per boot, before the task has anything to publish.
+   * bypass: get_time_ms() reads 0 during the first millisecond of uptime and again
+   * at every 2^32 ms (~49.7 day) wrap, so the bypass can come back long after boot.
+   * Every loop iteration sharing such a millisecond then wakes the task unpaced - a
+   * handful of extra wakes per boot and per wrap, closed again by the next paced
+   * wake, which stores a non-zero stamp.
    *
    * The elapsed test is UNSIGNED deliberately.  The publish task takes the work
    * semaphore with portMAX_DELAY, so a window that still reads as open against an
