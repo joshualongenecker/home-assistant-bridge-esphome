@@ -202,15 +202,15 @@ At DEBUG the bridge prints one line per subsystem instead of one line per ERD. `
 [D][geappliances_bridge]:   Custom ERDs: 65 configured (primary 65)
 [D][geappliances_bridge]:   Subscription: 151 ERDs (host board 0xC0)
 [D][geappliances_bridge]:   Feature bits: 106 valid, 7 skipped (unsupported or unreadable)
-[D][ha_discovery_manager]:  Discovery: 151 ERDs to publish
+[D][ha_discovery]:   Discovery: 151 ERDs to publish
 ```
 
 | Line | What it answers |
 |------|-----------------|
 | `Custom ERDs:` | How many ERDs the YAML declares, split by board. `primary` is the primary board; a physical board address is always `0x00`–`0xFE`. |
 | `Subscription:` | How many distinct ERDs the subscription bridge has seen publish **and pass the valid-ERD filter** since the host came online, and the host board it subscribes from. It is not a per-ERD subscribe list and it is not a bus tap: publications the filter rejects are dropped before they are counted (`erd_bridge_subscribe.cpp:31-37`), and the filter is only active when `appliance_api_parsing` is on and feature-bit parsing completed with a non-empty set — otherwise every ERD passes. So this number can legitimately sit below `Discovery:`, or below what you can see on the bus, without anything being wrong. |
-| `Polled ERDs:` | Present only when it adds something: the per-board split of what the polling bridge actually polls (multi-board appliances), or, when nothing is polled, why — `no custom ERDs configured`, `custom ERDs all arrive by subscription`, or `N custom ERDs uncovered, no polling bridge`. The polled count itself is logged at INFO by the bridge as `Entered steady-state polling: N ERDs`. |
-| `Feature bits:` | ERDs the feature API declared valid, and how many were skipped **while being read**. `unsupported or unreadable` is deliberate: a read that timed out counts the same as a feature the appliance lacks, so the number is not a list of missing features. A feature ERD that read successfully but parsed to nothing (too short, or all-zero type/version/bitmap) counts as neither, so the two numbers do not sum to the feature-list size. |
+| `Polled ERDs:` | Present only when it adds something: the per-board split of what the polling bridge actually polls (multi-board appliances), or, when nothing is polled, why — `no custom ERDs configured`, `custom ERDs all arrive by subscription`, or `N custom ERDs uncovered, no polling bridge`. Boards here are the physical addresses the poller saw, so the primary board shows as its address (`0xC0`) rather than as `primary` the way the `Custom ERDs:` line renders it. The polled count itself is logged at INFO by the bridge as `Entered steady-state polling: N ERDs`. |
+| `Feature bits:` | ERDs the feature API declared valid, and how many were skipped **while being read**. `unsupported or unreadable` is deliberate: a read that timed out counts the same as a feature the appliance lacks, so the number is not a list of missing features. A feature ERD that read successfully but parsed to nothing (too short, or all-zero type/version/bitmap) adds no ERDs of its own and is not counted as skipped — it is still in the valid set, because all 11 feature ERDs are mandatory — so these two numbers are not two halves of the feature list. |
 | `Discovery:` | One line per discovery run, not per boot — a normal boot whose stored discovery record is unchanged runs no discovery and prints nothing. |
 
 The per-entry detail these lines replaced is still logged at VERBOSE, which compiles out below that level, so a device built with `logger: level: VERBOSE` still shows every ERD as it is cached or skipped.

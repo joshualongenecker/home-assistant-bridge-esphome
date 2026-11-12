@@ -192,7 +192,7 @@ Renders the `Polled ERDs:` line into `out`; returns characters stored, or 0 with
 
 | Condition | Output |
 |-----------|--------|
-| Polling bridge running, polled set spans two or more boards | `Polled ERDs: 53 (primary 43, 0xC0 10)` |
+| Polling bridge running, polled set spans two or more boards | `Polled ERDs: 53 (0xC0 43, 0xC1 10)` — `erd_polling_addresses[]` holds the physical source address the client reported for each read, so the primary board shows as its own address here. The `primary` label appears only where the tally is fed *configured* addresses, which use `0xFF` (`PROBE_ENTRY_DEFAULT_ADDRESS`) as the primary-board sentinel — as the `Custom ERDs:` line does; it can never reach this line |
 | Polling bridge running, single board, or list not filled yet | empty — the bridge logs `Entered steady-state polling: N ERDs` at INFO on the same transition, from the same count |
 | No polling bridge, no custom ERDs configured | `Polled ERDs: none - no custom ERDs configured` |
 | No polling bridge, every custom ERD covered by the subscription | `Polled ERDs: none - custom ERDs all arrive by subscription` |
