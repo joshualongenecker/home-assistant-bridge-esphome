@@ -53,6 +53,11 @@ void FeatureBitManager::init(i_tiny_gea3_erd_client_t* erd_client,
   this->parse_common_done_ = false;
   this->valid_list_ready_ = false;
   this->valid_erds_count_ = 0;
+  /* Both counts describe this run's feature-bit read.  The members are
+   * default-initialised at construction, but init() is where valid_erds_count_ is
+   * reset, so the skip count has to be reset alongside it: a second init() would
+   * otherwise report a cumulative skip count next to a per-run valid count. */
+  this->skipped_erds_count_ = 0;
 
   this->erd_data_ = FeatureBitErdData{};
 
@@ -259,8 +264,9 @@ void FeatureBitManager::skip_to_next_erd_(tiny_erd_t failed_erd)
   this->read_queued_ = false;
   this->skipped_erds_count_++;
 
-  /* VERBOSE: an unsupported feature ERD is the normal case (10-25 of them per
-   * boot), and the count is reported once by the completion summary. */
+  /* VERBOSE: an unsupported feature ERD is the normal case - up to
+   * FEATURE_ERD_COUNT of them per boot, one per entry in the feature list - and
+   * the count is reported once by the completion summary. */
   ESP_LOGV(TAG, "Feature bit ERD 0x%04X failed or not supported, skipping", failed_erd);
 
   /* ERD 0x0092 (common feature API) is the foundation for all feature

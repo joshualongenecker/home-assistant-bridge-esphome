@@ -789,6 +789,11 @@ bool GeappliancesBridge::check_steady_state()
         } else {
           ESP_LOGD(TAG, "  Polled ERDs: %u", this->erd_bridge_poll_.polling_list_count);
         }
+      } else if (this->custom_erds_count_ == 0) {
+        /* Nothing was ever polled and nothing needed covering.  Attributing this
+         * to subscription coverage would invent a reason: an appliance whose ERDs
+         * all arrive by subscription has no custom list to cover. */
+        ESP_LOGD(TAG, "  Polled ERDs: none - no custom ERDs configured");
       } else {
         ESP_LOGD(TAG, "  Polled ERDs: none - custom ERDs all arrive by subscription");
       }

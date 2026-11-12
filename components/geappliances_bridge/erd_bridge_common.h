@@ -209,8 +209,10 @@ static inline void board_tally_add(board_tally_t* self, uint8_t address)
  *
  * Never writes past out_len and always NUL-terminates. A buffer shorter than
  * BOARD_TALLY_BUF_SIZE truncates wherever snprintf reached, so callers pass
- * BOARD_TALLY_BUF_SIZE to get the whole line. A non-empty tally never renders
- * as "none" - that would read as "no boards" on a multi-board appliance.
+ * BOARD_TALLY_BUF_SIZE to get the whole line; with out_len == 1 a non-empty
+ * tally has nowhere to write and the result is the empty string. A non-empty
+ * tally never renders as "none" - that would read as "no boards" on a
+ * multi-board appliance.
  * Returns the number of characters stored, excluding the terminator.
  */
 static inline int board_tally_format(const board_tally_t* self, char* out, size_t out_len)
@@ -218,6 +220,11 @@ static inline int board_tally_format(const board_tally_t* self, char* out, size_
   if (out_len == 0) {
     return 0;
   }
+  /* Every write below needs room for a character plus the terminator, so arm the
+   * terminator up front.  Without it, a one-byte buffer and a non-empty tally
+   * would return 0 having written nothing, leaving the caller's buffer
+   * unterminated - the one case the loop cannot reach. */
+  out[0] = '\0';
   if (self->count[0] == 0 && self->untracked == 0) {
     return snprintf(out, out_len, "none");
   }

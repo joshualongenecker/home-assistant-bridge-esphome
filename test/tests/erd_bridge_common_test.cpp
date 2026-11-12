@@ -17,7 +17,7 @@
 
 TEST_GROUP(BoardTally) {
   board_tally_t tally;
-  char buf[64];
+  char buf[BOARD_TALLY_BUF_SIZE];
 
   void setup() override {
     board_tally_init(&tally);
@@ -114,4 +114,56 @@ TEST(BoardTally, formatting_never_writes_past_the_supplied_buffer) {
   // What it does write is a prefix of the full line, never a partial token
   // followed by junk.
   STRNCMP_EQUAL("primary 1, 0xC0 1, 0xC1 1", small, 11);
+}
+
+TEST(BoardTally, a_zero_length_buffer_writes_nothing) {
+  board_tally_add(&tally, PROBE_ENTRY_DEFAULT_ADDRESS);
+  LONGS_EQUAL(0, board_tally_format(&tally, buf, 0));
+  CHECK(buf[0] == (char) 0xAA);  // untouched
+}
+
+/* The one case the format loop cannot reach: it needs room for a character plus a
+ * terminator, so a one-byte buffer must still come back terminated. */
+TEST(BoardTally, a_one_byte_buffer_is_terminated_and_empty) {
+  board_tally_add(&tally, PROBE_ENTRY_DEFAULT_ADDRESS);
+  char one[1];
+  memset(one, 0xAA, sizeof(one));
+  LONGS_EQUAL(0, board_tally_format(&tally, one, sizeof(one)));
+  CHECK(one[0] == '\0');
+}
+
+/* Widest rendering the type can produce: the primary sentinel at maximum count,
+ * three maximum-width physical boards, and the "+65535 more" tail.  This is the
+ * contract BOARD_TALLY_BUF_SIZE exists to hold - if the token format or
+ * BOARD_TALLY_MAX grows, boards silently drop out of the summary. */
+TEST(BoardTally, the_widest_possible_line_still_fits) {
+  tally.address[0] = PROBE_ENTRY_DEFAULT_ADDRESS;
+  tally.address[1] = 0xC0;
+  tally.address[2] = 0xC1;
+  tally.address[3] = 0xC2;
+  for (int i = 0; i < BOARD_TALLY_MAX; i++) {
+    tally.count[i] = 65535U;
+  }
+  tally.untracked = 65535U;
+
+  const int n = board_tally_format(&tally, buf, sizeof(buf));
+  STRCMP_EQUAL("primary 65535, 0xC0 65535, 0xC1 65535, 0xC2 65535, +65535 more", buf);
+  LONGS_EQUAL(62, n);
+  CHECK(n < (int) sizeof(buf));  // fits with room to spare, not truncated
+}
+
+/* The tail is written last, so it is what gets cut when the buffer is short. */
+TEST(BoardTally, the_untracked_tail_truncates_inside_the_buffer) {
+  board_tally_add(&tally, 0xC0);
+  board_tally_add(&tally, 0xC1);
+  board_tally_add(&tally, 0xC2);
+  board_tally_add(&tally, 0xC3);
+  board_tally_add(&tally, 0xC4);  // fifth board -> untracked
+
+  char small[32];
+  memset(small, 0xAA, sizeof(small));
+  const int n = board_tally_format(&tally, small, sizeof(small));
+  LONGS_EQUAL((long) sizeof(small) - 1, n);
+  CHECK(small[sizeof(small) - 1] == '\0');
+  STRNCMP_EQUAL("0xC0 1, 0xC1 1, 0xC2 1, 0xC3 1,", small, 30);
 }
