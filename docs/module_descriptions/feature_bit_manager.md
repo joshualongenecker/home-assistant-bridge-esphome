@@ -12,7 +12,7 @@ Reads and parses appliance API feature bit ERDs (0x0092 through 0x010D), buildin
 | `cleanup()` | Unsubscribe from events and stop timers. Safe to call multiple times. |
 | `start()` | Start the feature-bit reading sequence. Idempotent with `read_queued_` guard. |
 | `get_valid_erd_count()` | Returns the number of valid ERDs. |
-| `get_skipped_erd_count()` | Returns how many feature-list ERDs were skipped. Covers unsupported features, failed reads (the failure reason is not inspected), and out-of-order or empty reads — reported as `skipped (unsupported or unreadable)`. |
+| `get_skipped_erd_count()` | Returns how many feature-list ERDs were skipped **while being read**. Covers unsupported features, failed reads (the failure reason is not inspected), and out-of-order or empty reads — reported as `skipped (unsupported or unreadable)`. Parse-phase drops (data shorter than expected, or all-zero type/version/bitmap after a successful read) are not counted. |
 | `get_valid_erd(idx)` | Returns the valid ERD at the given index (0-based). |
 | `get_state()` | Returns the current `FeatureBitState` |
 ## State Machine
