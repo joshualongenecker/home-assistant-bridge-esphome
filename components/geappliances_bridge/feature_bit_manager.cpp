@@ -421,7 +421,13 @@ void FeatureBitManager::parse_next_step_()
   }
 
   this->valid_list_ready_ = true;
-  ESP_LOGI(TAG, "Feature bit parsing complete: %u valid ERDs, %u skipped as unsupported",
+  /* Not "skipped as unsupported": skip_to_next_erd_ is also reached from a read
+   * failure (the reason is never inspected, so a bus or queue timeout counts the
+   * same as an absent feature) and from an out-of-order or empty read.  Saying
+   * "unsupported" tells an operator the appliance lacks those features and to stop
+   * looking, which the counter does not support. */
+  ESP_LOGI(TAG, "Feature bit parsing complete: %u valid ERDs, %u skipped "
+                "(unsupported or unreadable)",
            this->valid_erds_count_, this->skipped_erds_count_);
 
   tiny_timer_stop(this->timer_group_, &this->parse_timer_);

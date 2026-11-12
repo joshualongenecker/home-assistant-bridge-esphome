@@ -768,49 +768,32 @@ bool GeappliancesBridge::check_steady_state()
                this->erd_bridge_subscribe_.erd_host_address);
     }
     {
+      polled_erds_state_t polled;
+      polled.polling_bridge_initialized = this->polling_bridge_initialized_;
+      polled.custom_erd_polling_started = this->custom_erd_polling_started_;
+      polled.polled_count = this->erd_bridge_poll_.polling_list_count;
+      polled.custom_erds_count = this->custom_erds_count_;
+      polled.unseen_custom_count = this->subscription_unseen_custom_erds_count_;
+
       board_tally_t poll_tally;
       board_tally_init(&poll_tally);
       for (uint16_t i = 0; i < this->subscription_unseen_custom_erds_count_; i++) {
         board_tally_add(&poll_tally, this->subscription_unseen_custom_erds_[i].board_address);
       }
-      char poll_boards[BOARD_TALLY_BUF_SIZE];
-      board_tally_format(&poll_tally, poll_boards, sizeof(poll_boards));
-      /* "Polled ERDs", deliberately not "Poll list" or "Polling bridge":
-       * bridge_init already logs "Poll list: <how it was built> (N ERDs)" for
-       * the list as built, and erd_bridge_poll logs "Polling bridge: N ERDs to
-       * verify" when it starts. This is what is *still* polled once probing has
-       * excluded unresponsive ERDs, so it is normally smaller than both - under
-       * either of those labels it reads as a contradiction (seen on
-       * gea-esphome-refer: 60 built, 60 to verify, 53 still polled). */
-      if (this->polling_bridge_initialized_) {
-        if (this->subscription_unseen_custom_erds_count_ > 0) {
-          ESP_LOGD(TAG, "  Polled ERDs: %u (custom: %s)",
-                   this->erd_bridge_poll_.polling_list_count, poll_boards);
-        } else {
-          ESP_LOGD(TAG, "  Polled ERDs: %u", this->erd_bridge_poll_.polling_list_count);
-        }
-      } else if (this->custom_erds_count_ == 0) {
-        /* Nothing was ever polled and nothing needed covering.  Attributing this
-         * to subscription coverage would invent a reason: an appliance whose ERDs
-         * all arrive by subscription has no custom list to cover. */
-        ESP_LOGD(TAG, "  Polled ERDs: none - no custom ERDs configured");
-      } else if (this->subscription_unseen_custom_erds_count_ == 0) {
-        /* Stated as the observable it is: every custom ERD is inside the
-         * subscription set, so none of them needs polling. */
-        ESP_LOGD(TAG, "  Polled ERDs: none - custom ERDs all arrive by subscription");
-      } else {
-        /* Custom ERDs exist, the subscription does not cover them, and nothing
-         * polls them.  handle_polling_failed() destroys the polling bridge and
-         * clears the flag after consecutive failed cycles (bridge_init logs the
-         * WARN for it), and if that happens before steady state is reached this
-         * is where it lands - so subscription coverage must not be offered as the
-         * reason here. */
-        ESP_LOGD(TAG, "  Polled ERDs: none - %u custom ERDs uncovered, no polling bridge",
-                 this->subscription_unseen_custom_erds_count_);
+
+      /* The wording, the stale-tally guard and the "the bridge already said it"
+       * suppression live in board_polled_summary_format (erd_bridge_common.h),
+       * where the unit tests can see them.  The label stays "Polled ERDs" rather
+       * than "Poll list:" or "Polling bridge:" because bridge_init logs the list as
+       * built and erd_bridge_poll logs the list handed to the bridge, and those
+       * counts differ from this one by design. */
+      char polled_line[BOARD_POLLED_SUMMARY_BUF_SIZE];
+      if (board_polled_summary_format(&polled, &poll_tally, polled_line, sizeof(polled_line)) > 0) {
+        ESP_LOGD(TAG, "  %s", polled_line);
       }
     }
     if (this->feature_bit_manager_.get_state() == FEATURE_BIT_STATE_COMPLETE) {
-      ESP_LOGD(TAG, "  Feature bits: %u valid, %u skipped as unsupported",
+      ESP_LOGD(TAG, "  Feature bits: %u valid, %u skipped (unsupported or unreadable)",
                this->feature_bit_manager_.get_valid_erd_count(),
                this->feature_bit_manager_.get_skipped_erd_count());
     }

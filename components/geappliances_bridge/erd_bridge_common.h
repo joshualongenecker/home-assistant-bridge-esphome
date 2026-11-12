@@ -266,3 +266,66 @@ static inline int board_tally_format(const board_tally_t* self, char* out, size_
   }
   return written;
 }
+
+/*!
+ * State the "Polled ERDs" summary line is derived from.  Plain values on purpose:
+ * the summary exists only inside a log call, and ESP_LOGx compiles to nothing in
+ * the unit build, so a branch that picks the wrong reason is invisible to the
+ * suite unless the rendered line itself is observable.
+ */
+typedef struct {
+  bool polling_bridge_initialized;
+  bool custom_erd_polling_started;
+  uint16_t polled_count;         /* polling_list_count while a bridge is running */
+  uint16_t custom_erds_count;
+  uint16_t unseen_custom_count;  /* custom ERDs the subscription set does not cover */
+} polled_erds_state_t;
+
+/* Prefix, a five-digit count, " (custom: ", a full tally, and the closer. */
+#define BOARD_POLLED_SUMMARY_BUF_SIZE (BOARD_TALLY_BUF_SIZE + 32)
+
+/*!
+ * Render the "Polled ERDs" line into out.  Returns the number of characters
+ * stored, or 0 with out[0] == '\0' when the line would add nothing.  tally may be
+ * NULL.  Two rules here are not obvious from the code:
+ *
+ * - With a polling bridge running and no per-board split to add, the line is
+ *   deliberately empty.  The polling bridge logs "Entered steady-state polling:
+ *   N ERDs" (erd_bridge_poll.cpp, state entry) from the same polling_list_count
+ *   field, on the very transition that makes the summary run, at INFO - so
+ *   repeating the number at DEBUG duplicates an existing line rather than adding
+ *   a third measurement.
+ * - The tally rides only when custom polling is what built the running bridge.
+ *   subscription_unseen_custom_erds_ describes the list start_custom_erd_polling_()
+ *   built; after handle_subscription_failed() rebuilds the bridge from the full
+ *   custom list, that array is a stale subset whose numbers no longer sum to the
+ *   count printed beside it.
+ */
+static inline int board_polled_summary_format(const polled_erds_state_t* st,
+                                              const board_tally_t* tally,
+                                              char* out, size_t out_len)
+{
+  if (out_len == 0) {
+    return 0;
+  }
+  out[0] = '\0';
+
+  if (st->polling_bridge_initialized) {
+    if (!st->custom_erd_polling_started || st->unseen_custom_count == 0 || tally == NULL) {
+      return 0;
+    }
+    char boards[BOARD_TALLY_BUF_SIZE];
+    board_tally_format(tally, boards, sizeof(boards));
+    return snprintf(out, out_len, "Polled ERDs: %u (custom: %s)",
+                    (unsigned) st->polled_count, boards);
+  }
+
+  if (st->custom_erds_count == 0) {
+    return snprintf(out, out_len, "Polled ERDs: none - no custom ERDs configured");
+  }
+  if (st->unseen_custom_count == 0) {
+    return snprintf(out, out_len, "Polled ERDs: none - custom ERDs all arrive by subscription");
+  }
+  return snprintf(out, out_len, "Polled ERDs: none - %u custom ERDs uncovered, no polling bridge",
+                  (unsigned) st->unseen_custom_count);
+}

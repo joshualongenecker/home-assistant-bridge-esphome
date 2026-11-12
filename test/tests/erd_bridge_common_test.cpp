@@ -167,3 +167,92 @@ TEST(BoardTally, the_untracked_tail_truncates_inside_the_buffer) {
   CHECK(small[sizeof(small) - 1] == '\0');
   STRNCMP_EQUAL("0xC0 1, 0xC1 1, 0xC2 1, 0xC3 1,", small, 30);
 }
+
+/* ---------- the "Polled ERDs" summary line ----------
+ * The line exists only inside an ESP_LOGD, which this harness compiles to
+ * nothing, so the wording and the two suppression rules are asserted on the
+ * rendered string. */
+
+static polled_erds_state_t s_state;  // storage so the helper can hand back a pointer
+
+static const polled_erds_state_t* make_state(bool polling_initialized,
+                                             bool custom_polling_started,
+                                             uint16_t polled_count, uint16_t custom_count,
+                                             uint16_t unseen_count) {
+  s_state.polling_bridge_initialized = polling_initialized;
+  s_state.custom_erd_polling_started = custom_polling_started;
+  s_state.polled_count = polled_count;
+  s_state.custom_erds_count = custom_count;
+  s_state.unseen_custom_count = unseen_count;
+  return &s_state;
+}
+
+TEST(BoardTally, summary_reports_the_per_board_split_while_custom_polling_runs) {
+  board_tally_add(&tally, PROBE_ENTRY_DEFAULT_ADDRESS);
+  board_tally_add(&tally, PROBE_ENTRY_DEFAULT_ADDRESS);
+  board_tally_add(&tally, 0xC0);
+  board_polled_summary_format(make_state(true, true, 53, 65, 3), &tally, buf, sizeof(buf));
+  STRCMP_EQUAL("Polled ERDs: 53 (custom: primary 2, 0xC0 1)", buf);
+}
+
+TEST(BoardTally, summary_stays_quiet_when_the_bridge_already_reported_the_count) {
+  // "Entered steady-state polling: N ERDs" logs the same polling_list_count at
+  // INFO on the same transition, so a DEBUG repeat adds nothing.
+  LONGS_EQUAL(0, board_polled_summary_format(
+                    make_state(true, false, 53, 65, 0), NULL, buf, sizeof(buf)));
+  STRCMP_EQUAL("", buf);
+}
+
+TEST(BoardTally, summary_stays_quiet_when_there_is_no_split_to_add) {
+  board_tally_add(&tally, 0xC0);
+  LONGS_EQUAL(0, board_polled_summary_format(
+                    make_state(true, true, 53, 65, 0), &tally, buf, sizeof(buf)));
+  STRCMP_EQUAL("", buf);
+}
+
+/* Regression: after handle_subscription_failed() rebuilds the polling bridge from
+ * the full custom list, subscription_unseen_custom_erds_ is a stale subset whose
+ * numbers no longer sum to the count. The tally must not ride beside it. */
+TEST(BoardTally, summary_never_attaches_a_stale_tally_after_a_subscription_failure) {
+  board_tally_add(&tally, PROBE_ENTRY_DEFAULT_ADDRESS);
+  board_tally_add(&tally, 0xC0);
+  LONGS_EQUAL(0, board_polled_summary_format(
+                    make_state(true, false, 151, 65, 2), &tally, buf, sizeof(buf)));
+  STRCMP_EQUAL("", buf);
+}
+
+TEST(BoardTally, summary_tolerates_a_missing_tally) {
+  LONGS_EQUAL(0, board_polled_summary_format(
+                    make_state(true, true, 53, 65, 3), NULL, buf, sizeof(buf)));
+  STRCMP_EQUAL("", buf);
+}
+
+TEST(BoardTally, summary_names_no_custom_erds_rather_than_a_subscription_reason) {
+  board_polled_summary_format(make_state(false, false, 0, 0, 0), NULL, buf, sizeof(buf));
+  STRCMP_EQUAL("Polled ERDs: none - no custom ERDs configured", buf);
+}
+
+TEST(BoardTally, summary_credits_subscription_only_when_it_covers_every_custom_erd) {
+  board_polled_summary_format(make_state(false, false, 0, 65, 0), NULL, buf, sizeof(buf));
+  STRCMP_EQUAL("Polled ERDs: none - custom ERDs all arrive by subscription", buf);
+}
+
+TEST(BoardTally, summary_counts_uncovered_erds_when_no_bridge_polls_them) {
+  board_polled_summary_format(make_state(false, false, 0, 65, 7), NULL, buf, sizeof(buf));
+  STRCMP_EQUAL("Polled ERDs: none - 7 custom ERDs uncovered, no polling bridge", buf);
+}
+
+TEST(BoardTally, summary_fits_its_declared_buffer) {
+  // Widest line: five-digit count plus a full-width tally.
+  for (int i = 0; i < BOARD_TALLY_MAX; i++) {
+    tally.address[i] = (i == 0) ? PROBE_ENTRY_DEFAULT_ADDRESS : (uint8_t) (0xC0 + i);
+    tally.count[i] = 65535U;
+  }
+  tally.untracked = 65535U;
+  char line[BOARD_POLLED_SUMMARY_BUF_SIZE];
+  const int n = board_polled_summary_format(
+      make_state(true, true, 65535, 65535, 65535), &tally, line, sizeof(line));
+  CHECK(n < (int) sizeof(line));  // not truncated
+  STRCMP_EQUAL("Polled ERDs: 65535 (custom: primary 65535, 0xC1 65535, 0xC2 65535, "
+               "0xC3 65535, +65535 more)", line);
+}
