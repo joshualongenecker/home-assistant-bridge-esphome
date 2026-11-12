@@ -274,8 +274,10 @@ void erd_cache_mqtt_publisher_signal_work(erd_cache_mqtt_publisher_t* self)
    * changes keep their latency.  A zero last_work_signal_ms means "nothing has been
    * paced yet", so the first wake is never suppressed: without that clause a
    * backlog forming inside the first PUBLISH_PACE_INTERVAL_MS of uptime would be
-   * held back before the task has ever run.  Stamping a literal 0 would re-arm the
-   * same bypass, costing at most one extra wake exactly once per boot.
+   * held back before the task has ever run.  Stamping a literal 0 would re-arm that
+   * bypass.  It can only happen during the first millisecond of uptime, and every
+   * loop iteration inside that millisecond then wakes the task unpaced - a handful
+   * of extra wakes, once per boot, before the task has anything to publish.
    *
    * The elapsed test is UNSIGNED deliberately.  The publish task takes the work
    * semaphore with portMAX_DELAY, so a window that still reads as open against an
