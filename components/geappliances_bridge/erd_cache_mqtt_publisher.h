@@ -37,6 +37,12 @@ typedef struct {
   const char* device_id;
   uint8_t primary_board_address;  /* board address that maps to the legacy (no-prefix) MQTT topic */
   uint16_t publish_index;
+  /* millis() until which publish attempts are suppressed after a dropped
+   * publish (the ESPHome MQTT backend's outbound queue is full).  Written by
+   * the publisher task in publish_one; cleared by on_connected so a fresh
+   * connection is not held back by a stale backoff.  Aligned uint32_t — the
+   * cross-context clear is a benign race, same treatment as publish_index. */
+  uint32_t retry_backoff_until_ms;
   bool mqtt_connected;
   bool paused;
   bool first_round_done;

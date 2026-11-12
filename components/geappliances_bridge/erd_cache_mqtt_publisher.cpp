@@ -18,6 +18,13 @@
 GEA_TAG(PUBLISHER_TAG) = "erd_cache_mqtt_publisher";
 #include "esp_task_wdt.h"
 
+/* After a publish is dropped (the ESPHome MQTT backend's 30-slot outbound
+ * queue is full), wait this long before the next attempt.  Retrying at
+ * main-loop rate against a full queue only churns the backend's drop counter
+ * and flaps the MQTT component warning flag; the cache holds the latest value
+ * per ERD, so the retry delivers whatever is current once the queue drains. */
+static const uint32_t PUBLISH_RETRY_BACKOFF_MS = 250;
+
 static void mqtt_publisher_task(void* arg)
 {
   erd_cache_mqtt_publisher_t* self = (erd_cache_mqtt_publisher_t*)arg;
@@ -263,6 +270,12 @@ bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self)
     return false;
   }
 
+  /* Backoff after a dropped publish (see PUBLISH_RETRY_BACKOFF_MS).  The
+   * signed diff is rollover-safe, and 0 (init or cleared) never blocks. */
+  if ((int32_t)(self->get_time_ms() - self->retry_backoff_until_ms) < 0) {
+    return false;
+  }
+
   /* Publish one entry. The snapshot atomically copies the payload out of the
    * arena under the cache lock, so the main loop cannot overwrite it during
    * the slow MQTT publish. The task loop checks mqtt_connected/paused before
@@ -302,10 +315,14 @@ bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self)
       if (sent) {
         erd_cache_mark_published(self->cache, entry);
         published_ok = true;
+        self->retry_backoff_until_ms = 0;
       } else {
         /* Publish dropped (queue full or not connected) - re-set
-         * update_required so the entry is picked up on the next wake. */
+         * update_required so the entry is picked up on the next wake, and
+         * hold off further attempts until the backend queue has had a chance
+         * to drain. */
         erd_cache_mark_unpublished(self->cache, entry);
+        self->retry_backoff_until_ms = t_publish + elapsed + PUBLISH_RETRY_BACKOFF_MS;
       }
     } else {
       ESP_LOGW(PUBLISHER_TAG, "MQTT topic format failed (device_id too long? %s)", self->device_id);
@@ -367,6 +384,9 @@ void erd_cache_mqtt_publisher_on_connected(erd_cache_mqtt_publisher_t* self)
     self->first_round_done = false;
     disconnect_start = self->disconnect_start_ms;
   }
+
+  /* A fresh connection gets an immediate attempt, not a stale backoff. */
+  self->retry_backoff_until_ms = 0;
 
   uint32_t now = self->get_time_ms ? self->get_time_ms() : 0;
   uint32_t duration = (disconnect_start != 0) ? (now - disconnect_start) : 0;
