@@ -4,6 +4,7 @@
 // All functions are template or `inline` so each translation unit gets its own
 // copy without ODR violations.
 
+#include <stdio.h>
 #include <string.h>
 #include <cstdint>
 
@@ -162,4 +163,99 @@ static inline const char* polling_state_name(polling_state_t state)
     case polling_state_failed: return "failed";
     default: return "unknown";
   }
+}
+
+// Board distribution of an ERD list, used by the one-line boot summaries.
+// Only the first BOARD_TALLY_MAX addresses are named; entries on any further
+// board are counted into `untracked` so the formatted line stays bounded on
+// multi-board appliances instead of growing with the board count.
+#define BOARD_TALLY_MAX 4
+
+typedef struct {
+  uint8_t address[BOARD_TALLY_MAX];
+  uint16_t count[BOARD_TALLY_MAX];
+  uint16_t untracked;
+} board_tally_t;
+
+static inline void board_tally_init(board_tally_t* self)
+{
+  memset(self, 0, sizeof(*self));
+}
+
+static inline void board_tally_add(board_tally_t* self, uint8_t address)
+{
+  for (uint8_t i = 0; i < BOARD_TALLY_MAX; i++) {
+    if (self->count[i] == 0) {
+      self->address[i] = address;
+      self->count[i] = 1;
+      return;
+    }
+    if (self->address[i] == address) {
+      self->count[i]++;
+      return;
+    }
+  }
+  self->untracked++;
+}
+
+// Longest possible tally line: BOARD_TALLY_MAX "0xNN 65535" tokens, their
+// separators, and the "+65535 more" tail.
+#define BOARD_TALLY_BUF_SIZE 64
+
+/*!
+ * Format as "primary 41, 0xC0 24" (PROBE_ENTRY_DEFAULT_ADDRESS is the primary
+ * board sentinel, so it reads as "primary", not "0xFF"). An empty tally is
+ * "none"; boards past BOARD_TALLY_MAX collapse into "+N more".
+ *
+ * Never writes past out_len and always NUL-terminates. A buffer shorter than
+ * BOARD_TALLY_BUF_SIZE truncates wherever snprintf reached, so callers pass
+ * BOARD_TALLY_BUF_SIZE to get the whole line. A non-empty tally never renders
+ * as "none" - that would read as "no boards" on a multi-board appliance.
+ * Returns the number of characters stored, excluding the terminator.
+ */
+static inline int board_tally_format(const board_tally_t* self, char* out, size_t out_len)
+{
+  if (out_len == 0) {
+    return 0;
+  }
+  if (self->count[0] == 0 && self->untracked == 0) {
+    return snprintf(out, out_len, "none");
+  }
+
+  int written = 0;
+  for (uint8_t i = 0; i < BOARD_TALLY_MAX && self->count[i] > 0; i++) {
+    const int room = (int) out_len - written;
+    if (room <= 1) {
+      break;
+    }
+    const char* label = (self->address[i] == PROBE_ENTRY_DEFAULT_ADDRESS)
+        ? "primary" : nullptr;
+    const int n = (label != nullptr)
+        ? snprintf(out + written, room, "%s%s %u",
+                   (written > 0) ? ", " : "", label, self->count[i])
+        : snprintf(out + written, room, "%s0x%02X %u",
+                   (written > 0) ? ", " : "", self->address[i], self->count[i]);
+    if (n < 0) {
+      break;
+    }
+    if (n >= room) {
+      return (int) out_len - 1;  // snprintf truncated and NUL-terminated within room
+    }
+    written += n;
+  }
+  if (self->untracked > 0) {
+    const int room = (int) out_len - written;
+    if (room > 1) {
+      const int n = snprintf(out + written, room, "%s+%u more",
+                             (written > 0) ? ", " : "", self->untracked);
+      if (n < 0) {
+        return written;
+      }
+      if (n >= room) {
+        return (int) out_len - 1;
+      }
+      written += n;
+    }
+  }
+  return written;
 }

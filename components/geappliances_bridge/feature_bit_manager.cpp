@@ -105,6 +105,11 @@ uint16_t FeatureBitManager::get_valid_erd_count() const
   return this->valid_erds_count_;
 }
 
+uint16_t FeatureBitManager::get_skipped_erd_count() const
+{
+  return this->skipped_erds_count_;
+}
+
 tiny_erd_t FeatureBitManager::get_valid_erd(uint16_t idx) const
 {
   if (idx >= this->valid_erds_count_) {
@@ -252,8 +257,11 @@ void FeatureBitManager::queue_retry_()
 void FeatureBitManager::skip_to_next_erd_(tiny_erd_t failed_erd)
 {
   this->read_queued_ = false;
+  this->skipped_erds_count_++;
 
-  ESP_LOGD(TAG, "Feature bit ERD 0x%04X failed or not supported, skipping", failed_erd);
+  /* VERBOSE: an unsupported feature ERD is the normal case (10-25 of them per
+   * boot), and the count is reported once by the completion summary. */
+  ESP_LOGV(TAG, "Feature bit ERD 0x%04X failed or not supported, skipping", failed_erd);
 
   /* ERD 0x0092 (common feature API) is the foundation for all feature
    * filtering. Without it, we have no way to know which ERDs are
@@ -407,7 +415,8 @@ void FeatureBitManager::parse_next_step_()
   }
 
   this->valid_list_ready_ = true;
-  ESP_LOGI(TAG, "Feature bit parsing complete: %u valid ERDs", this->valid_erds_count_);
+  ESP_LOGI(TAG, "Feature bit parsing complete: %u valid ERDs, %u skipped as unsupported",
+           this->valid_erds_count_, this->skipped_erds_count_);
 
   tiny_timer_stop(this->timer_group_, &this->parse_timer_);
   this->state_ = FEATURE_BIT_STATE_COMPLETE;

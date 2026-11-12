@@ -539,13 +539,25 @@ void GeappliancesBridge::dump_config() {
     }
   }
   if (this->custom_erds_count_ > 0) {
-    ESP_LOGCONFIG(TAG, "  Custom ERDs: %u configured", this->custom_erds_count_);
+    // One summary line, not one per ERD: this loop was the largest single
+    // block of the boot log (65-92 lines on real appliances), and the board
+    // distribution is the only part it says that matters. Per-ERD detail is
+    // kept at VERBOSE. The tally is computed into locals so the helpers run
+    // even when the log macros are stubbed out in tests.
+    board_tally_t tally;
+    board_tally_init(&tally);
+    for (uint16_t i = 0; i < this->custom_erds_count_; i++) {
+      board_tally_add(&tally, this->custom_erds_[i].board_address);
+    }
+    char boards[BOARD_TALLY_BUF_SIZE];
+    board_tally_format(&tally, boards, sizeof(boards));
+    ESP_LOGD(TAG, "  Custom ERDs: %u configured (%s)", this->custom_erds_count_, boards);
     for (uint16_t i = 0; i < this->custom_erds_count_; i++) {
       const custom_erd_entry_t &entry = this->custom_erds_[i];
       if (entry.board_address == PROBE_ENTRY_DEFAULT_ADDRESS) {
-        ESP_LOGCONFIG(TAG, "    ERD 0x%04X: primary board", entry.erd);
+        ESP_LOGV(TAG, "    ERD 0x%04X: primary board", entry.erd);
       } else {
-        ESP_LOGCONFIG(TAG, "    ERD 0x%04X: address 0x%02X", entry.erd, entry.board_address);
+        ESP_LOGV(TAG, "    ERD 0x%04X: address 0x%02X", entry.erd, entry.board_address);
       }
     }
   }
@@ -744,6 +756,42 @@ bool GeappliancesBridge::check_steady_state()
              erd_cache_get_arena_usage(&this->erd_cache_),
              ERD_CACHE_ARENA_SIZE,
              erd_cache_get_arena_usage_percent(&this->erd_cache_));
+
+    /* One line per section, at DEBUG. The per-entry detail that used to
+     * accompany this (per-ERD config dump, per-cache-add, per-skipped feature
+     * ERD) is at VERBOSE now: ~200 boot lines of it overflowed the 30-slot
+     * MQTT log queue on the busier appliances, which is what the "Dropped N
+     * messages" warning was reporting. */
+    if (this->subscription_bridge_initialized_) {
+      ESP_LOGD(TAG, "  Subscription: %u ERDs (host board 0x%02X)",
+               this->erd_bridge_subscribe_.erd_set.count,
+               this->erd_bridge_subscribe_.erd_host_address);
+    }
+    {
+      board_tally_t poll_tally;
+      board_tally_init(&poll_tally);
+      for (uint16_t i = 0; i < this->subscription_unseen_custom_erds_count_; i++) {
+        board_tally_add(&poll_tally, this->subscription_unseen_custom_erds_[i].board_address);
+      }
+      char poll_boards[BOARD_TALLY_BUF_SIZE];
+      board_tally_format(&poll_tally, poll_boards, sizeof(poll_boards));
+      if (this->polling_bridge_initialized_) {
+        if (this->subscription_unseen_custom_erds_count_ > 0) {
+          ESP_LOGD(TAG, "  Poll list: %u ERDs (custom: %s)",
+                   this->erd_bridge_poll_.polling_list_count, poll_boards);
+        } else {
+          ESP_LOGD(TAG, "  Poll list: %u ERDs", this->erd_bridge_poll_.polling_list_count);
+        }
+      } else {
+        ESP_LOGD(TAG, "  Poll list: none - custom ERDs all arrive by subscription");
+      }
+    }
+    if (this->feature_bit_manager_.get_state() == FEATURE_BIT_STATE_COMPLETE) {
+      ESP_LOGD(TAG, "  Feature bits: %u valid, %u skipped as unsupported",
+               this->feature_bit_manager_.get_valid_erd_count(),
+               this->feature_bit_manager_.get_skipped_erd_count());
+    }
+    ESP_LOGD(TAG, "  HA discovery: %u ERDs mapped", this->ha_discovery_manager_.sorted_erds_count);
 
     if (this->generate_device_config_) {
       this->discovery_lifecycle_manager_.check_discovery_changes(
