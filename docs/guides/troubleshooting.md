@@ -196,7 +196,7 @@ logger:
 
 ### Read the Boot Summary
 
-At DEBUG the bridge prints one line per subsystem when it first reaches steady state, instead of one line per ERD:
+At DEBUG the bridge prints one line per subsystem instead of one line per ERD. `Custom ERDs:` comes from `dump_config()` during setup; `Subscription:`, `Polled ERDs:` and `Feature bits:` come from the block that runs once, when the bridge first reaches steady state; `Discovery:` is printed per discovery run:
 
 ```text
 [D][geappliances_bridge]:   Custom ERDs: 65 configured (primary 65)
