@@ -169,6 +169,7 @@ typedef struct erd_cache_t {
   uint32_t update_count_window;       // updates since last get_update_rate() call
   uint32_t required_update_count;     // total updates setting update_required=true since init
   uint32_t required_update_count_window; // such updates since last get_required_update_rate() call
+  uint16_t dirty_count;               // valid entries currently carrying update_required
   uint8_t max_cooldown;              // configured rate limit in seconds; 0 = disabled
   bool initialized;                   // true after first successful erd_cache_init()
 } erd_cache_t;
@@ -183,6 +184,7 @@ typedef struct erd_cache_t {
 | `update_count_window` | `uint32_t` | Updates since last `get_update_rate()` call |
 | `required_update_count` | `uint32_t` | Total updates that set `update_required=true` since init |
 | `required_update_count_window` | `uint32_t` | Such updates since last `get_required_update_rate()` call |
+| `dirty_count` | `uint16_t` | Valid entries currently carrying `update_required = true` — the publish backlog. Maintained under the cache lock at every site that sets or clears the flag, counting transitions rather than assignments, so re-marking an already-dirty entry never double counts. Cleared by `erd_cache_reset()`. |
 | `max_cooldown` | `uint8_t` | Configured rate limit in seconds; 0 = disabled |
 | `initialized` | `bool` | Guard for safe init/destroy |
 
@@ -209,6 +211,7 @@ typedef struct erd_cache_t {
 |----------|-----------|-------------|
 | `erd_cache_snapshot_next_updated` | `bool erd_cache_snapshot_next_updated(erd_cache_t* self, uint16_t* iterator, erd_cache_entry_t** entry_out, tiny_erd_t* erd_out, uint8_t* addr_out, uint8_t* data_out, uint8_t* size_out)` | Atomically fetch the next entry with `update_required = true` AND copy its payload out of the arena in one lock hold; clears the flag. Caller provides an iterator (`uint16_t`) initialized to 0. Entries with an active `publish_cooldown` are skipped (rate-limited) when `max_cooldown > 0`. Returns `true` and fills the out-params when an entry was found; `false` otherwise (iterator reset to 0). |
 | `erd_cache_get_count` | `uint16_t erd_cache_get_count(erd_cache_t* self)` | Returns the number of valid entries currently in the cache. |
+| `erd_cache_get_dirty_count` | `uint16_t erd_cache_get_dirty_count(erd_cache_t* self)` | Returns the publish backlog: valid entries currently carrying `update_required = true`. Takes the cache lock briefly; safe from the main loop and from the esp-mqtt task. The MQTT publisher uses it to decide when a backlog justifies pacing its drain. |
 | `erd_cache_get_next_entry` | `erd_cache_entry_t* erd_cache_get_next_entry(erd_cache_t* self, uint16_t* iterator)` | Returns the next valid entry in the cache, iterating all entries. Does NOT require `update_required = true` and does NOT clear any flags — it is a read-only iteration. Resets iterator to 0 when exhausted. |
 | `erd_cache_mark_all_updated` | `void erd_cache_mark_all_updated(erd_cache_t* self)` | Marks all valid entries as `update_required = true`. Used after a long MQTT disconnect to force a full drain of retained values to the broker. |
 
@@ -252,6 +255,8 @@ The window is determined by the call interval of the consumer (e.g., ~60 s if ca
 9. **Iterator reset on exhaustion:** Both `erd_cache_snapshot_next_updated()` and `erd_cache_get_next_entry()` reset the iterator to 0 when no more entries are found, allowing the caller to restart iteration.
 
 10. **Safe init/destroy:** `erd_cache_init()` and `erd_cache_destroy()` guard against non-initialized structs.
+
+11. **The backlog counter tracks transitions.** `dirty_count` is incremented only where `update_required` goes false→true and decremented only where it goes true→false, both inside the same lock hold as the flag write. That makes it exact under re-marking (`mark_all_updated` on reconnect, `mark_unpublished` after a dropped publish) without a recount pass, and it cannot underflow: the sole decrement runs only when the flag was true. Slot and arena exhaustion return before any mutation, so no uncounted dirty entry can exist.
 
 ---
 
