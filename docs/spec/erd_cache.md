@@ -36,7 +36,7 @@ Initializes the cache for use. Safe to call on a previously-initialized cache (r
 **Behavior:**
 1. Explicitly zeroes all entry fields (erd, data_offset, data_size, update_required, publish_cooldown, valid) — avoids UBSan issues with bool fields after `memset`
 2. Resets `arena_offset` to 0 (arena is not cleared, just the pointer)
-3. Resets all counters (`update_count`, `update_count_window`, `required_update_count`, `required_update_count_window`) to zero
+3. Resets all counters (`update_count`, `update_count_window`, `required_update_count`, `required_update_count_window`, `dirty_count`) to zero
 4. Sets `self->initialized = true`
 
 No heap deallocation is needed — the arena is static memory.

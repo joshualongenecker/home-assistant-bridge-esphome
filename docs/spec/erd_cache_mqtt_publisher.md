@@ -306,7 +306,7 @@ void erd_cache_mqtt_publisher_resume(erd_cache_mqtt_publisher_t* self);
 
 - Sets `paused = false`
 - **Thread-safe**: acquires `state_mutex` (100 ms timeout) before modifying state; falls back to unprotected write if mutex creation failed
-- After clearing `paused`, calls `erd_cache_mqtt_publisher_signal_work()` to wake the background task so it can immediately resume draining
+- After clearing `paused`, calls `erd_cache_mqtt_publisher_signal_work()` so the background task can resume draining. That call is gated: while more than `PUBLISH_PACE_BACKLOG_THRESHOLD` entries are dirty the wake can be deferred by up to `PUBLISH_PACE_INTERVAL_MS` (see §2.5), so `resume()` does not guarantee a give — the main loop calls `signal_work()` again on its next iteration
 - Does **not** reset `first_round_done` — the flag is set by the publish loop itself when a full round completes
 
 ### 11.3 First Round Done
@@ -327,7 +327,7 @@ bool erd_cache_mqtt_publisher_first_round_done(erd_cache_mqtt_publisher_t* self)
 **Background task (`mqtt_publisher_task`):**
 - On each wake (from `work_semaphore` signal), the task acquires `state_mutex` and reads `mqtt_connected`, `paused`, and dependency pointers
 - If `paused` is `true`, the task skips publishing and returns to waiting on `work_semaphore` — no cache entries are published
-- When `resume()` is called, it clears `paused` and signals `work_semaphore`, waking the task to resume immediately
+- When `resume()` is called, it clears `paused` and calls `signal_work()`, which normally wakes the task immediately; while a large backlog is queued that wake can be deferred by up to `PUBLISH_PACE_INTERVAL_MS` (§2.5). The deferral is bounded by one interval plus one main-loop iteration, because the loop re-signals every pass
 - The task publishes one entry per wake; when the snapshot finds no entry and `first_round_done` is not yet set, it is set to `true`
 
 ### 11.5 Use Case: Pausing During HA Discovery

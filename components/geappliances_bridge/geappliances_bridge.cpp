@@ -338,8 +338,9 @@ void GeappliancesBridge::update_publisher_state_()
   }
 
   /* Check steady state BEFORE signaling work — the background task sets
-   * first_round_done during its drain, and we want to read it before
-   * the next signal_work() wakes it again. */
+   * first_round_done during its drain, and we want to read it before this
+   * iteration's signal_work() can wake it again.  Pacing may defer that wake;
+   * it can never advance it past this read. */
   if (this->discovery_just_resumed_ &&
       erd_cache_mqtt_publisher_first_round_done(&this->erd_cache_publisher_)) {
     ESP_LOGI(TAG, "Device is in steady state");
