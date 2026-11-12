@@ -51,8 +51,9 @@ Resets the cache. Guards against being called on a never-initialized struct (che
 
 **Behavior:**
 1. If `!self->initialized`, returns immediately
-2. Calls `erd_cache_init(self)` to reset all entries and arena pointer
-3. Sets `self->initialized = false`
+2. Deletes the mutex and sets `self->lock = NULL`
+3. Calls `erd_cache_reset()` to reset all entries, the arena pointer and the counters — outside any lock, because the mutex is already gone (this is the lifecycle reset carved out of the `dirty_count` note in §6.2)
+4. Sets `self->initialized = false`
 
 No heap deallocation is needed — the arena is static memory.
 

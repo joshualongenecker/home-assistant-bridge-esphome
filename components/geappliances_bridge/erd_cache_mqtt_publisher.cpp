@@ -46,8 +46,9 @@ static void mqtt_publisher_task(void* arg)
   }
 
   while (self->task_running) {
-    // Block until the main loop signals work. No timeout —
-    // the main loop controls pacing.
+    // Block until work is signalled. No timeout: signal_work() paces its own give
+    // while the backlog is large, and stop() gives the semaphore directly so the
+    // task always wakes to shut down.
     if (xSemaphoreTake(self->work_semaphore, portMAX_DELAY) != pdTRUE) {
       continue;
     }
