@@ -1249,6 +1249,54 @@ TEST(erd_cache_mqtt_publisher, signal_work_does_not_pace_small_backlog)
   CHECK_EQUAL(0, (int) publisher.last_work_signal_ms);
 }
 
+/* Every other pacing test fills the cache and the backlog with the same insert
+ * loop, so the backlog always equals the entry count - and a gate keyed on
+ * erd_cache_get_count(), or on the monotonic required_update_count, would pass all
+ * of them.  That is not academic: a deployed bridge keeps 129-151 entries cached
+ * permanently, so a count-keyed gate would stay engaged forever and cap every live
+ * ERD publish at one wake per PUBLISH_PACE_INTERVAL_MS.  This test drains the
+ * backlog through the publisher's own read path so the two numbers come apart, then
+ * requires a small backlog inside a large cache to wake unpaced. */
+TEST(erd_cache_mqtt_publisher, signal_work_ignores_clean_entries_in_a_large_cache)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+
+  uint8_t data = 0x42;
+  for (uint16_t i = 0; i < 20; i++) {
+    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
+  }
+
+  /* Drain through the same read path the publish task uses: entries stay valid and
+   * keep their payloads, only the dirty flags clear. */
+  uint16_t iter = 0;
+  while (erd_cache_snapshot_next_updated(&cache, &iter, NULL, NULL, NULL, NULL, NULL)) {
+  }
+  CHECK_EQUAL(20, (int) erd_cache_get_count(&cache));
+  CHECK_EQUAL(0, (int) erd_cache_get_dirty_count(&cache));
+
+  /* Two entries go dirty again while the cache still holds twenty. */
+  uint8_t d1 = 0x11;
+  uint8_t d2 = 0x22;
+  erd_cache_update(&cache, 0x1000, 0xFF, &d1, sizeof(d1));
+  erd_cache_update(&cache, 0x1001, 0xFF, &d2, sizeof(d2));
+  CHECK_EQUAL(2, (int) erd_cache_get_dirty_count(&cache));
+
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(1000);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  esphome_hal_double_set_millis(1005);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(2, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL(0, (int) publisher.last_work_signal_ms);
+}
+
+
 /* The threshold is exclusive, so 11 is the first backlog that gets paced.  Pinning
  * both sides is what catches the gate being written with >= instead of >, or the
  * threshold constant being retuned without revisiting the pacing rate. */

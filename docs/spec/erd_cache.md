@@ -184,7 +184,7 @@ typedef struct erd_cache_t {
 | `update_count_window` | `uint32_t` | Updates since last `get_update_rate()` call |
 | `required_update_count` | `uint32_t` | Total updates that set `update_required=true` since init |
 | `required_update_count_window` | `uint32_t` | Such updates since last `get_required_update_rate()` call |
-| `dirty_count` | `uint16_t` | Valid entries currently carrying `update_required = true` — the publish backlog. Maintained under the cache lock at every site that sets or clears the flag, counting transitions rather than assignments, so re-marking an already-dirty entry never double counts. Cleared by `erd_cache_reset()`. |
+| `dirty_count` | `uint16_t` | Valid entries currently carrying `update_required = true` — the publish backlog. Maintained under the cache lock at every runtime site that sets or clears the flag, counting transitions rather than assignments, so re-marking an already-dirty entry never double counts. `erd_cache_reset()` reinitializes it single-threaded instead, outside any lock: `erd_cache_init()` runs the reset before the mutex exists and `erd_cache_destroy()` after the mutex is deleted. |
 | `max_cooldown` | `uint8_t` | Configured rate limit in seconds; 0 = disabled |
 | `initialized` | `bool` | Guard for safe init/destroy |
 
@@ -256,7 +256,7 @@ The window is determined by the call interval of the consumer (e.g., ~60 s if ca
 
 10. **Safe init/destroy:** `erd_cache_init()` and `erd_cache_destroy()` guard against non-initialized structs.
 
-11. **The backlog counter tracks transitions.** `dirty_count` is incremented only where `update_required` goes false→true and decremented only where it goes true→false, both inside the same lock hold as the flag write. That makes it exact under re-marking (`mark_all_updated` on reconnect, `mark_unpublished` after a dropped publish) without a recount pass, and it cannot underflow: the sole decrement runs only when the flag was true. Slot and arena exhaustion return before any mutation, so no uncounted dirty entry can exist.
+11. **The backlog counter tracks transitions.** `dirty_count` is incremented only where `update_required` goes false→true and decremented only where it goes true→false, both inside the same lock hold as the flag write — at every *runtime* site. The one non-runtime site is `erd_cache_reset()`, which zeroes the counter along with the entries single-threaded and outside the lock (see the lifecycle note in the field table). That makes it exact under re-marking (`mark_all_updated` on reconnect, `mark_unpublished` after a dropped publish) without a recount pass, and it cannot underflow: the sole decrement runs only when the flag was true. Slot and arena exhaustion return before any mutation, so no uncounted dirty entry can exist.
 
 ---
 

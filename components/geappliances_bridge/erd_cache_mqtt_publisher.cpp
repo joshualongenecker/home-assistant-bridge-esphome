@@ -289,8 +289,11 @@ void erd_cache_mqtt_publisher_signal_work(erd_cache_mqtt_publisher_t* self)
    * that idles 25 days with a small backlog and then sees a >10-entry backlog (a
    * reconnect republish is enough) out of publishing ERDs until the millisecond
    * counter rolls over.  Unsigned, the modulo difference is the true gap for any
-   * idle period under 2^32 ms, and the only false suppression is a stamp exactly one
-   * wrap plus <100 ms old, which expires inside the window. */
+   * idle period under 2^32 ms.  False suppression then needs a stamp one OR MORE
+   * wraps plus <100 ms old - k wraps is reachable, because only a passing paced
+   * wake refreshes the stamp, so a bridge idling with the gate disengaged for
+   * ~99.4 days carries one across two wraps.  Either way it expires inside the
+   * window. */
   if (self->cache != NULL && self->get_time_ms != NULL &&
       erd_cache_get_dirty_count(self->cache) > PUBLISH_PACE_BACKLOG_THRESHOLD) {
     uint32_t now = self->get_time_ms();

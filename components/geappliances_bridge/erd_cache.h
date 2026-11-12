@@ -49,9 +49,12 @@ typedef struct erd_cache_t {
   uint32_t update_count_window;        /* updates since last get_update_rate() call */
   uint32_t required_update_count;      /* total updates setting update_required=true since init */
   uint32_t required_update_count_window; /* such updates since last get_required_update_rate() call */
-  /* Number of valid entries currently carrying update_required=true. Maintained
-   * under the cache lock at every site that sets/clears the flag; the MQTT
-   * publisher uses it to decide when a backlog justifies pacing its drain. */
+  /* Number of valid entries currently carrying update_required=true. Every
+   * runtime site that sets or clears the flag maintains it under the cache lock;
+   * erd_cache_reset() reinitializes it single-threaded instead, outside any lock
+   * (init runs it before the mutex exists, destroy after the mutex is deleted).
+   * The MQTT publisher uses it to decide when a backlog justifies pacing its
+   * drain. */
   uint16_t dirty_count;
   uint8_t max_cooldown;                /* configured rate limit in seconds; 0 = disabled */
   bool initialized;                    /* true after first successful erd_cache_init() */
