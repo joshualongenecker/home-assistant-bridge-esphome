@@ -79,15 +79,13 @@ static void clear_discovery_state(erd_bridge_poll_t* self)
   self->polling_list_count = 0;
 }
 
-/* Cycle-phase transition helper: logs every phase change at debug level so
- * field/debug builds can trace the cycle machine. */
+/* Cycle-phase transition helper.  The phase machine is intentionally not
+ * logged per transition: a steady-state cycle changes phase three times per
+ * interval, which floods debug builds.  The cycle machine is observable at
+ * startup through the "Entered steady-state polling" log and the
+ * current_state/cycle_phase fields. */
 static void set_cycle_phase(erd_bridge_poll_t* self, poll_cycle_phase_t phase)
 {
-  if (self->cycle_phase == phase) {
-    return;
-  }
-  ESP_LOGD(TAG, "Poll cycle phase: %s -> %s",
-           poll_cycle_phase_name(self->cycle_phase), poll_cycle_phase_name(phase));
   self->cycle_phase = phase;
 }
 

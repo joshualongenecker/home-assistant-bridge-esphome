@@ -40,17 +40,6 @@ typedef enum {
   poll_cycle_phase_awaiting_restart
 } poll_cycle_phase_t;
 
-static inline const char* poll_cycle_phase_name(poll_cycle_phase_t phase)
-{
-  switch(phase) {
-    case poll_cycle_phase_idle: return "idle";
-    case poll_cycle_phase_sending: return "sending";
-    case poll_cycle_phase_awaiting: return "awaiting";
-    case poll_cycle_phase_awaiting_restart: return "awaiting_restart";
-    default: return "unknown";
-  }
-}
-
 typedef struct {
   tiny_erd_t erd_polling_list[POLLING_LIST_MAX_SIZE];
   uint8_t erd_polling_addresses[POLLING_LIST_MAX_SIZE];
