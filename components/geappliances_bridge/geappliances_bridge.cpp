@@ -794,8 +794,19 @@ bool GeappliancesBridge::check_steady_state()
          * to subscription coverage would invent a reason: an appliance whose ERDs
          * all arrive by subscription has no custom list to cover. */
         ESP_LOGD(TAG, "  Polled ERDs: none - no custom ERDs configured");
-      } else {
+      } else if (this->subscription_unseen_custom_erds_count_ == 0) {
+        /* Stated as the observable it is: every custom ERD is inside the
+         * subscription set, so none of them needs polling. */
         ESP_LOGD(TAG, "  Polled ERDs: none - custom ERDs all arrive by subscription");
+      } else {
+        /* Custom ERDs exist, the subscription does not cover them, and nothing
+         * polls them.  handle_polling_failed() destroys the polling bridge and
+         * clears the flag after consecutive failed cycles (bridge_init logs the
+         * WARN for it), and if that happens before steady state is reached this
+         * is where it lands - so subscription coverage must not be offered as the
+         * reason here. */
+        ESP_LOGD(TAG, "  Polled ERDs: none - %u custom ERDs uncovered, no polling bridge",
+                 this->subscription_unseen_custom_erds_count_);
       }
     }
     if (this->feature_bit_manager_.get_state() == FEATURE_BIT_STATE_COMPLETE) {
