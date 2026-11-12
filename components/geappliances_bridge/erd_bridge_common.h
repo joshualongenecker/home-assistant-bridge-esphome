@@ -203,6 +203,21 @@ static inline void board_tally_add(board_tally_t* self, uint8_t address)
 #define BOARD_TALLY_BUF_SIZE 64
 
 /*!
+ * snprintf reports the length it WOULD have written.  Both summary formatters
+ * promise the caller the length that WAS stored, so every return goes through
+ * here; a caller that only checks "> 0" would otherwise log an empty or truncated
+ * line on a short buffer.  out_len must be non-zero (the callers arm the
+ * terminator and return early otherwise).
+ */
+static inline int board_summary_stored_len(int written, size_t out_len)
+{
+  if (written < 0) {
+    return 0;
+  }
+  return (written >= (int) out_len) ? (int) out_len - 1 : written;
+}
+
+/*!
  * Format as "primary 41, 0xC0 24" (PROBE_ENTRY_DEFAULT_ADDRESS is the primary
  * board sentinel, so it reads as "primary", not "0xFF"). An empty tally is
  * "none"; boards past BOARD_TALLY_MAX collapse into "+N more".
@@ -226,8 +241,7 @@ static inline int board_tally_format(const board_tally_t* self, char* out, size_
    * unterminated - the one case the loop cannot reach. */
   out[0] = '\0';
   if (self->count[0] == 0 && self->untracked == 0) {
-    const int n = snprintf(out, out_len, "none");
-    return (n >= (int) out_len) ? (int) out_len - 1 : n;  // stored, not would-be
+    return board_summary_stored_len(snprintf(out, out_len, "none"), out_len);
   }
 
   int written = 0;
@@ -333,17 +347,22 @@ static inline int board_polled_summary_format(const polled_erds_state_t* st,
     }
     char split[BOARD_TALLY_BUF_SIZE];
     board_tally_format(&tally, split, sizeof(split));
-    const int n = snprintf(out, out_len, "Polled ERDs: %u (%s)",
-                           (unsigned) polled_count, split);
-    return (n >= (int) out_len) ? (int) out_len - 1 : n;
+    return board_summary_stored_len(snprintf(out, out_len, "Polled ERDs: %u (%s)",
+                                             (unsigned) polled_count, split),
+                                    out_len);
   }
 
   if (st->custom_erds_count == 0) {
-    return snprintf(out, out_len, "Polled ERDs: none - no custom ERDs configured");
+    return board_summary_stored_len(
+        snprintf(out, out_len, "Polled ERDs: none - no custom ERDs configured"), out_len);
   }
   if (st->unseen_custom_count == 0) {
-    return snprintf(out, out_len, "Polled ERDs: none - custom ERDs all arrive by subscription");
+    return board_summary_stored_len(
+        snprintf(out, out_len, "Polled ERDs: none - custom ERDs all arrive by subscription"),
+        out_len);
   }
-  return snprintf(out, out_len, "Polled ERDs: none - %u custom ERDs uncovered, no polling bridge",
-                  (unsigned) st->unseen_custom_count);
+  return board_summary_stored_len(
+      snprintf(out, out_len, "Polled ERDs: none - %u custom ERDs uncovered, no polling bridge",
+               (unsigned) st->unseen_custom_count),
+      out_len);
 }

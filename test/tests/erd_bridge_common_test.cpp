@@ -240,6 +240,29 @@ TEST(BoardTally, summary_truncates_inside_the_buffer) {
   STRNCMP_EQUAL("Polled ERDs: 6 (0xC0 2,", small, 23);
 }
 
+/* The three "nothing is polled, because ..." branches share the same clamp.
+ * snprintf reports the length it WOULD have written and the caller only checks
+ * "> 0", so an unclamped return would log a truncated line as though it were
+ * whole - the same contract the tally formatter had to learn the hard way. */
+TEST(BoardTally, summary_reports_the_stored_length_for_a_truncated_reason_line) {
+  char small[8];
+  memset(small, 0xAA, sizeof(small));
+  const int n = board_polled_summary_format(make_state(false, 0, 0), NULL, 0,
+                                            small, sizeof(small));
+  LONGS_EQUAL((long) sizeof(small) - 1, n);  // the full line is 45 characters
+  CHECK(small[sizeof(small) - 1] == '\0');
+  STRNCMP_EQUAL("Polled ", small, 7);
+}
+
+TEST(BoardTally, summary_reports_the_stored_length_for_a_one_byte_reason_buffer) {
+  char one[1];
+  one[0] = (char) 0xAA;
+  const int n = board_polled_summary_format(make_state(false, 65, 7), NULL, 0, one, sizeof(one));
+  LONGS_EQUAL(0, n);
+  CHECK(one[0] == '\0');  // armed up front, so the buffer is never left unterminated
+}
+
+
 TEST(BoardTally, summary_names_no_custom_erds_rather_than_a_subscription_reason) {
   board_polled_summary_format(make_state(false, 0, 0), NULL, 0, buf, sizeof(buf));
   STRCMP_EQUAL("Polled ERDs: none - no custom ERDs configured", buf);
