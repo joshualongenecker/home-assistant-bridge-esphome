@@ -339,6 +339,32 @@ TEST(feature_bit_manager, read_failed_skips_feature_api_0_to_api_1)
   CHECK_EQUAL(FEATURE_BIT_STATE_READING, manager.get_state());
 }
 
+/* The skip count is a printed diagnostic: the INFO "Feature bit parsing complete"
+ * line and the DEBUG "Feature bits:" summary both report it.  Pin both the
+ * increment and the reset in init() - without the reset, a teardown/setup cycle
+ * reports a cumulative skip count beside a per-run valid count, and nothing else
+ * in the suite observes the counter. */
+TEST(feature_bit_manager, read_failed_counts_one_skip_and_reinit_clears_it)
+{
+  init_manager();
+
+  expect_successful_read(0xC0, ERD_COMMON_FEATURE_API);
+  manager.start();
+
+  uint8_t feature_data[8] = {0};
+  expect_successful_read(0xC0, ERD_APPLIANCE_FEATURE_API_0);
+  trigger_read_completed(ERD_COMMON_FEATURE_API, feature_data, 8);
+
+  expect_successful_read(0xC0, ERD_APPLIANCE_FEATURE_API_1);
+  trigger_read_failed(ERD_APPLIANCE_FEATURE_API_0);
+
+  LONGS_EQUAL(1, (long) manager.get_skipped_erd_count());
+
+  /* The teardown/setup path: the counter belongs to the run, not the object. */
+  init_manager();
+  LONGS_EQUAL(0, (long) manager.get_skipped_erd_count());
+}
+
 TEST(feature_bit_manager, read_failed_on_last_erd_transitions_to_parsing)
 {
   init_manager();

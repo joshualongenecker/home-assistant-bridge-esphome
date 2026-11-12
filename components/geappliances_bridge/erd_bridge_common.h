@@ -4,6 +4,7 @@
 // All functions are template or `inline` so each translation unit gets its own
 // copy without ODR violations.
 
+#include <stdio.h>
 #include <string.h>
 #include <cstdint>
 
@@ -162,4 +163,206 @@ static inline const char* polling_state_name(polling_state_t state)
     case polling_state_failed: return "failed";
     default: return "unknown";
   }
+}
+
+// Board distribution of an ERD list, used by the one-line boot summaries.
+// Only the first BOARD_TALLY_MAX addresses are named; entries on any further
+// board are counted into `untracked` so the formatted line stays bounded on
+// multi-board appliances instead of growing with the board count.
+#define BOARD_TALLY_MAX 4
+
+typedef struct {
+  uint8_t address[BOARD_TALLY_MAX];
+  uint16_t count[BOARD_TALLY_MAX];
+  uint16_t untracked;
+} board_tally_t;
+
+static inline void board_tally_init(board_tally_t* self)
+{
+  memset(self, 0, sizeof(*self));
+}
+
+static inline void board_tally_add(board_tally_t* self, uint8_t address)
+{
+  for (uint8_t i = 0; i < BOARD_TALLY_MAX; i++) {
+    if (self->count[i] == 0) {
+      self->address[i] = address;
+      self->count[i] = 1;
+      return;
+    }
+    if (self->address[i] == address) {
+      self->count[i]++;
+      return;
+    }
+  }
+  self->untracked++;
+}
+
+// Longest possible tally line: BOARD_TALLY_MAX "0xNN 65535" tokens, their
+// separators, and the "+65535 more" tail.
+#define BOARD_TALLY_BUF_SIZE 64
+
+/*!
+ * snprintf reports the length it WOULD have written.  Both summary formatters
+ * promise the caller the length that WAS stored, so every return goes through
+ * here; a caller that only checks "> 0" would otherwise log an empty or truncated
+ * line on a short buffer.  out_len must be non-zero (the callers arm the
+ * terminator and return early otherwise).
+ */
+static inline int board_summary_stored_len(int written, size_t out_len)
+{
+  if (written < 0) {
+    return 0;
+  }
+  return (written >= (int) out_len) ? (int) out_len - 1 : written;
+}
+
+/*!
+ * Format as "primary 41, 0xC0 24" (PROBE_ENTRY_DEFAULT_ADDRESS is the primary
+ * board sentinel, so it reads as "primary", not "0xFF"). An empty tally is
+ * "none"; boards past BOARD_TALLY_MAX collapse into "+N more".
+ *
+ * Never writes past out_len and always NUL-terminates. A buffer shorter than
+ * BOARD_TALLY_BUF_SIZE truncates wherever snprintf reached, so callers pass
+ * BOARD_TALLY_BUF_SIZE to get the whole line; with out_len == 1 a non-empty
+ * tally has nowhere to write and the result is the empty string. A non-empty
+ * tally never renders as "none" - that would read as "no boards" on a
+ * multi-board appliance.
+ * Returns the number of characters stored, excluding the terminator.
+ */
+static inline int board_tally_format(const board_tally_t* self, char* out, size_t out_len)
+{
+  if (out_len == 0) {
+    return 0;
+  }
+  /* Every write below needs room for a character plus the terminator, so arm the
+   * terminator up front.  Without it, a one-byte buffer and a non-empty tally
+   * would return 0 having written nothing, leaving the caller's buffer
+   * unterminated - the one case the loop cannot reach. */
+  out[0] = '\0';
+  if (self->count[0] == 0 && self->untracked == 0) {
+    return board_summary_stored_len(snprintf(out, out_len, "none"), out_len);
+  }
+
+  int written = 0;
+  for (uint8_t i = 0; i < BOARD_TALLY_MAX && self->count[i] > 0; i++) {
+    const int room = (int) out_len - written;
+    if (room <= 1) {
+      break;
+    }
+    const char* label = (self->address[i] == PROBE_ENTRY_DEFAULT_ADDRESS)
+        ? "primary" : nullptr;
+    const int n = (label != nullptr)
+        ? snprintf(out + written, room, "%s%s %u",
+                   (written > 0) ? ", " : "", label, self->count[i])
+        : snprintf(out + written, room, "%s0x%02X %u",
+                   (written > 0) ? ", " : "", self->address[i], self->count[i]);
+    if (n < 0) {
+      break;
+    }
+    if (n >= room) {
+      return (int) out_len - 1;  // snprintf truncated and NUL-terminated within room
+    }
+    written += n;
+  }
+  if (self->untracked > 0) {
+    const int room = (int) out_len - written;
+    if (room > 1) {
+      const int n = snprintf(out + written, room, "%s+%u more",
+                             (written > 0) ? ", " : "", self->untracked);
+      if (n < 0) {
+        return written;
+      }
+      if (n >= room) {
+        return (int) out_len - 1;
+      }
+      written += n;
+    }
+  }
+  return written;
+}
+
+/*!
+ * State the "Polled ERDs" summary line is derived from, for the cases where no
+ * polling bridge is running.  Plain values on purpose: the summary exists only
+ * inside a log call, and ESP_LOGx compiles to nothing in the unit build, so a
+ * branch that picks the wrong reason is invisible to the suite unless the
+ * rendered line itself is observable.
+ */
+typedef struct {
+  bool polling_bridge_initialized;
+  uint16_t custom_erds_count;
+  uint16_t unseen_custom_count;  /* custom ERDs the subscription set does not cover */
+} polled_erds_state_t;
+
+/* Prefix, a five-digit count, " (", a full tally, and the closer. */
+#define BOARD_POLLED_SUMMARY_BUF_SIZE (BOARD_TALLY_BUF_SIZE + 32)
+
+/*!
+ * Render the "Polled ERDs" line into out.  Returns the number of characters
+ * stored, excluding the terminator, or 0 with out[0] == '\0' when the line would
+ * add nothing.
+ *
+ * polled_addresses / polled_count must come from the running polling bridge
+ * itself - erd_bridge_poll_t.erd_polling_addresses and .polling_list_count - and
+ * not from the list the bridge was built from.  The probe phase drops every ERD
+ * whose read failed ("Exclude the ERD from the polling list by simply not adding
+ * it", erd_bridge_poll.cpp), so the built list is strictly larger than what is
+ * polled whenever an ERD is unresponsive: gea-esphome-refer builds 60 and polls
+ * 53.  A split taken from the built list would not sum to the count printed
+ * beside it, which is the same defect the subscription-failure case had.
+ *
+ * With a bridge running the split is suppressed unless the polled set spans two
+ * or more boards.  The count itself is already logged at INFO by the bridge on
+ * the same transition ("Entered steady-state polling: N ERDs"), so on a
+ * single-board appliance the line would only repeat it at a lower level.
+ */
+static inline int board_polled_summary_format(const polled_erds_state_t* st,
+                                              const uint8_t* polled_addresses,
+                                              uint16_t polled_count,
+                                              char* out, size_t out_len)
+{
+  if (out_len == 0) {
+    return 0;
+  }
+  out[0] = '\0';
+
+  if (st->polling_bridge_initialized) {
+    if (polled_addresses == NULL || polled_count == 0) {
+      return 0;  /* probe phase has not filled the list yet */
+    }
+    board_tally_t tally;
+    board_tally_init(&tally);
+    for (uint16_t i = 0; i < polled_count; i++) {
+      board_tally_add(&tally, polled_addresses[i]);
+    }
+    uint8_t boards = (tally.untracked > 0) ? 1 : 0;
+    for (uint8_t i = 0; i < BOARD_TALLY_MAX; i++) {
+      if (tally.count[i] > 0) {
+        boards++;
+      }
+    }
+    if (boards < 2) {
+      return 0;
+    }
+    char split[BOARD_TALLY_BUF_SIZE];
+    board_tally_format(&tally, split, sizeof(split));
+    return board_summary_stored_len(snprintf(out, out_len, "Polled ERDs: %u (%s)",
+                                             (unsigned) polled_count, split),
+                                    out_len);
+  }
+
+  if (st->custom_erds_count == 0) {
+    return board_summary_stored_len(
+        snprintf(out, out_len, "Polled ERDs: none - no custom ERDs configured"), out_len);
+  }
+  if (st->unseen_custom_count == 0) {
+    return board_summary_stored_len(
+        snprintf(out, out_len, "Polled ERDs: none - custom ERDs all arrive by subscription"),
+        out_len);
+  }
+  return board_summary_stored_len(
+      snprintf(out, out_len, "Polled ERDs: none - %u custom ERDs uncovered, no polling bridge",
+               (unsigned) st->unseen_custom_count),
+      out_len);
 }

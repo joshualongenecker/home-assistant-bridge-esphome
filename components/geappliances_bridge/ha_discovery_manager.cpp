@@ -1082,6 +1082,9 @@ void ha_discovery_manager_start(ha_discovery_manager_t* self)
     }
 
     build_sorted_erd_list(self);
+    /* One line per discovery run, at DEBUG. This is the only point the count is
+     * meaningful: a boot-time summary printed before the run starts reads 0. */
+    ESP_LOGD(TAG, "Discovery: %u ERDs to publish", self->sorted_erds_count);
     build_device_json(self);
 
     self->state = ha_discovery_state_building;

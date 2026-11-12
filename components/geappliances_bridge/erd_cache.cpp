@@ -188,7 +188,12 @@ static bool erd_cache_update_locked(erd_cache_t* self, tiny_erd_t erd, uint8_t b
   slot->update_required = true;
   self->dirty_count++;
 
-  ESP_LOGD(TAG, "ERD 0x%04X at address 0x%02X added to cache (%u bytes, arena offset %u)",
+  /* VERBOSE, not DEBUG: a populated appliance adds 129-151 entries during the
+   * boot window, and every line here is an MQTT publish when the log transport
+   * is at its default level. The aggregate lives in the bridge's steady-state
+   * summary ("ERDs cached: N, arena: X/Y bytes"). Rebuild at VERBOSE to get the
+   * per-entry detail back. */
+  ESP_LOGV(TAG, "ERD 0x%04X at address 0x%02X added to cache (%u bytes, arena offset %u)",
            erd, board_address, data_size, slot->data_offset);
 
   return true;

@@ -267,7 +267,7 @@ The window is determined by the call interval of the consumer (e.g., ~60 s if ca
 |------------|---------|
 | `tiny_gea3_erd_client.h` | `tiny_erd_t` type definition |
 | `<cstring>` | `memcmp` for change detection, `memcpy` for data copy |
-| `esphome/core/log.h` | `ESP_LOGD`, `ESP_LOGW`, `ESP_LOGE` for logging |
+| `esphome/core/log.h` | `ESP_LOGV`, `ESP_LOGW`, `ESP_LOGE` for logging |
 
 ---
 

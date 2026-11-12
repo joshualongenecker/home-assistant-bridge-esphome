@@ -53,6 +53,11 @@ void FeatureBitManager::init(i_tiny_gea3_erd_client_t* erd_client,
   this->parse_common_done_ = false;
   this->valid_list_ready_ = false;
   this->valid_erds_count_ = 0;
+  /* Both counts describe this run's feature-bit read.  The members are
+   * default-initialised at construction, but init() is where valid_erds_count_ is
+   * reset, so the skip count has to be reset alongside it: a second init() would
+   * otherwise report a cumulative skip count next to a per-run valid count. */
+  this->skipped_erds_count_ = 0;
 
   this->erd_data_ = FeatureBitErdData{};
 
@@ -103,6 +108,11 @@ void FeatureBitManager::start()
 uint16_t FeatureBitManager::get_valid_erd_count() const
 {
   return this->valid_erds_count_;
+}
+
+uint16_t FeatureBitManager::get_skipped_erd_count() const
+{
+  return this->skipped_erds_count_;
 }
 
 tiny_erd_t FeatureBitManager::get_valid_erd(uint16_t idx) const
@@ -252,8 +262,12 @@ void FeatureBitManager::queue_retry_()
 void FeatureBitManager::skip_to_next_erd_(tiny_erd_t failed_erd)
 {
   this->read_queued_ = false;
+  this->skipped_erds_count_++;
 
-  ESP_LOGD(TAG, "Feature bit ERD 0x%04X failed or not supported, skipping", failed_erd);
+  /* VERBOSE: an unsupported feature ERD is the normal case - up to
+   * FEATURE_ERD_COUNT of them per boot, one per entry in the feature list - and
+   * the count is reported once by the completion summary. */
+  ESP_LOGV(TAG, "Feature bit ERD 0x%04X failed or not supported, skipping", failed_erd);
 
   /* ERD 0x0092 (common feature API) is the foundation for all feature
    * filtering. Without it, we have no way to know which ERDs are
@@ -407,7 +421,14 @@ void FeatureBitManager::parse_next_step_()
   }
 
   this->valid_list_ready_ = true;
-  ESP_LOGI(TAG, "Feature bit parsing complete: %u valid ERDs", this->valid_erds_count_);
+  /* Not "skipped as unsupported": skip_to_next_erd_ is also reached from a read
+   * failure (the reason is never inspected, so a bus or queue timeout counts the
+   * same as an absent feature) and from an out-of-order or empty read.  Saying
+   * "unsupported" tells an operator the appliance lacks those features and to stop
+   * looking, which the counter does not support. */
+  ESP_LOGI(TAG, "Feature bit parsing complete: %u valid ERDs, %u skipped "
+                "(unsupported or unreadable)",
+           this->valid_erds_count_, this->skipped_erds_count_);
 
   tiny_timer_stop(this->timer_group_, &this->parse_timer_);
   this->state_ = FEATURE_BIT_STATE_COMPLETE;
