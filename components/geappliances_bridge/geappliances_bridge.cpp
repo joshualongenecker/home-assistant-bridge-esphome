@@ -791,7 +791,6 @@ bool GeappliancesBridge::check_steady_state()
                this->feature_bit_manager_.get_valid_erd_count(),
                this->feature_bit_manager_.get_skipped_erd_count());
     }
-    ESP_LOGD(TAG, "  HA discovery: %u ERDs mapped", this->ha_discovery_manager_.sorted_erds_count);
 
     if (this->generate_device_config_) {
       this->discovery_lifecycle_manager_.check_discovery_changes(
