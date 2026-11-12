@@ -775,15 +775,20 @@ bool GeappliancesBridge::check_steady_state()
       }
       char poll_boards[BOARD_TALLY_BUF_SIZE];
       board_tally_format(&poll_tally, poll_boards, sizeof(poll_boards));
+      /* "Polling bridge", not "Poll list": bridge_init already logs
+       * "Poll list: <how it was built> (N ERDs)" for the list as *built*, and
+       * the polling bridge can run a smaller list than that (subscription
+       * covers some of it), so two "Poll list:" lines with different counts
+       * read as a contradiction. */
       if (this->polling_bridge_initialized_) {
         if (this->subscription_unseen_custom_erds_count_ > 0) {
-          ESP_LOGD(TAG, "  Poll list: %u ERDs (custom: %s)",
+          ESP_LOGD(TAG, "  Polling bridge: %u ERDs (custom: %s)",
                    this->erd_bridge_poll_.polling_list_count, poll_boards);
         } else {
-          ESP_LOGD(TAG, "  Poll list: %u ERDs", this->erd_bridge_poll_.polling_list_count);
+          ESP_LOGD(TAG, "  Polling bridge: %u ERDs", this->erd_bridge_poll_.polling_list_count);
         }
       } else {
-        ESP_LOGD(TAG, "  Poll list: none - custom ERDs all arrive by subscription");
+        ESP_LOGD(TAG, "  Polling bridge: none - custom ERDs all arrive by subscription");
       }
     }
     if (this->feature_bit_manager_.get_state() == FEATURE_BIT_STATE_COMPLETE) {
