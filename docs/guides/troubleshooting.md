@@ -202,10 +202,10 @@ At DEBUG the bridge prints one line per subsystem instead of one line per ERD. `
 [D][geappliances_bridge]:   Custom ERDs: 65 configured (primary 65)
 [D][geappliances_bridge]:   Subscription: 151 ERDs (host board 0xC0)
 [D][geappliances_bridge]:   Feature bits: 106 valid, 7 skipped (unsupported or unreadable)
-[D][ha_discovery]:   Discovery: 151 ERDs to publish
+[D][ha_discovery]: Discovery: 151 ERDs to publish
 ```
 
-Real output appends the source line to the tag — `[D][geappliances_bridge:554]`, `[D][ha_discovery:1087]` — and that number moves between builds, so match on the text after the tag. The `logger: logs:` mapping above is keyed on the bare tag (`geappliances_bridge`, `ha_discovery`), never the printed `tag:line` form.
+Real output appends the source line to the tag — `[D][geappliances_bridge:554]`, `[D][ha_discovery:1087]` — and that number moves between builds, so match on the text after the tag. The `logger: logs:` mapping above is keyed on the bare tag (`geappliances_bridge`, `ha_discovery`), never the printed `tag:line` form. The bridge's own summary lines carry two leading spaces in their format strings (`"  Subscription: …"`), while `Discovery:` carries none, so it sits flush after the tag.
 
 
 | Line | What it answers |
