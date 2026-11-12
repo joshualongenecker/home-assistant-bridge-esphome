@@ -41,7 +41,7 @@ Scans the shared ERD cache and publishes updated ERDs to MQTT topics with `retai
 **Task lifecycle:**
 1. `init()` creates three semaphores: `work_semaphore`, `state_mutex`, `done_semaphore`
 2. `start()` creates the static task
-3. Main loop calls `signal_work()` when cache entries are updated
+3. Main loop calls `resume()` on every `loop()` iteration while a cache is attached and discovery is idle, and that resume gives `work_semaphore`; a cache update by itself does not wake the task
 4. Task wakes, acquires `state_mutex` to check `mqtt_connected`, `paused`, and dependency validity
 5. Task calls `erd_cache_mqtt_publisher_publish_one()` once, then blocks on `work_semaphore`
 6. `stop()` signals `work_semaphore` first, then sets `task_running = false`, waits on `done_semaphore` (1 s timeout), then yields for idle task TCB cleanup (100 ms). Idempotent — safe to call multiple times.
