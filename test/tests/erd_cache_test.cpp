@@ -238,9 +238,20 @@ TEST(erd_cache, get_next_updated_skips_non_updated)
   erd_cache_update(&cache, 0x0002, 0xFF, data2, 1);
   erd_cache_update(&cache, 0x0003, 0xFF, data3, 1);
 
-  erd_cache_entry_t* e2 = find_entry(&cache, 0x0002, 0xFF);
-  CHECK(NULL != e2);
-  e2->update_required = false;
+  /* Reach "entry present, flag clear" through the read path, then re-dirty 1 and
+   * 3 with new bytes.  Clearing update_required by hand would leave dirty_count
+   * above the number of entries that actually need publishing, which is the
+   * invariant the backlog gate in the MQTT publisher depends on. */
+  uint16_t clear_iter = 0;
+  while (next_updated(&cache, &clear_iter) != NULL) {
+  }
+  CHECK_EQUAL(0, erd_cache_get_dirty_count(&cache));
+
+  uint8_t data1_changed[] = { 0x11 };
+  uint8_t data3_changed[] = { 0x33 };
+  erd_cache_update(&cache, 0x0001, 0xFF, data1_changed, 1);
+  erd_cache_update(&cache, 0x0003, 0xFF, data3_changed, 1);
+  CHECK_EQUAL(2, erd_cache_get_dirty_count(&cache));
 
   uint16_t iter = 0;
   erd_cache_entry_t* e = next_updated(&cache, &iter);
@@ -253,6 +264,7 @@ TEST(erd_cache, get_next_updated_skips_non_updated)
 
   e = next_updated(&cache, &iter);
   CHECK(NULL == e);
+  CHECK_EQUAL(0, erd_cache_get_dirty_count(&cache));
 }
 
 TEST(erd_cache, get_next_updated_resets_iterator)

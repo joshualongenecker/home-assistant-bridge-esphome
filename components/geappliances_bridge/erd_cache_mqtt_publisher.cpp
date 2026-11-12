@@ -271,12 +271,17 @@ void erd_cache_mqtt_publisher_signal_work(erd_cache_mqtt_publisher_t* self)
 
   /* Pace only while a large backlog is queued up (see the constants above).
    * Below the threshold the task is woken every loop, so ordinary one-or-two-value
-   * changes keep their latency.  The signed diff is rollover-safe, and a zero or
-   * stale timestamp always lets the first signal through. */
+   * changes keep their latency.  The signed diff is rollover-safe.  A zero
+   * last_work_signal_ms means "nothing has been paced yet", so the first wake is
+   * never suppressed: without that clause a backlog forming inside the first
+   * PUBLISH_PACE_INTERVAL_MS of uptime would be held back before the task has
+   * ever run.  Stamping a literal 0 would re-arm the same bypass, which costs at
+   * most one extra wake exactly once per boot. */
   if (self->cache != NULL && self->get_time_ms != NULL &&
       erd_cache_get_dirty_count(self->cache) > PUBLISH_PACE_BACKLOG_THRESHOLD) {
     uint32_t now = self->get_time_ms();
-    if ((int32_t)(now - self->last_work_signal_ms) < (int32_t)PUBLISH_PACE_INTERVAL_MS) {
+    if (self->last_work_signal_ms != 0 &&
+        (int32_t)(now - self->last_work_signal_ms) < (int32_t)PUBLISH_PACE_INTERVAL_MS) {
       return;
     }
     self->last_work_signal_ms = now;
