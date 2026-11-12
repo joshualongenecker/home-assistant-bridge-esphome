@@ -170,89 +170,87 @@ TEST(BoardTally, the_untracked_tail_truncates_inside_the_buffer) {
 
 /* ---------- the "Polled ERDs" summary line ----------
  * The line exists only inside an ESP_LOGD, which this harness compiles to
- * nothing, so the wording and the two suppression rules are asserted on the
- * rendered string. */
+ * nothing, so the wording and the suppression rules are asserted on the rendered
+ * string. */
 
 static polled_erds_state_t s_state;  // storage so the helper can hand back a pointer
 
 static const polled_erds_state_t* make_state(bool polling_initialized,
-                                             bool custom_polling_started,
-                                             uint16_t polled_count, uint16_t custom_count,
-                                             uint16_t unseen_count) {
+                                             uint16_t custom_count, uint16_t unseen_count) {
   s_state.polling_bridge_initialized = polling_initialized;
-  s_state.custom_erd_polling_started = custom_polling_started;
-  s_state.polled_count = polled_count;
   s_state.custom_erds_count = custom_count;
   s_state.unseen_custom_count = unseen_count;
   return &s_state;
 }
 
-TEST(BoardTally, summary_reports_the_per_board_split_while_custom_polling_runs) {
-  board_tally_add(&tally, PROBE_ENTRY_DEFAULT_ADDRESS);
-  board_tally_add(&tally, PROBE_ENTRY_DEFAULT_ADDRESS);
-  board_tally_add(&tally, 0xC0);
-  board_polled_summary_format(make_state(true, true, 53, 65, 3), &tally, buf, sizeof(buf));
-  STRCMP_EQUAL("Polled ERDs: 53 (custom: primary 2, 0xC0 1)", buf);
+TEST(BoardTally, summary_splits_the_polled_count_by_board) {
+  const uint8_t polled[] = {PROBE_ENTRY_DEFAULT_ADDRESS, PROBE_ENTRY_DEFAULT_ADDRESS, 0xC0};
+  board_polled_summary_format(make_state(true, 65, 3), polled, 3, buf, sizeof(buf));
+  STRCMP_EQUAL("Polled ERDs: 3 (primary 2, 0xC0 1)", buf);
 }
 
-TEST(BoardTally, summary_stays_quiet_when_the_bridge_already_reported_the_count) {
-  // "Entered steady-state polling: N ERDs" logs the same polling_list_count at
-  // INFO on the same transition, so a DEBUG repeat adds nothing.
-  LONGS_EQUAL(0, board_polled_summary_format(
-                    make_state(true, false, 53, 65, 0), NULL, buf, sizeof(buf)));
+/* Regression: the split must describe the set the count describes.  The probe
+ * phase drops every ERD whose read failed, so the list the bridge was BUILT from
+ * is larger than what it polls (gea-esphome-refer: 60 built, 53 polled).  Here 50
+ * custom ERDs were configured but only 48 are polled, and the split sums to 48. */
+TEST(BoardTally, summary_splits_the_polled_set_not_the_list_it_was_built_from) {
+  uint8_t polled[48];
+  memset(polled, PROBE_ENTRY_DEFAULT_ADDRESS, 40);
+  memset(polled + 40, 0xC0, 8);
+  board_polled_summary_format(make_state(true, 50, 50), polled, 48, buf, sizeof(buf));
+  STRCMP_EQUAL("Polled ERDs: 48 (primary 40, 0xC0 8)", buf);
+}
+
+TEST(BoardTally, summary_stays_quiet_on_a_single_board_appliance) {
+  // "Entered steady-state polling: N ERDs" already gives the count at INFO, and a
+  // one-board split adds nothing to it.
+  uint8_t polled[53];
+  memset(polled, PROBE_ENTRY_DEFAULT_ADDRESS, sizeof(polled));
+  LONGS_EQUAL(0, board_polled_summary_format(make_state(true, 0, 0), polled, 53,
+                                             buf, sizeof(buf)));
   STRCMP_EQUAL("", buf);
 }
 
-TEST(BoardTally, summary_stays_quiet_when_there_is_no_split_to_add) {
-  board_tally_add(&tally, 0xC0);
-  LONGS_EQUAL(0, board_polled_summary_format(
-                    make_state(true, true, 53, 65, 0), &tally, buf, sizeof(buf)));
+TEST(BoardTally, summary_stays_quiet_before_the_probe_phase_fills_the_list) {
+  LONGS_EQUAL(0, board_polled_summary_format(make_state(true, 65, 3), NULL, 0,
+                                             buf, sizeof(buf)));
   STRCMP_EQUAL("", buf);
 }
 
-/* Regression: after handle_subscription_failed() rebuilds the polling bridge from
- * the full custom list, subscription_unseen_custom_erds_ is a stale subset whose
- * numbers no longer sum to the count. The tally must not ride beside it. */
-TEST(BoardTally, summary_never_attaches_a_stale_tally_after_a_subscription_failure) {
-  board_tally_add(&tally, PROBE_ENTRY_DEFAULT_ADDRESS);
-  board_tally_add(&tally, 0xC0);
-  LONGS_EQUAL(0, board_polled_summary_format(
-                    make_state(true, false, 151, 65, 2), &tally, buf, sizeof(buf)));
-  STRCMP_EQUAL("", buf);
+TEST(BoardTally, summary_keeps_board_zero_distinct_from_the_primary_sentinel) {
+  const uint8_t polled[] = {0x00, 0x00, PROBE_ENTRY_DEFAULT_ADDRESS};
+  board_polled_summary_format(make_state(true, 0, 0), polled, 3, buf, sizeof(buf));
+  STRCMP_EQUAL("Polled ERDs: 3 (0x00 2, primary 1)", buf);
 }
 
-TEST(BoardTally, summary_tolerates_a_missing_tally) {
-  LONGS_EQUAL(0, board_polled_summary_format(
-                    make_state(true, true, 53, 65, 3), NULL, buf, sizeof(buf)));
-  STRCMP_EQUAL("", buf);
+TEST(BoardTally, summary_collapses_boards_past_four_into_the_untracked_tail) {
+  const uint8_t polled[] = {0xC0, 0xC0, 0xC1, 0xC2, 0xC3, 0xC4};
+  board_polled_summary_format(make_state(true, 0, 0), polled, 6, buf, sizeof(buf));
+  STRCMP_EQUAL("Polled ERDs: 6 (0xC0 2, 0xC1 1, 0xC2 1, 0xC3 1, +1 more)", buf);
+}
+
+TEST(BoardTally, summary_truncates_inside_the_buffer) {
+  const uint8_t polled[] = {0xC0, 0xC0, 0xC1, 0xC2, 0xC3, 0xC4};
+  char small[24];
+  memset(small, 0xAA, sizeof(small));
+  const int n = board_polled_summary_format(make_state(true, 0, 0), polled, 6,
+                                            small, sizeof(small));
+  LONGS_EQUAL((long) sizeof(small) - 1, n);  // stored length, not the would-be length
+  CHECK(small[sizeof(small) - 1] == '\0');
+  STRNCMP_EQUAL("Polled ERDs: 6 (0xC0 2,", small, 23);
 }
 
 TEST(BoardTally, summary_names_no_custom_erds_rather_than_a_subscription_reason) {
-  board_polled_summary_format(make_state(false, false, 0, 0, 0), NULL, buf, sizeof(buf));
+  board_polled_summary_format(make_state(false, 0, 0), NULL, 0, buf, sizeof(buf));
   STRCMP_EQUAL("Polled ERDs: none - no custom ERDs configured", buf);
 }
 
 TEST(BoardTally, summary_credits_subscription_only_when_it_covers_every_custom_erd) {
-  board_polled_summary_format(make_state(false, false, 0, 65, 0), NULL, buf, sizeof(buf));
+  board_polled_summary_format(make_state(false, 65, 0), NULL, 0, buf, sizeof(buf));
   STRCMP_EQUAL("Polled ERDs: none - custom ERDs all arrive by subscription", buf);
 }
 
 TEST(BoardTally, summary_counts_uncovered_erds_when_no_bridge_polls_them) {
-  board_polled_summary_format(make_state(false, false, 0, 65, 7), NULL, buf, sizeof(buf));
+  board_polled_summary_format(make_state(false, 65, 7), NULL, 0, buf, sizeof(buf));
   STRCMP_EQUAL("Polled ERDs: none - 7 custom ERDs uncovered, no polling bridge", buf);
-}
-
-TEST(BoardTally, summary_fits_its_declared_buffer) {
-  // Widest line: five-digit count plus a full-width tally.
-  for (int i = 0; i < BOARD_TALLY_MAX; i++) {
-    tally.address[i] = (i == 0) ? PROBE_ENTRY_DEFAULT_ADDRESS : (uint8_t) (0xC0 + i);
-    tally.count[i] = 65535U;
-  }
-  tally.untracked = 65535U;
-  char line[BOARD_POLLED_SUMMARY_BUF_SIZE];
-  const int n = board_polled_summary_format(
-      make_state(true, true, 65535, 65535, 65535), &tally, line, sizeof(line));
-  CHECK(n < (int) sizeof(line));  // not truncated
-  STRCMP_EQUAL("Polled ERDs: 65535 (custom: primary 65535, 0xC1 65535, 0xC2 65535, "
-               "0xC3 65535, +65535 more)", line);
 }

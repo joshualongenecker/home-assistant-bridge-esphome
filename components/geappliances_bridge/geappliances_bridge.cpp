@@ -770,25 +770,22 @@ bool GeappliancesBridge::check_steady_state()
     {
       polled_erds_state_t polled;
       polled.polling_bridge_initialized = this->polling_bridge_initialized_;
-      polled.custom_erd_polling_started = this->custom_erd_polling_started_;
-      polled.polled_count = this->erd_bridge_poll_.polling_list_count;
       polled.custom_erds_count = this->custom_erds_count_;
       polled.unseen_custom_count = this->subscription_unseen_custom_erds_count_;
 
-      board_tally_t poll_tally;
-      board_tally_init(&poll_tally);
-      for (uint16_t i = 0; i < this->subscription_unseen_custom_erds_count_; i++) {
-        board_tally_add(&poll_tally, this->subscription_unseen_custom_erds_[i].board_address);
-      }
-
-      /* The wording, the stale-tally guard and the "the bridge already said it"
-       * suppression live in board_polled_summary_format (erd_bridge_common.h),
-       * where the unit tests can see them.  The label stays "Polled ERDs" rather
-       * than "Poll list:" or "Polling bridge:" because bridge_init logs the list as
-       * built and erd_bridge_poll logs the list handed to the bridge, and those
-       * counts differ from this one by design. */
+      /* The wording, the "the bridge already printed the count" suppression and the
+       * reason clauses live in board_polled_summary_format (erd_bridge_common.h),
+       * where the unit tests can see them.  The per-board split is read out of the
+       * running bridge's own list rather than subscription_unseen_custom_erds_:
+       * the probe phase drops unresponsive ERDs, so the built list is larger than
+       * what is polled and its split would not sum to the count printed beside it.
+       * The label stays "Polled ERDs" rather than "Poll list:" or "Polling bridge:"
+       * because bridge_init logs the list as built and erd_bridge_poll logs the
+       * list handed to the bridge, and those counts differ by design. */
       char polled_line[BOARD_POLLED_SUMMARY_BUF_SIZE];
-      if (board_polled_summary_format(&polled, &poll_tally, polled_line, sizeof(polled_line)) > 0) {
+      if (board_polled_summary_format(&polled, this->erd_bridge_poll_.erd_polling_addresses,
+                                      this->erd_bridge_poll_.polling_list_count,
+                                      polled_line, sizeof(polled_line)) > 0) {
         ESP_LOGD(TAG, "  %s", polled_line);
       }
     }

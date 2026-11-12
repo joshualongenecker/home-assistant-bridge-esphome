@@ -226,7 +226,8 @@ static inline int board_tally_format(const board_tally_t* self, char* out, size_
    * unterminated - the one case the loop cannot reach. */
   out[0] = '\0';
   if (self->count[0] == 0 && self->untracked == 0) {
-    return snprintf(out, out_len, "none");
+    const int n = snprintf(out, out_len, "none");
+    return (n >= (int) out_len) ? (int) out_len - 1 : n;  // stored, not would-be
   }
 
   int written = 0;
@@ -268,41 +269,43 @@ static inline int board_tally_format(const board_tally_t* self, char* out, size_
 }
 
 /*!
- * State the "Polled ERDs" summary line is derived from.  Plain values on purpose:
- * the summary exists only inside a log call, and ESP_LOGx compiles to nothing in
- * the unit build, so a branch that picks the wrong reason is invisible to the
- * suite unless the rendered line itself is observable.
+ * State the "Polled ERDs" summary line is derived from, for the cases where no
+ * polling bridge is running.  Plain values on purpose: the summary exists only
+ * inside a log call, and ESP_LOGx compiles to nothing in the unit build, so a
+ * branch that picks the wrong reason is invisible to the suite unless the
+ * rendered line itself is observable.
  */
 typedef struct {
   bool polling_bridge_initialized;
-  bool custom_erd_polling_started;
-  uint16_t polled_count;         /* polling_list_count while a bridge is running */
   uint16_t custom_erds_count;
   uint16_t unseen_custom_count;  /* custom ERDs the subscription set does not cover */
 } polled_erds_state_t;
 
-/* Prefix, a five-digit count, " (custom: ", a full tally, and the closer. */
+/* Prefix, a five-digit count, " (", a full tally, and the closer. */
 #define BOARD_POLLED_SUMMARY_BUF_SIZE (BOARD_TALLY_BUF_SIZE + 32)
 
 /*!
  * Render the "Polled ERDs" line into out.  Returns the number of characters
- * stored, or 0 with out[0] == '\0' when the line would add nothing.  tally may be
- * NULL.  Two rules here are not obvious from the code:
+ * stored, excluding the terminator, or 0 with out[0] == '\0' when the line would
+ * add nothing.
  *
- * - With a polling bridge running and no per-board split to add, the line is
- *   deliberately empty.  The polling bridge logs "Entered steady-state polling:
- *   N ERDs" (erd_bridge_poll.cpp, state entry) from the same polling_list_count
- *   field, on the very transition that makes the summary run, at INFO - so
- *   repeating the number at DEBUG duplicates an existing line rather than adding
- *   a third measurement.
- * - The tally rides only when custom polling is what built the running bridge.
- *   subscription_unseen_custom_erds_ describes the list start_custom_erd_polling_()
- *   built; after handle_subscription_failed() rebuilds the bridge from the full
- *   custom list, that array is a stale subset whose numbers no longer sum to the
- *   count printed beside it.
+ * polled_addresses / polled_count must come from the running polling bridge
+ * itself - erd_bridge_poll_t.erd_polling_addresses and .polling_list_count - and
+ * not from the list the bridge was built from.  The probe phase drops every ERD
+ * whose read failed ("Exclude the ERD from the polling list by simply not adding
+ * it", erd_bridge_poll.cpp), so the built list is strictly larger than what is
+ * polled whenever an ERD is unresponsive: gea-esphome-refer builds 60 and polls
+ * 53.  A split taken from the built list would not sum to the count printed
+ * beside it, which is the same defect the subscription-failure case had.
+ *
+ * With a bridge running the split is suppressed unless the polled set spans two
+ * or more boards.  The count itself is already logged at INFO by the bridge on
+ * the same transition ("Entered steady-state polling: N ERDs"), so on a
+ * single-board appliance the line would only repeat it at a lower level.
  */
 static inline int board_polled_summary_format(const polled_erds_state_t* st,
-                                              const board_tally_t* tally,
+                                              const uint8_t* polled_addresses,
+                                              uint16_t polled_count,
                                               char* out, size_t out_len)
 {
   if (out_len == 0) {
@@ -311,13 +314,28 @@ static inline int board_polled_summary_format(const polled_erds_state_t* st,
   out[0] = '\0';
 
   if (st->polling_bridge_initialized) {
-    if (!st->custom_erd_polling_started || st->unseen_custom_count == 0 || tally == NULL) {
+    if (polled_addresses == NULL || polled_count == 0) {
+      return 0;  /* probe phase has not filled the list yet */
+    }
+    board_tally_t tally;
+    board_tally_init(&tally);
+    for (uint16_t i = 0; i < polled_count; i++) {
+      board_tally_add(&tally, polled_addresses[i]);
+    }
+    uint8_t boards = (tally.untracked > 0) ? 1 : 0;
+    for (uint8_t i = 0; i < BOARD_TALLY_MAX; i++) {
+      if (tally.count[i] > 0) {
+        boards++;
+      }
+    }
+    if (boards < 2) {
       return 0;
     }
-    char boards[BOARD_TALLY_BUF_SIZE];
-    board_tally_format(tally, boards, sizeof(boards));
-    return snprintf(out, out_len, "Polled ERDs: %u (custom: %s)",
-                    (unsigned) st->polled_count, boards);
+    char split[BOARD_TALLY_BUF_SIZE];
+    board_tally_format(&tally, split, sizeof(split));
+    const int n = snprintf(out, out_len, "Polled ERDs: %u (%s)",
+                           (unsigned) polled_count, split);
+    return (n >= (int) out_len) ? (int) out_len - 1 : n;
   }
 
   if (st->custom_erds_count == 0) {
