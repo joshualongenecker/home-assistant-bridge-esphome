@@ -1371,3 +1371,38 @@ TEST(erd_cache_mqtt_publisher, pacing_never_locks_out_after_a_long_idle_period)
   CHECK_EQUAL(1, (int) xSemaphoreGive_double_count);
   CHECK_EQUAL((unsigned long) much_later, (unsigned long) publisher.last_work_signal_ms);
 }
+
+/* The pacing window measured across the millis() wrap.  A stamp just below
+ * 2^32 and a "now" just above zero are 48 ms apart, not 49.7 days apart, so the
+ * wake must still be paced; once the true gap passes the interval it must pass. */
+TEST(erd_cache_mqtt_publisher, pacing_window_is_rollover_safe)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+
+  uint8_t data = 0x42;
+  for (uint16_t i = 0; i < 20; i++) {
+    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
+  }
+
+  publisher.last_work_signal_ms = 0xFFFFFFF0u;
+
+  /* 48 ms after the stamp, having wrapped past zero: still paced. */
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(0x20u);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(0, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL(0xFFFFFFF0u, (unsigned long) publisher.last_work_signal_ms);
+
+  /* 160 ms after it: the window has elapsed, so the wake passes and restamps. */
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(0x90u);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(1, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL(0x90u, (unsigned long) publisher.last_work_signal_ms);
+}
