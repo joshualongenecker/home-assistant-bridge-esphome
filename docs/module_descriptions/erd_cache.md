@@ -99,7 +99,7 @@ typedef struct erd_cache_t {
 
 - `tiny_gea3_erd_client.h` — `tiny_erd_t` type definition
 - `<cstring>` — for `memcmp`
-- `esphome/core/log.h` — for `ESP_LOGD`, `ESP_LOGW`, `ESP_LOGE`
+- `esphome/core/log.h` — for `ESP_LOGV`, `ESP_LOGW`, `ESP_LOGE`
 
 ## Key Design Decisions
 
