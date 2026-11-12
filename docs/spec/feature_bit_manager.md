@@ -99,16 +99,18 @@ After all 11 ERD reads are complete (regardless of individual success or failure
 
 Parsing proceeds in three phases, each on separate timer ticks:
 
-1. **Initialization** (first tick): Clear `valid_erds_count_` and reset `valid_list_ready_`. The initialization phase shares this first tick with the first batch of common feature descriptors.
+1. **Initialization** (first tick): Clear `valid_erds_count_` and `skipped_erds_count_` and reset `valid_list_ready_`. The initialization phase shares this first tick with the first batch of common feature descriptors.
 2. **Common features** (ERD 0x0092): Process 17 common feature descriptors, 4 per tick (~5 ticks total, sharing the first tick with initialization). Each descriptor has a bit mask and a list of ERDs; if the bit is set in the common feature bitmap, all ERDs in the descriptor are added to `valid_erds_`.
 3. **Appliance features** (ERDs 0x0093–0x010D): Process one appliance ERD per tick (10 ticks). Each ERD contains a type, version, and feature bitmap. The bitmap is matched against the `appliance_feature_api_descriptors` table by type and version; matching descriptors contribute their ERDs to `valid_erds_`.
-4. **Finalization** (last tick): Add the mandatory ERDs (see Requirement 2.4), set `valid_list_ready_` to true, stop the parse timer, and transition to `FEATURE_BIT_STATE_COMPLETE`.
+4. **Finalization** (last tick): Add the mandatory ERDs (see Requirement 2.4), set `valid_list_ready_` to true, log `Feature bit parsing complete: N valid ERDs, M skipped (unsupported or unreadable)`, stop the parse timer, and transition to `FEATURE_BIT_STATE_COMPLETE`.
 
 ### Requirement 2.3: Parsing with Incomplete Data
 
 If an ERD read failed or returned less than the expected size:
 - **Common features (0x0092)**: If `erd_0092_size == 0`, the common feature parsing phase is skipped entirely (no ERDs added from common features).
 - **Appliance features**: If the ERD data is less than 8 bytes, that ERD is skipped (no ERDs added from it). If the type and version fields are all zeros and the feature bitmap is zero, the ERD is also skipped.
+
+Every skip goes through `skip_to_next_erd_()`, which increments `skipped_erds_count_` once (exposed as `get_skipped_erd_count()`). The count therefore covers three different causes — a feature the appliance does not support, a read that failed for a reason the parser never inspects (a bus or queue timeout counts the same as an absent feature), and a read that arrived out of order or empty. The aggregate lines say `skipped (unsupported or unreadable)` rather than `skipped as unsupported` for that reason: the counter does not distinguish the causes, and "unsupported" tells an operator to stop looking. Queue-full retries are routed through `queue_retry_` and never reach `skip_to_next_erd_`, so a retry does not inflate the count.
 
 ### Requirement 2.4: Mandatory ERDs
 

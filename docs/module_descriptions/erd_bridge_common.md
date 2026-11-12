@@ -52,6 +52,23 @@ The `erd_set_t` struct replaces the previous `std::set<tiny_erd_t>` to eliminate
 | `erd_set_insert(self, erd)` | Inserts at the correct sorted position; returns `false` if already present or capacity exceeded |
 | `erd_set_clear(self)` | Resets `count` to 0 (does not zero the data array) |
 
+## Board Tally and Boot Summary Lines
+
+`board_tally_t` counts "how many ERDs per board" in a fixed four-slot table so the boot summary stays one line on a multi-board appliance; the fifth and later boards collapse into `+N more`. `PROBE_ENTRY_DEFAULT_ADDRESS` (the `0xFF` primary-board sentinel) renders as `primary`, never as an address, and a physical `0x00` stays a distinct board. `board_tally_format` never writes past `out_len`, always NUL-terminates (the terminator is armed before any write), and returns the number of characters stored. `BOARD_TALLY_BUF_SIZE` (64) holds the widest line the type can render, 62 characters.
+
+`board_polled_summary_format` renders the `Polled ERDs:` line from `polled_erds_state_t` plus the running polling bridge's own `erd_polling_addresses[]`/`polling_list_count`, and returns 0 (empty line) when it would add nothing — the bridge already logs `Entered steady-state polling: N ERDs` at INFO, so a single-board split is suppressed. The split must come from the polled list rather than the list the bridge was built from: the probe phase drops every ERD whose read failed, so the built list is larger than what is polled whenever an ERD is unresponsive.
+
+These are pure functions in the header rather than inline log calls because the summary exists only inside an `ESP_LOGD`, and `ESP_LOGx` expands to nothing in the unit build — the branch choices would otherwise be untestable.
+
+### API
+
+| Function | Description |
+|----------|-------------|
+| `board_tally_init(self)` | Zeroes the tally |
+| `board_tally_add(self, address)` | Counts one ERD for `address`, or into `untracked` past four boards |
+| `board_tally_format(self, out, out_len)` | Renders `primary 41, 0xC0 24` (empty → `none`); returns characters stored |
+| `board_polled_summary_format(st, polled_addresses, polled_count, out, out_len)` | Renders the `Polled ERDs:` line, or 0 with an empty buffer when it adds nothing |
+
 ## Utility Templates
 
 ### `arm_timer(T* self, tiny_timer_ticks_t ticks)`

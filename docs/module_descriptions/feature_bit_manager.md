@@ -12,6 +12,7 @@ Reads and parses appliance API feature bit ERDs (0x0092 through 0x010D), buildin
 | `cleanup()` | Unsubscribe from events and stop timers. Safe to call multiple times. |
 | `start()` | Start the feature-bit reading sequence. Idempotent with `read_queued_` guard. |
 | `get_valid_erd_count()` | Returns the number of valid ERDs. |
+| `get_skipped_erd_count()` | Returns how many feature-list ERDs were skipped. Covers unsupported features, failed reads (the failure reason is not inspected), and out-of-order or empty reads — reported as `skipped (unsupported or unreadable)`. |
 | `get_valid_erd(idx)` | Returns the valid ERD at the given index (0-based). |
 | `get_state()` | Returns the current `FeatureBitState` |
 ## State Machine
@@ -65,7 +66,7 @@ The manager is fully self-driving with no polling from the bridge:
 - **No timeout**: The feature bits phase has no timeout. The HSM handles appliance loss.
 - **No MQTT dependency**: Removed `i_mqtt_client` dependency. The manager only needs the ERD client and timer group.
 - **No `run()` method**: The manager is fully event-driven and timer-driven. The bridge does not poll `run()`.
-- **Read failure**: Each ERD read that fails is skipped (not retried). The manager advances to the next ERD in the sequence.
+- **Read failure**: Each ERD read that fails is skipped (not retried) and counted in `skipped_erds_count_`. The manager advances to the next ERD in the sequence. Queue-full retries go through a separate retry path and are not counted as skips.
 - **Common Feature API failure**: If ERD 0x0092 fails, the manager transitions to `FEATURE_BIT_STATE_FAILED` instead of continuing. The bridge falls back to full polling (no feature filtering). `is_feature_bits_complete()` returns true for FAILED, allowing the HSM to transition past the feature_bits phase.
 - **Queue full retry**: If `tiny_gea3_erd_client_read()` returns false (queue full), the manager arms a one-shot retry timer (50ms). If an ERD activity event arrives before the timer fires and queues the read, the timer becomes a no-op. This prevents indefinite stalling when the queue is persistently full with no other activity.
 - **Event filtering**: `on_erd_activity_()` filters by `address == host_address_` AND verifies the event's ERD matches the one the current READING state expects. Unrelated reads (e.g., from the polling bridge) are ignored. Events in PARSING, COMPLETE, or FAILED states are also ignored to prevent state machine corruption.

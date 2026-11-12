@@ -194,6 +194,27 @@ logger:
     uart: DEBUG
 ```
 
+### Read the Boot Summary
+
+At DEBUG the bridge prints one line per subsystem when it first reaches steady state, instead of one line per ERD:
+
+```text
+[D][geappliances_bridge]:   Custom ERDs: 65 configured (primary 65)
+[D][geappliances_bridge]:   Subscription: 151 ERDs (host board 0xC0)
+[D][geappliances_bridge]:   Feature bits: 106 valid, 7 skipped (unsupported or unreadable)
+[D][ha_discovery_manager]:  Discovery: 151 ERDs to publish
+```
+
+| Line | What it answers |
+|------|-----------------|
+| `Custom ERDs:` | How many ERDs the YAML declares, split by board. `primary` is the primary board; a physical board address is always `0x00`–`0xFE`. |
+| `Subscription:` | How many ERDs the subscription bridge subscribed to, and the host board it subscribed from. |
+| `Polled ERDs:` | Present only when it adds something: the per-board split of what the polling bridge actually polls (multi-board appliances), or, when nothing is polled, why — `no custom ERDs configured`, `custom ERDs all arrive by subscription`, or `N custom ERDs uncovered, no polling bridge`. The polled count itself is logged at INFO by the bridge as `Entered steady-state polling: N ERDs`. |
+| `Feature bits:` | ERDs the feature API declared valid, and how many were skipped. `unsupported or unreadable` is deliberate: a read that timed out counts the same as a feature the appliance lacks, so the number is not a list of missing features. |
+| `Discovery:` | One line per discovery run, not per boot — a normal boot whose stored discovery record is unchanged runs no discovery and prints nothing. |
+
+The per-entry detail these lines replaced is still logged at VERBOSE, which compiles out below that level, so a device built with `logger: level: VERBOSE` still shows every ERD as it is cached or skipped.
+
 ### Monitor MQTT Traffic
 
 ```bash

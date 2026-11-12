@@ -144,6 +144,62 @@ A fixed-capacity sorted array that replaces `std::set<tiny_erd_t>`. Capacity is 
 | `erd_set_clear(self)` | `void` | Resets `count` to zero without clearing the underlying array. |
 
 
+### 2.6 Board Tally (`board_tally_t`)
+
+```c
+#define BOARD_TALLY_MAX 4
+#define BOARD_TALLY_BUF_SIZE 64
+
+typedef struct {
+  uint8_t address[BOARD_TALLY_MAX];
+  uint16_t count[BOARD_TALLY_MAX];
+  uint16_t untracked;
+} board_tally_t;
+```
+
+A fixed-capacity "how many per board" counter used by the boot summary lines, so a multi-board appliance cannot emit one log line per board. Boards are kept in first-seen order; the fifth and later boards collapse into `untracked`.
+
+| Function | Return | Description |
+|----------|--------|-------------|
+| `board_tally_init(self)` | `void` | Zeroes the tally. |
+| `board_tally_add(self, address)` | `void` | Increments the slot for `address`, taking a free slot on first sight, otherwise counting into `untracked`. |
+| `board_tally_format(self, out, out_len)` | `int` | Renders `primary 41, 0xC0 24`; an empty tally renders `none`; extra boards render `+N more`. Returns characters stored, excluding the terminator. |
+
+Contract:
+
+- `PROBE_ENTRY_DEFAULT_ADDRESS` (`0xFF`, the "primary board" sentinel) renders as `primary`, never as `0xFF`. A physical board address is always `0x00`–`0xFE`, so `0x00` stays a distinct board and is never conflated with the sentinel.
+- Never writes past `out_len`, and always NUL-terminates: `out[0] = '\0'` is armed before any write, so a one-byte buffer with a non-empty tally yields the empty string instead of an unterminated buffer. A non-empty tally never renders as `none` — that would read as "no boards" on a multi-board appliance.
+- The widest line the type can render is 62 characters (`primary 65535, 0xC0 65535, 0xC1 65535, 0xC2 65535, +65535 more`); `BOARD_TALLY_BUF_SIZE` is 64 for exactly that reason. A shorter buffer truncates wherever `snprintf` stopped and returns the stored length, not the would-be length.
+
+### 2.7 Polled-ERDs Summary Line (`board_polled_summary_format`)
+
+```c
+typedef struct {
+  bool polling_bridge_initialized;
+  uint16_t custom_erds_count;
+  uint16_t unseen_custom_count;
+} polled_erds_state_t;
+
+#define BOARD_POLLED_SUMMARY_BUF_SIZE (BOARD_TALLY_BUF_SIZE + 32)
+
+static inline int board_polled_summary_format(const polled_erds_state_t* st,
+                                              const uint8_t* polled_addresses,
+                                              uint16_t polled_count,
+                                              char* out, size_t out_len);
+```
+
+Renders the `Polled ERDs:` line into `out`; returns characters stored, or 0 with `out[0] == '\0'` when the line would add nothing. It is a pure function rather than inline log calls because the line exists only inside an `ESP_LOGD`, and `ESP_LOGx` expands to nothing in the unit build — every branch choice would otherwise be invisible to the suite.
+
+| Condition | Output |
+|-----------|--------|
+| Polling bridge running, polled set spans two or more boards | `Polled ERDs: 53 (primary 43, 0xC0 10)` |
+| Polling bridge running, single board, or list not filled yet | empty — the bridge logs `Entered steady-state polling: N ERDs` at INFO on the same transition, from the same count |
+| No polling bridge, no custom ERDs configured | `Polled ERDs: none - no custom ERDs configured` |
+| No polling bridge, every custom ERD covered by the subscription | `Polled ERDs: none - custom ERDs all arrive by subscription` |
+| No polling bridge, custom ERDs left uncovered | `Polled ERDs: none - N custom ERDs uncovered, no polling bridge` |
+
+`polled_addresses` / `polled_count` MUST come from the running polling bridge — `erd_bridge_poll_t.erd_polling_addresses` and `.polling_list_count`, written as a pair by `add_erd_to_polling_list()` — and not from the list the bridge was built from. The probe phase excludes every ERD whose read failed, so the built list is strictly larger than what is polled whenever an ERD is unresponsive (observed on hardware: 60 built, 53 polled), and a split taken from it would not sum to the count printed beside it.
+
 ---
 
 ## 3. Behavior
