@@ -17,6 +17,8 @@ static tiny_hsm_result_t write_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t sign
 static tiny_hsm_result_t state_ready(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
 static tiny_hsm_result_t state_writing(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
 
+static void start_next_write(erd_write_bridge_t* self);
+
 static tiny_hsm_result_t write_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data)
 {
   (void)hsm;
@@ -25,40 +27,117 @@ static tiny_hsm_result_t write_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t sign
   return tiny_hsm_result_signal_deferred;
 }
 
+static void report_write_failure(erd_write_bridge_t* self, tiny_erd_t erd, uint8_t board_address,
+  tiny_gea3_erd_client_write_failure_reason_t reason)
+{
+  mqtt_client_update_erd_write_result(self->mqtt_client, erd, board_address, false, reason);
+}
+
+/*!
+ * Pop the head of the queue and put it on the bus, then stay in
+ * state_writing until the ERD client reports the result. Requests the ERD
+ * client cannot accept are reported here (they never become in-flight), and
+ * the next queued request is tried so one bad request cannot stall the queue.
+ *
+ * Does nothing while the queue is empty; the bridge is then idle in
+ * state_ready.
+ */
+static void start_next_write(erd_write_bridge_t* self)
+{
+  while(self->queue_count > 0) {
+    erd_write_request_t* request = &self->queue[self->queue_head];
+
+    // Primary-board topics (board_address == 0xFF, the broadcast sentinel)
+    // route to the detected host address; secondary-board topics route to
+    // the parsed address.
+    uint8_t target_address = (request->board_address != tiny_gea_broadcast_address)
+      ? request->board_address
+      : self->erd_host_address;
+
+    tiny_gea3_erd_client_request_id_t request_id;
+    if(tiny_gea3_erd_client_write(self->erd_client, &request_id, target_address,
+       request->erd, request->value, request->size)) {
+      self->pending_request_id = request_id;
+      self->pending_erd = request->erd;
+      self->pending_board_address = request->board_address;
+
+      self->queue_head = (self->queue_head + 1) % erd_write_bridge_queue_capacity;
+      self->queue_count--;
+
+      tiny_hsm_transition(&self->hsm, state_writing);
+      return;
+    }
+
+    // Copy the identity out before popping: popping only moves the head, but
+    // the next iteration may overwrite this slot.
+    tiny_erd_t failed_erd = request->erd;
+    uint8_t failed_board_address = request->board_address;
+
+    self->queue_head = (self->queue_head + 1) % erd_write_bridge_queue_capacity;
+    self->queue_count--;
+
+    ESP_LOGW(TAG, "Write request for ERD 0x%04x failed to queue", failed_erd);
+    report_write_failure(self, failed_erd, failed_board_address,
+      tiny_gea3_erd_client_write_failure_reason_retries_exhausted);
+  }
+}
+
+/*!
+ * Queue a write request, or reject it with a write_result if it cannot be
+ * honored. Whether the new request goes straight onto the bus is the caller's
+ * decision: only `state_ready` pumps the queue, so a request that arrives
+ * while a write is in flight always waits its turn.
+ *
+ * The payload has to be copied: the event args point at the MQTT client's
+ * stack buffer, which is only valid for the duration of the event.
+ */
+static void enqueue_write_request(erd_write_bridge_t* self, const mqtt_client_on_write_request_args_t* args)
+{
+  if(self->erd_host_address == tiny_gea_broadcast_address) {
+    ESP_LOGW(TAG, "Write request for ERD 0x%04x dropped: appliance not identified", args->erd);
+    report_write_failure(self, args->erd, args->board_address,
+      tiny_gea3_erd_client_write_failure_reason_not_supported);
+    return;
+  }
+
+  if(args->size > ERD_WRITE_MAX_DATA_SIZE) {
+    ESP_LOGW(TAG, "Write request for ERD 0x%04x dropped: %u byte payload exceeds the %u byte limit",
+      args->erd, (unsigned)args->size, (unsigned)ERD_WRITE_MAX_DATA_SIZE);
+    report_write_failure(self, args->erd, args->board_address,
+      tiny_gea3_erd_client_write_failure_reason_incorrect_size);
+    return;
+  }
+
+  if(self->queue_count == erd_write_bridge_queue_capacity) {
+    ESP_LOGW(TAG, "Write request for ERD 0x%04x dropped: write queue full (%u pending)",
+      args->erd, (unsigned)self->queue_count);
+    report_write_failure(self, args->erd, args->board_address,
+      tiny_gea3_erd_client_write_failure_reason_retries_exhausted);
+    return;
+  }
+
+  erd_write_request_t* slot = &self->queue[(self->queue_head + self->queue_count) % erd_write_bridge_queue_capacity];
+  slot->erd = args->erd;
+  slot->board_address = args->board_address;
+  slot->size = args->size;
+  if(args->value != nullptr && args->size > 0) {
+    memcpy(slot->value, args->value, args->size);
+  }
+
+  self->queue_count++;
+}
+
 static tiny_hsm_result_t state_ready(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data)
 {
   erd_write_bridge_t* self = container_of(erd_write_bridge_t, hsm, hsm);
 
   switch(signal) {
-    case signal_write_requested: {
-      auto args = reinterpret_cast<const mqtt_client_on_write_request_args_t*>(data);
-
-      if(self->erd_host_address == tiny_gea_broadcast_address) {
-        ESP_LOGW(TAG, "Write request for ERD 0x%04x dropped: appliance not identified", args->erd);
-        mqtt_client_update_erd_write_result(self->mqtt_client, args->erd, args->board_address, false,
-          tiny_gea3_erd_client_write_failure_reason_not_supported);
-        break;
-      }
-
-      // Primary-board topics (board_address == 0xFF, the broadcast sentinel)
-      // route to the detected host address; secondary-board topics route to
-      // the parsed address.
-      uint8_t target_address = (args->board_address != tiny_gea_broadcast_address) ? args->board_address : self->erd_host_address;
-
-      tiny_gea3_erd_client_request_id_t request_id;
-      if(!tiny_gea3_erd_client_write(self->erd_client, &request_id, target_address,
-         args->erd, args->value, args->size)) {
-        ESP_LOGW(TAG, "Write request for ERD 0x%04x failed to queue", args->erd);
-        mqtt_client_update_erd_write_result(self->mqtt_client, args->erd, args->board_address, false,
-          tiny_gea3_erd_client_write_failure_reason_retries_exhausted);
-        break;
-      }
-
-      self->pending_request_id = request_id;
-      self->pending_erd = args->erd;
-      self->pending_board_address = args->board_address;
-      tiny_hsm_transition(hsm, state_writing);
-    } break;
+    case signal_write_requested:
+      // Nothing is in flight, so the queue holds only this request: it goes
+      // out immediately.
+      enqueue_write_request(self, reinterpret_cast<const mqtt_client_on_write_request_args_t*>(data));
+      start_next_write(self);
+      break;
 
     default:
       return tiny_hsm_result_signal_deferred;
@@ -73,8 +152,11 @@ static tiny_hsm_result_t state_writing(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
 
   switch(signal) {
     case signal_write_requested: {
-      [[maybe_unused]] auto args = reinterpret_cast<const mqtt_client_on_write_request_args_t*>(data);
-      ESP_LOGW(TAG, "Write request for ERD 0x%04x dropped: write already in progress", args->erd);
+      auto args = reinterpret_cast<const mqtt_client_on_write_request_args_t*>(data);
+      // The bus is busy with the previous write; this one waits its turn
+      // unless the queue is already full, in which case it is rejected with a
+      // write_result rather than dropped silently.
+      enqueue_write_request(self, args);
     } break;
 
     case signal_write_completed: {
@@ -87,6 +169,7 @@ static tiny_hsm_result_t state_writing(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       mqtt_client_update_erd_write_result(self->mqtt_client, self->pending_erd, self->pending_board_address, true,
         0);
       tiny_hsm_transition(hsm, state_ready);
+      start_next_write(self);
     } break;
 
     case signal_write_failed: {
@@ -99,6 +182,7 @@ static tiny_hsm_result_t state_writing(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       mqtt_client_update_erd_write_result(self->mqtt_client, self->pending_erd, self->pending_board_address, false,
         args->write_failed.reason);
       tiny_hsm_transition(hsm, state_ready);
+      start_next_write(self);
     } break;
     default:
       return tiny_hsm_result_signal_deferred;
@@ -128,6 +212,8 @@ void erd_write_bridge_init(
   self->erd_client = erd_client;
   self->mqtt_client = mqtt_client;
   self->erd_host_address = host_address;
+  self->queue_head = 0;
+  self->queue_count = 0;
   self->pending_request_id = 0;
   self->pending_erd = 0;
   self->pending_board_address = tiny_gea_broadcast_address;

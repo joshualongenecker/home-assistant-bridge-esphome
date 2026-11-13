@@ -13,6 +13,8 @@ extern "C" {
 #include "simulation_test_base.h"
 #include "tiny_gea_constants.h"
 
+#include <cstring>
+
 TEST_GROUP_BASE(erd_write_bridge, simulation_test_base)
 {
   erd_write_bridge_t self;
@@ -111,6 +113,23 @@ TEST_GROUP_BASE(erd_write_bridge, simulation_test_base)
       .ignoreOtherParameters()
       .andReturnValue(true);
   }
+
+  /* Expect one write on the bus with an exact payload, and hand back
+   * `returned_id` as its request id. The expected payload lives in storage
+   * owned by the test, so a queued write that replays a stale pointer to the
+   * caller's buffer shows up as a mismatch here. */
+  void expect_write(tiny_erd_t erd, uint8_t address, const uint8_t* value, uint8_t size,
+    tiny_gea3_erd_client_request_id_t* returned_id)
+  {
+    mock()
+      .expectOneCall("write")
+      .onObject(&erd_client)
+      .withParameter("address", address)
+      .withParameter("erd", erd)
+      .withMemoryBufferParameter("data", value, size)
+      .withOutputParameterReturning("request_id", returned_id, sizeof(*returned_id))
+      .andReturnValue(true);
+  }
 };
 
 TEST(erd_write_bridge, should_forward_write_to_erd_client_when_host_address_is_known)
@@ -197,19 +216,193 @@ TEST(erd_write_bridge, should_report_write_failure_to_mqtt)
   when_a_write_fails(mock_request_id, 0x3001, tiny_gea3_erd_client_write_failure_reason_not_supported);
 }
 
-TEST(erd_write_bridge, should_drop_second_write_while_first_is_in_progress)
+TEST(erd_write_bridge, should_queue_a_write_that_arrives_during_an_in_flight_write)
 {
   given_that_the_bridge_has_been_initialized();
 
-  uint8_t value1 = 0x01;
-  expect_write_succeeds();
-  when_a_write_request_is_received(0x3001, &value1, sizeof(value1));
+  tiny_gea3_erd_client_request_id_t first_id{1};
+  tiny_gea3_erd_client_request_id_t second_id{2};
+  uint8_t first_value = 0x01;
+  uint8_t second_value = 0x02;
 
-  uint8_t value2 = 0x02;
-  when_a_write_request_is_received(0x3002, &value2, sizeof(value2));
-
+  // Expectations are declared in the order the calls actually happen: the
+  // second write only reaches the bus after the first one has been reported.
+  expect_write(0x3001, 0xC0, &first_value, sizeof(first_value), &first_id);
   should_report_write_result(0x3001, true, 0);
-  when_a_write_is_completed(mock_request_id, 0x3001);
+  expect_write(0x3002, 0xC0, &second_value, sizeof(second_value), &second_id);
+  should_report_write_result(0x3002, true, 0);
+
+  when_a_write_request_is_received(0x3001, &first_value, sizeof(first_value));
+  when_a_write_request_is_received(0x3002, &second_value, sizeof(second_value));
+
+  when_a_write_is_completed(first_id, 0x3001);
+  when_a_write_is_completed(second_id, 0x3002);
+
+  mock().checkExpectations();
+}
+
+TEST(erd_write_bridge, queued_write_sends_the_payload_copied_when_it_was_accepted)
+{
+  given_that_the_bridge_has_been_initialized();
+
+  tiny_gea3_erd_client_request_id_t first_id{1};
+  tiny_gea3_erd_client_request_id_t second_id{2};
+  const uint8_t first_payload[2] = {0x11, 0x12};
+  const uint8_t second_payload[2] = {0xAA, 0xBB};
+  uint8_t caller_buffer[2];
+
+  expect_write(0x3001, 0xC0, first_payload, sizeof(first_payload), &first_id);
+  should_report_write_result(0x3001, true, 0);
+  expect_write(0x3002, 0xC0, second_payload, sizeof(second_payload), &second_id);
+  should_report_write_result(0x3002, true, 0);
+
+  memcpy(caller_buffer, first_payload, sizeof(first_payload));
+  when_a_write_request_is_received(0x3001, caller_buffer, sizeof(caller_buffer));
+
+  memcpy(caller_buffer, second_payload, sizeof(second_payload));
+  when_a_write_request_is_received(0x3002, caller_buffer, sizeof(caller_buffer));
+
+  // The MQTT adapter reuses one stack buffer per write message, so the queued
+  // request's buffer is gone before the queued write is ever sent.
+  memset(caller_buffer, 0x00, sizeof(caller_buffer));
+
+  when_a_write_is_completed(first_id, 0x3001);
+  when_a_write_is_completed(second_id, 0x3002);
+
+  mock().checkExpectations();
+}
+
+TEST(erd_write_bridge, should_report_queued_secondary_board_write_on_its_own_topic)
+{
+  given_that_the_bridge_has_been_initialized();
+
+  tiny_gea3_erd_client_request_id_t first_id{1};
+  tiny_gea3_erd_client_request_id_t second_id{2};
+  uint8_t value = 0x01;
+
+  expect_write(0x3001, 0xC0, &value, sizeof(value), &first_id);
+  should_report_write_result(0x3001, true, 0, 0xFF);
+  expect_write(0x3002, 0xA1, &value, sizeof(value), &second_id);
+  should_report_write_result(0x3002, true, 0, 0xA1);
+
+  when_a_write_request_is_received(0x3001, &value, sizeof(value), 0xFF);
+  when_a_write_request_is_received(0x3002, &value, sizeof(value), 0xA1);
+
+  when_a_write_is_completed(first_id, 0x3001);
+  when_a_write_is_completed(second_id, 0x3002);
+
+  mock().checkExpectations();
+}
+
+TEST(erd_write_bridge, a_stale_completion_publishes_nothing_and_starts_no_write)
+{
+  given_that_the_bridge_has_been_initialized();
+
+  tiny_gea3_erd_client_request_id_t first_id{1};
+  uint8_t value = 0x01;
+
+  // The only call this test tolerates is the write that went out before the
+  // stale event. Declaring no result expectation is the assertion: a
+  // completion carrying an unexpected request id that consumed the in-flight
+  // slot would show up as an unexpected publish or an unexpected second
+  // write.
+  expect_write(0x3001, 0xC0, &value, sizeof(value), &first_id);
+
+  when_a_write_request_is_received(0x3001, &value, sizeof(value));
+  when_a_write_request_is_received(0x3002, &value, sizeof(value));
+
+  when_a_write_is_completed(99, 0x3001);
+
+  mock().checkExpectations();
+}
+
+TEST(erd_write_bridge, should_still_drain_the_queue_after_a_stale_completion)
+{
+  given_that_the_bridge_has_been_initialized();
+
+  tiny_gea3_erd_client_request_id_t first_id{1};
+  tiny_gea3_erd_client_request_id_t second_id{2};
+  uint8_t value = 0x01;
+
+  expect_write(0x3001, 0xC0, &value, sizeof(value), &first_id);
+  should_report_write_result(0x3001, true, 0);
+  expect_write(0x3002, 0xC0, &value, sizeof(value), &second_id);
+  should_report_write_result(0x3002, true, 0);
+
+  when_a_write_request_is_received(0x3001, &value, sizeof(value));
+  when_a_write_request_is_received(0x3002, &value, sizeof(value));
+
+  when_a_write_is_completed(99, 0x3001);
+
+  when_a_write_is_completed(first_id, 0x3001);
+  when_a_write_is_completed(second_id, 0x3002);
+
+  mock().checkExpectations();
+}
+
+TEST(erd_write_bridge, should_report_queued_write_that_fails_to_queue_and_keep_draining)
+{
+  given_that_the_bridge_has_been_initialized();
+
+  tiny_gea3_erd_client_request_id_t first_id{1};
+  tiny_gea3_erd_client_request_id_t third_id{3};
+  uint8_t value = 0x01;
+
+  expect_write(0x3001, 0xC0, &value, sizeof(value), &first_id);
+  should_report_write_result(0x3001, true, 0);
+  mock()
+    .expectOneCall("write")
+    .onObject(&erd_client)
+    .withParameter("erd", 0x3002)
+    .ignoreOtherParameters()
+    .andReturnValue(false);
+  should_report_write_result(0x3002, false, tiny_gea3_erd_client_write_failure_reason_retries_exhausted);
+  expect_write(0x3003, 0xC0, &value, sizeof(value), &third_id);
+  should_report_write_result(0x3003, true, 0);
+
+  when_a_write_request_is_received(0x3001, &value, sizeof(value));
+  when_a_write_request_is_received(0x3002, &value, sizeof(value));
+  when_a_write_request_is_received(0x3003, &value, sizeof(value));
+
+  // Completing the first write drains 0x3002 (which the ERD client refuses)
+  // and still puts 0x3003 on the bus.
+  when_a_write_is_completed(first_id, 0x3001);
+  when_a_write_is_completed(third_id, 0x3003);
+
+  mock().checkExpectations();
+}
+
+TEST(erd_write_bridge, should_report_write_result_when_the_write_queue_is_full)
+{
+  given_that_the_bridge_has_been_initialized();
+
+  tiny_gea3_erd_client_request_id_t first_id{1};
+  uint8_t value = 0x01;
+
+  // One write goes out and erd_write_bridge_queue_capacity more are queued;
+  // the request after that is refused, and the refusal is published before
+  // any queued write reaches the bus.
+  expect_write(0x3001, 0xC0, &value, sizeof(value), &first_id);
+  should_report_write_result(0x3006, false, tiny_gea3_erd_client_write_failure_reason_retries_exhausted);
+
+  for(tiny_erd_t offset = 0; offset <= erd_write_bridge_queue_capacity; offset++) {
+    when_a_write_request_is_received(0x3001 + offset, &value, sizeof(value));
+  }
+  when_a_write_request_is_received(0x3006, &value, sizeof(value));
+
+  mock().checkExpectations();
+}
+
+TEST(erd_write_bridge, should_reject_write_with_payload_larger_than_the_limit)
+{
+  given_that_the_bridge_has_been_initialized();
+
+  uint8_t value[ERD_WRITE_MAX_DATA_SIZE + 1] = {0};
+
+  should_report_write_result(0x3001, false, tiny_gea3_erd_client_write_failure_reason_incorrect_size);
+  when_a_write_request_is_received(0x3001, value, sizeof(value));
+
+  mock().checkExpectations();
 }
 
 TEST(erd_write_bridge, should_handle_write_when_erd_client_queue_is_full)
