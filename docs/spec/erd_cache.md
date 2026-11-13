@@ -35,8 +35,8 @@ Initializes the cache for use. Safe to call on a previously-initialized cache (r
 
 **Behavior:**
 1. Explicitly zeroes all entry fields (erd, board_address, data_offset, update_required, publish_cooldown, valid) — avoids UBSan issues with bool fields after `memset`. `data_size` is NOT zeroed; `valid` gates every read of it.
-2. Resets `arena_offset` to 0 and clears the arena itself (`memset`, `erd_cache.cpp:62`), so bytes left by a previous generation are never readable through a reused slot
-3. Resets all counters (`update_count`, `update_count_window`, `required_update_count`, `required_update_count_window`, `dirty_count`) to zero, plus `max_cooldown` (`erd_cache.cpp:68`) — the configured rate limit, not a counter
+2. Resets `arena_offset` to 0 and clears the arena itself (`memset` in `erd_cache_reset()`), so bytes left by a previous generation are never readable through a reused slot
+3. Resets all counters (`update_count`, `update_count_window`, `required_update_count`, `required_update_count_window`, `dirty_count`) to zero, plus `max_cooldown` — the configured rate limit, not a counter (both in `erd_cache_reset()`)
 4. Sets `self->initialized = true`
 
 No heap deallocation is needed — the arena is static memory.
@@ -229,7 +229,7 @@ The window is determined by the call interval of the consumer (e.g., ~60 s if ca
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `erd_cache_entry_data` | `const uint8_t* erd_cache_entry_data(const erd_cache_t* self, const erd_cache_entry_t* entry)` | Returns a pointer to the ERD data in the arena. Returns `NULL` when `entry` is `NULL` or `entry->valid` is false (`erd_cache.cpp:349-353`); `data_offset == 0` is a legitimate first allocation and is not an error. Defined in `erd_cache.cpp`, not inline. |
+| `erd_cache_entry_data` | `const uint8_t* erd_cache_entry_data(const erd_cache_t* self, const erd_cache_entry_t* entry)` | Returns a pointer to the ERD data in the arena. Returns `NULL` when `entry` is `NULL` or `entry->valid` is false; `data_offset == 0` is a legitimate first allocation and is not an error. Defined in `erd_cache.cpp`, not inline. |
 | `erd_cache_get_arena_usage` | `static inline uint16_t erd_cache_get_arena_usage(const erd_cache_t* self)` | Returns the number of bytes currently used in the arena. |
 | `erd_cache_get_arena_usage_percent` | `static inline uint8_t erd_cache_get_arena_usage_percent(const erd_cache_t* self)` | Returns the arena usage as a percentage (0-100). |
 

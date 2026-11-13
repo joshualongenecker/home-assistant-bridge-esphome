@@ -187,7 +187,7 @@ The publisher subscribes to `mqtt_client_on_mqtt_connect` and `mqtt_client_on_mq
 void erd_cache_mqtt_publisher_on_connected(erd_cache_mqtt_publisher_t* self);
 - Set `mqtt_connected = true` (under `state_mutex` on ESP-IDF)
 - Reset `first_round_done = false` (under `state_mutex` on ESP-IDF)
-- Record the disconnect duration in `last_disconnect_duration_ms`. `disconnect_start_ms` is deliberately **not** reset here: repeated ESPHome reconnect attempts must measure the cumulative outage, not the last blip (`erd_cache_mqtt_publisher.cpp:376`)
+- Record the disconnect duration in `last_disconnect_duration_ms`. `disconnect_start_ms` is deliberately **not** reset here: repeated ESPHome reconnect attempts must measure the cumulative outage, not the last blip (the comment in `on_connected()`, `erd_cache_mqtt_publisher.cpp`)
 - If disconnect duration ≥ 60 s: call `erd_cache_mark_all_updated()` to mark all valid cache entries as `update_required`, reset `publish_index` to 0, then log info with the disconnect duration
 - If disconnect duration < 60 s: log info: "MQTT reconnected — resuming ERD cache publishing"
 - Call `erd_cache_mqtt_publisher_signal_work()` to wake the background task
