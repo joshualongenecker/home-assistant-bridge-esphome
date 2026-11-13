@@ -337,9 +337,12 @@ void GeappliancesBridge::update_publisher_state_()
     }
   }
 
-  /* Check steady state BEFORE signaling work — the background task sets
-   * first_round_done during its drain, and we want to read it before
-   * the next signal_work() wakes it again. */
+  /* Check steady state BEFORE this function's own signal_work() below - the
+   * background task sets first_round_done during its drain, and this read wants
+   * the value from before that give can wake it again.  Pacing may defer a wake;
+   * it can never advance one past this read.  The read is NOT ordered against
+   * every wake: resume() above signals work on this same iteration whenever the
+   * cache is attached, whether or not discovery had paused the publisher. */
   if (this->discovery_just_resumed_ &&
       erd_cache_mqtt_publisher_first_round_done(&this->erd_cache_publisher_)) {
     ESP_LOGI(TAG, "Device is in steady state");
@@ -539,13 +542,25 @@ void GeappliancesBridge::dump_config() {
     }
   }
   if (this->custom_erds_count_ > 0) {
-    ESP_LOGCONFIG(TAG, "  Custom ERDs: %u configured", this->custom_erds_count_);
+    // One summary line, not one per ERD: this loop was the largest single
+    // block of the boot log (65-92 lines on real appliances), and the board
+    // distribution is the only part it says that matters. Per-ERD detail is
+    // kept at VERBOSE. The tally is computed into locals so the helpers run
+    // even when the log macros are stubbed out in tests.
+    board_tally_t tally;
+    board_tally_init(&tally);
+    for (uint16_t i = 0; i < this->custom_erds_count_; i++) {
+      board_tally_add(&tally, this->custom_erds_[i].board_address);
+    }
+    char boards[BOARD_TALLY_BUF_SIZE];
+    board_tally_format(&tally, boards, sizeof(boards));
+    ESP_LOGD(TAG, "  Custom ERDs: %u configured (%s)", this->custom_erds_count_, boards);
     for (uint16_t i = 0; i < this->custom_erds_count_; i++) {
       const custom_erd_entry_t &entry = this->custom_erds_[i];
       if (entry.board_address == PROBE_ENTRY_DEFAULT_ADDRESS) {
-        ESP_LOGCONFIG(TAG, "    ERD 0x%04X: primary board", entry.erd);
+        ESP_LOGV(TAG, "    ERD 0x%04X: primary board", entry.erd);
       } else {
-        ESP_LOGCONFIG(TAG, "    ERD 0x%04X: address 0x%02X", entry.erd, entry.board_address);
+        ESP_LOGV(TAG, "    ERD 0x%04X: address 0x%02X", entry.erd, entry.board_address);
       }
     }
   }
@@ -744,6 +759,44 @@ bool GeappliancesBridge::check_steady_state()
              erd_cache_get_arena_usage(&this->erd_cache_),
              ERD_CACHE_ARENA_SIZE,
              erd_cache_get_arena_usage_percent(&this->erd_cache_));
+
+    /* One line per section, at DEBUG. The per-entry detail that used to
+     * accompany this (per-ERD config dump, per-cache-add, per-skipped feature
+     * ERD) is at VERBOSE now: ~200 boot lines of it overflowed the 30-slot
+     * MQTT log queue on the busier appliances, which is what the "Dropped N
+     * messages" warning was reporting. */
+    if (this->subscription_bridge_initialized_) {
+      ESP_LOGD(TAG, "  Subscription: %u ERDs (host board 0x%02X)",
+               this->erd_bridge_subscribe_.erd_set.count,
+               this->erd_bridge_subscribe_.erd_host_address);
+    }
+    {
+      polled_erds_state_t polled;
+      polled.polling_bridge_initialized = this->polling_bridge_initialized_;
+      polled.custom_erds_count = this->custom_erds_count_;
+      polled.unseen_custom_count = this->subscription_unseen_custom_erds_count_;
+
+      /* The wording, the "the bridge already printed the count" suppression and the
+       * reason clauses live in board_polled_summary_format (erd_bridge_common.h),
+       * where the unit tests can see them.  The per-board split is read out of the
+       * running bridge's own list rather than subscription_unseen_custom_erds_:
+       * the probe phase drops unresponsive ERDs, so the built list is larger than
+       * what is polled and its split would not sum to the count printed beside it.
+       * The label stays "Polled ERDs" rather than "Poll list:" or "Polling bridge:"
+       * because bridge_init logs the list as built and erd_bridge_poll logs the
+       * list handed to the bridge, and those counts differ by design. */
+      char polled_line[BOARD_POLLED_SUMMARY_BUF_SIZE];
+      if (board_polled_summary_format(&polled, this->erd_bridge_poll_.erd_polling_addresses,
+                                      this->erd_bridge_poll_.polling_list_count,
+                                      polled_line, sizeof(polled_line)) > 0) {
+        ESP_LOGD(TAG, "  %s", polled_line);
+      }
+    }
+    if (this->feature_bit_manager_.get_state() == FEATURE_BIT_STATE_COMPLETE) {
+      ESP_LOGD(TAG, "  Feature bits: %u valid, %u skipped (unsupported or unreadable)",
+               this->feature_bit_manager_.get_valid_erd_count(),
+               this->feature_bit_manager_.get_skipped_erd_count());
+    }
 
     if (this->generate_device_config_) {
       this->discovery_lifecycle_manager_.check_discovery_changes(

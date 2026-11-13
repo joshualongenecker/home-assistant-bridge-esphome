@@ -9,14 +9,25 @@
  * or cross-core interrupts; it models the C++ memory model, which is exactly
  * what the atomic claim relies on.
  *
- * Two trigger threads hammer the claim from Idle while the main thread runs
- * the machine through full cleanup -> publish -> reboot cycles and samples
- * the pairing invariants after every iteration:
+ * Two trigger threads hammer the claim while the main thread runs the machine
+ * through full cleanup -> publish -> reboot cycles and samples the pairing
+ * invariants after every iteration:
  *
  *   - a queued or active phase is never paired with kTriggerNone;
  *   - trigger_ never changes while a cycle is in flight (a losing trigger
  *     must not be able to write it, and a mid-cycle re-queue would
  *     necessarily rewrite trigger_).
+ *
+ * The main thread grants the next Idle window to one trigger kind at a time
+ * (`wanted` below) and opens the gate to both kinds while a cycle is in
+ * flight.  The claim is a bare compare-exchange with no fairness mechanism,
+ * and none is wanted, but an un-gated stress run is not a fair sample of it:
+ * on a two-core host the scheduler parks one thread for whole stretches, so
+ * the same kind can win every one of the 100 claims and the "both kinds
+ * completed a cycle" check then fails on a healthy machine.  Only the Idle
+ * window is single-kind; the other kind keeps calling its trigger for the
+ * rest of the cycle, which is what puts a losing writer in front of the
+ * mid-cycle check.
  *
  * Sampling is once per loop() call. A completed cycle always shows at least
  * one RebootPending sample (the delay cannot elapse in the call that enters
@@ -25,9 +36,14 @@
  * is skipped by a fast claimer. The one window that could false-positive is
  * an abort that leaves a phase inside a single loop() call (the
  * kPhaseTimeoutMs aborts, or a FAILED run) being immediately re-claimed
- * before the next sample; neither abort is reachable in this test (the
- * stepped clock never comes near the 5-minute budget, and publish runs are
- * steered to COMPLETE), so the counter stays exact here.
+ * before the next sample: the loop then sees a queued phase while still
+ * marked in-cycle and folds the two runs together.  Forcing it - lowering
+ * Cleaning's timeout to 1200 ms, which the stepped clock crosses in two
+ * iterations - folds between 5 and 596 re-claims per run (mean 116 over ten
+ * runs) into the preceding cycle, so the window is real; but neither abort is
+ * reachable in this test as written (the stepped clock never comes near the
+ * 5-minute budget, and publish runs are steered to COMPLETE), where it folds
+ * nothing - 0 in ten runs - and the counter stays exact.
  *
  * Under `make test TSAN=1` ThreadSanitizer additionally checks the
  * happens-before edges: the claimer's write to trigger_ must be published by
@@ -166,18 +182,52 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
   std::atomic<unsigned int> refresh_calls{0};
   std::atomic<unsigned int> ota_calls{0};
 
+  /* Which thread may claim the next Idle window.  The main thread opens the
+   * gate to both kinds - kTriggerNone, a value neither thread ever claims -
+   * while a cycle is in flight, and closes it on the first sample outside a
+   * cycle, which hands the next Idle window to the kind that did not just
+   * run one.  One atomic carries both jobs on purpose: a separate "gate
+   * open" flag would need two stores, and a thread could read the gate
+   * closed before reading the new grant, leaving a window no kind owns.
+   *
+   * Without the gate the both-kinds assertion below measures the host
+   * scheduler instead of the claim protocol: with two spinning threads on a
+   * two-core host one of them stays off-CPU long enough to lose all 100
+   * claims (measured 13 failures in 150 full-suite runs under
+   * `taskset -c 0,1`, and either kind could be the starved one).  Gating the
+   * Idle windows alone would trade that for the mid-cycle check, whose only
+   * signal is trigger_ differing from cycle_trigger: if only the winner ever
+   * calls a trigger, a regression that lets a losing trigger write trigger_
+   * stores the value the winner already stored and the check cannot see it.
+   * So the loser keeps hammering the reject path for the whole cycle.  The
+   * race stays live in both directions: the gate is read before the call, so
+   * a thread that passes it and is then preempted still lands its claim
+   * attempt on a phase the other thread already moved. */
+  std::atomic<Trigger> wanted{DiscoveryLifecycleManager::kTriggerDiscoveryRefresh};
+
   std::thread refresh([&] {
     while (!stop.load(std::memory_order_relaxed)) {
-      lifecycle_.trigger_discovery_refresh();
+      const Trigger w = wanted.load(std::memory_order_relaxed);
+      if (w == DiscoveryLifecycleManager::kTriggerDiscoveryRefresh ||
+          w == DiscoveryLifecycleManager::kTriggerNone) {
+        lifecycle_.trigger_discovery_refresh();
+        /* Count the attempt, not the loop: the gate below can hold a thread
+         * off its trigger for a whole cycle, so a loop counter would only
+         * prove the thread was scheduled. */
+        refresh_calls.fetch_add(1, std::memory_order_relaxed);
+      }
       std::this_thread::yield();
-      refresh_calls.fetch_add(1, std::memory_order_relaxed);
     }
   });
   std::thread ota([&] {
     while (!stop.load(std::memory_order_relaxed)) {
-      lifecycle_.trigger_ota_cleanup();
+      const Trigger w = wanted.load(std::memory_order_relaxed);
+      if (w == DiscoveryLifecycleManager::kTriggerOta ||
+          w == DiscoveryLifecycleManager::kTriggerNone) {
+        lifecycle_.trigger_ota_cleanup();
+        ota_calls.fetch_add(1, std::memory_order_relaxed);
+      }
       std::this_thread::yield();
-      ota_calls.fetch_add(1, std::memory_order_relaxed);
     }
   });
 
@@ -188,6 +238,20 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
   unsigned int refresh_cycles = 0;
   unsigned int ota_cycles = 0;
   unsigned int mid_cycle_trigger_change = 0;
+  /* Idle iterations to tolerate before treating the waiting kind as stuck, so
+   * a dropped-claim regression fails the both-kinds check instead of burning
+   * the iteration budget.  Sized from the measured tail, not from intuition:
+   * the longest run of consecutive Idle samples a *healthy* run produced was
+   * 615 unpinned on a 24-core host, 161 pinned to two cores, 2 pinned to one,
+   * so the previous 500 did fire on healthy machines and took a window from
+   * the kind it exists to protect.  The ceiling is the iteration budget: when
+   * one kind's claim is broken *every* window ends in a stall, because the
+   * close hands it the next one, so kTargetCycles x this value has to stay
+   * inside kMaxIterations or the run ends on the cycles check instead of
+   * naming the kind.  Measured: at 2000 the dropped-claim perturbation burned
+   * the budget and failed on cycles; at 1500 it names ota_cycles in ~90 ms. */
+  static const unsigned int kIdleStallSpins = 1500;
+  unsigned int idle_spins = 0;
 
   Phase previous = lifecycle_.phase();
   int i = 0;
@@ -223,10 +287,35 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
       if (!in_cycle) {
         in_cycle = true;
         cycle_trigger = trig;
+        /* Only the Idle window is granted to one kind at a time.  Once a
+         * cycle is in flight the gate opens to both, so the kind that lost
+         * the claim keeps trying to write trigger_ for the whole cycle;
+         * that is the race the mid-cycle check exists to see. */
+        wanted.store(DiscoveryLifecycleManager::kTriggerNone, std::memory_order_relaxed);
       } else if (cycle_trigger != trig) {
         mid_cycle_trigger_change++;
       }
     } else {
+      /* Outside a cycle the gate closes again, handing the next Idle window
+       * to the kind that did not just run one.  Keying on the open gate
+       * rather than on the phase is what makes this the backstop too: a
+       * cycle that ends without a RebootPending sample - a kPhaseTimeoutMs
+       * abort, a FAILED publish run - still gets its next Idle window
+       * granted to one kind instead of to both.  It still needs one sample
+       * outside the cycle to run, so the re-claimed-before-the-next-sample
+       * window noted at the top of this loop skips it as well as the
+       * mid-cycle check; that window is unreachable here for the same reason
+       * the counter stays exact.  Its mirror is a sample landing on
+       * kPhaseClaimed: the close still fires there, but cycle_trigger then
+       * belongs to the folded-away cycle, so the grant can go to the kind that
+       * just ran.  Neither case occurs as written. */
+      if (wanted.load(std::memory_order_relaxed) ==
+          DiscoveryLifecycleManager::kTriggerNone) {
+        wanted.store(cycle_trigger == DiscoveryLifecycleManager::kTriggerDiscoveryRefresh
+                        ? DiscoveryLifecycleManager::kTriggerOta
+                        : DiscoveryLifecycleManager::kTriggerDiscoveryRefresh,
+                     std::memory_order_relaxed);
+      }
       if (previous == DiscoveryLifecycleManager::kPhaseRebootPending &&
           now == DiscoveryLifecycleManager::kPhaseIdle) {
         cycles++;
@@ -240,6 +329,27 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
         }
       }
       in_cycle = false;
+    }
+    if (now == DiscoveryLifecycleManager::kPhaseIdle) {
+      /* Idle means the machine is waiting on the thread holding permission,
+       * and spinning here without yielding is what keeps that thread off the
+       * CPU on a host with fewer cores than runnable threads.  If it never
+       * claims at all - a regression that drops one kind's claim, or a thread
+       * this host never schedules - hand permission to the other kind rather
+       * than burning the iteration budget, so the run finishes and the
+       * both-kinds assertion names the kind that is missing instead of
+       * reporting a stalled loop. */
+      if (++idle_spins > kIdleStallSpins) {
+        idle_spins = 0;
+        wanted.store(wanted.load(std::memory_order_relaxed) ==
+                             DiscoveryLifecycleManager::kTriggerDiscoveryRefresh
+                         ? DiscoveryLifecycleManager::kTriggerOta
+                         : DiscoveryLifecycleManager::kTriggerDiscoveryRefresh,
+                     std::memory_order_relaxed);
+      }
+      std::this_thread::yield();
+    } else {
+      idle_spins = 0;
     }
     previous = now;
   }

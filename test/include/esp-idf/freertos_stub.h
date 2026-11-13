@@ -73,18 +73,32 @@ static inline void vQueueDelete(QueueHandle_t) { }
 /* ---------- semphr.h types & functions ---------- */
 typedef void* SemaphoreHandle_t;
 
+/* Every binary semaphore shares one handle value and every mutex another, which
+ * is enough for the give counter below to tell a task wake from a lock release. */
+#define XSEMAPHORE_DOUBLE_BINARY_HANDLE ((SemaphoreHandle_t) 0x1)
+#define XSEMAPHORE_DOUBLE_MUTEX_HANDLE  ((SemaphoreHandle_t) 0x2)
+
 static inline SemaphoreHandle_t xSemaphoreCreateBinary(void) {
-    return (SemaphoreHandle_t)0x1;
+    return XSEMAPHORE_DOUBLE_BINARY_HANDLE;
 }
 static inline SemaphoreHandle_t xSemaphoreCreateMutex(void) {
-    return (SemaphoreHandle_t)0x2;
+    return XSEMAPHORE_DOUBLE_MUTEX_HANDLE;
 }
 static inline BaseType_t xSemaphoreTake(SemaphoreHandle_t sem, UBaseType_t ticks) {
     (void)sem; (void)ticks;
     return pdTRUE;
 }
+/* Binary gives are counted so a test can prove a wake was actually issued instead
+ * of inferring it from a gate timestamp.  Mutex releases are deliberately not
+ * counted: the cache lock is taken by the very accessors a gated path calls, so
+ * counting them would move the total on every read and tell a test nothing.
+ * Defined in test/src/esphome_hal_double.cpp; a test that cares resets it before
+ * the call it is checking. */
+extern unsigned xSemaphoreGive_double_count;
 static inline BaseType_t xSemaphoreGive(SemaphoreHandle_t sem) {
-    (void)sem;
+    if (sem == XSEMAPHORE_DOUBLE_BINARY_HANDLE) {
+        xSemaphoreGive_double_count++;
+    }
     return pdTRUE;
 }
 static inline void vSemaphoreDelete(SemaphoreHandle_t) { }

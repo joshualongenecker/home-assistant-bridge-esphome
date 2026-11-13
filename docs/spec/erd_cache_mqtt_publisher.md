@@ -107,7 +107,15 @@ On non-ESP-IDF: no-op.
 void erd_cache_mqtt_publisher_signal_work(erd_cache_mqtt_publisher_t* self);
 ```
 
-On ESP-IDF: gives `work_semaphore` (non-blocking). Used by the main loop to notify the background task that cache entries have been updated.
+On ESP-IDF: gives `work_semaphore` (non-blocking). Used by the main loop, by `resume()`, and by `on_connected()` to notify the background task that cache entries have been updated.
+
+**Backlog pacing.** While the cache reports more than `PUBLISH_PACE_BACKLOG_THRESHOLD` (10) dirty entries, the give is rate-limited to at most one per `PUBLISH_PACE_INTERVAL_MS` (100 ms), tracked in `last_work_signal_ms`. Below the threshold every call gives, so ordinary one-or-two-value changes keep their latency.
+
+- Why: boot and the post-reconnect `erd_cache_mark_all_updated()` republish mark every cached entry dirty at once. One entry per wake at main-loop rate (~30/s) drains 129–151 entries straight into ESPHome's 30-slot outbound MQTT queue and overflows it; the queue has no depth accessor, so by the time `publish()` returns false the drops have already happened. Pacing prevents that instead of reacting to it.
+- `last_work_signal_ms == 0` means the gate has never stored a paced wake, so the first wake after boot is never suppressed. Only a wake that passes refreshes the stamp, which is why this clause is needed at all. A paced wake can store `0` again only during the single millisecond in which `get_time_ms()` reads `0` — at boot and at each 2³² ms wrap — which re-arms the bypass for that millisecond; the next paced wake closes it.
+- The elapsed test is an **unsigned modulo difference**, deliberately. The task waits with `portMAX_DELAY` and only a wake that *passes* refreshes the stamp, so a window that keeps reading as open against an ancient stamp suppresses every wake forever; a signed difference goes negative for any idle gap above 2³¹ ms (~24.9 days) and would take the bridge out of publishing until the millisecond counter rolls over.
+- Coalescing makes the slower drain free: `update_required` is a flag and the snapshot always copies the newest bytes, so pacing delivers fresher values rather than fewer of them.
+- `stop()` gives the semaphore directly and is never gated, so shutdown always wakes the task.
 
 On non-ESP-IDF: no-op.
 
@@ -122,7 +130,7 @@ On ESP-IDF, the publisher runs as a FreeRTOS task (`mqtt_publisher_task`) with:
 - **Stack**: 4096 bytes, statically allocated via `xTaskCreateStaticPinnedToCore` on dual-core or `xTaskCreateStatic` on single-core (no heap allocation)
 - **Priority**: 1 (below the main loop)
 - **Name**: `"erd_mqtt_pub"`
-- **Scheduling**: Blocks on `work_semaphore` with `portMAX_DELAY` (no timeout). The main loop controls pacing by calling `erd_cache_mqtt_publisher_signal_work()` when cache entries are updated.
+- **Scheduling**: Blocks on `work_semaphore` with `portMAX_DELAY` (no timeout). The main loop signals work by calling `erd_cache_mqtt_publisher_signal_work()` when cache entries are updated; that call is itself rate-limited while a large backlog is queued (see §2.5).
 
 **Task loop:**
 1. Block on `work_semaphore` (`portMAX_DELAY`)
@@ -165,7 +173,7 @@ The single publish path: the background task calls it once per wake, and tests d
 6. Measure per-publish elapsed time; log a warning if ≥ 1000 ms
 7. On success: call `erd_cache_mark_published(self->cache, entry)` to reload the publish cooldown. On drop: `erd_cache_mark_unpublished()` re-sets `update_required` so the entry is retried on the next wake.
 8. Update stats: increment `total_published` and `publish_count_window`; set `first_round_done` when the scan found no entry. All under the state mutex when available.
-**One entry per call:** the background task publishes exactly one entry per wake. The main loop controls pacing by calling `signal_work()` at its own cadence.
+**One entry per call:** the background task publishes exactly one entry per wake. Wake cadence comes from the main loop's `signal_work()` calls, which `signal_work()` paces while the publish backlog exceeds `PUBLISH_PACE_BACKLOG_THRESHOLD` (see §2.5).
 
 ---
 
@@ -271,7 +279,7 @@ Override the time source (defaults to `esphome::millis`). Used for testing to co
 2. **Retry via re-marking:** If `mqtt_client_publish_raw()` fails (e.g., internal queue full), `erd_cache_mark_unpublished()` re-sets `update_required` so the entry is retried on the next wake — but the scan iterator has already advanced, so the retry happens on the next full cache pass.
 3. **Single device ID:** The publisher is configured with one device ID at init time. Supporting multiple devices would require multiple publisher instances.
 4. **Hex encoding is CPU-intensive:** Converting binary data to hex via `snprintf` per byte is simple but not optimal for large payloads. A lookup table or bit-manipulation approach would be faster.
-5. **One publish per wake:** The ESP-IDF background task publishes exactly one entry per wake, then blocks on `work_semaphore` until the main loop signals more work. Pacing is controlled by the main loop via `signal_work()`.
+5. **One publish per wake:** The ESP-IDF background task publishes exactly one entry per wake, then blocks on `work_semaphore` until it is signalled again. Cadence is set by `signal_work()`, which paces while a large backlog is queued (§2.5) — so a full-cache republish drains in roughly `count / 10` seconds rather than at main-loop rate.
 6. **Semaphore failure is degraded, not fatal:** If any semaphore creation fails in `init()`, the publisher continues with reduced safety (no mutex protection, no clean shutdown handshake). This is acceptable for the single-core ESP32-C3 target where context switches provide natural serialization, but could lead to data races on dual-core ESP32 variants.
 
 ---
@@ -297,8 +305,8 @@ void erd_cache_mqtt_publisher_resume(erd_cache_mqtt_publisher_t* self);
 ```
 
 - Sets `paused = false`
-- **Thread-safe**: acquires `state_mutex` (100 ms timeout) before modifying state; falls back to unprotected write if mutex creation failed
-- After clearing `paused`, calls `erd_cache_mqtt_publisher_signal_work()` to wake the background task so it can immediately resume draining
+- **Thread-safe**: acquires `state_mutex` (100 ms timeout) before modifying state; falls back to unprotected write if mutex creation failed. If the mutex exists but the take times out, `resume()` does nothing at all — `paused` stays set and no wake is signalled (`erd_cache_mqtt_publisher.cpp:512-523`). Nothing retries inside the call; recovery comes from the main loop, which calls `resume()` on every iteration while a cache is attached and discovery is idle (`geappliances_bridge.cpp:331`)
+- After clearing `paused`, calls `erd_cache_mqtt_publisher_signal_work()` so the background task can resume draining. That call is gated: while more than `PUBLISH_PACE_BACKLOG_THRESHOLD` entries are dirty the wake can be deferred by up to `PUBLISH_PACE_INTERVAL_MS` (see §2.5), so `resume()` does not guarantee a give — the main loop calls `signal_work()` again on its next iteration
 - Does **not** reset `first_round_done` — the flag is set by the publish loop itself when a full round completes
 
 ### 11.3 First Round Done
@@ -319,7 +327,7 @@ bool erd_cache_mqtt_publisher_first_round_done(erd_cache_mqtt_publisher_t* self)
 **Background task (`mqtt_publisher_task`):**
 - On each wake (from `work_semaphore` signal), the task acquires `state_mutex` and reads `mqtt_connected`, `paused`, and dependency pointers
 - If `paused` is `true`, the task skips publishing and returns to waiting on `work_semaphore` — no cache entries are published
-- When `resume()` is called, it clears `paused` and signals `work_semaphore`, waking the task to resume immediately
+- When `resume()` is called, it clears `paused` and calls `signal_work()`, which normally wakes the task immediately; while a large backlog is queued that wake can be deferred by up to `PUBLISH_PACE_INTERVAL_MS` (§2.5). The deferral is bounded by one interval plus one main-loop iteration, because the loop re-signals every pass
 - The task publishes one entry per wake; when the snapshot finds no entry and `first_round_done` is not yet set, it is set to `true`
 
 ### 11.5 Use Case: Pausing During HA Discovery

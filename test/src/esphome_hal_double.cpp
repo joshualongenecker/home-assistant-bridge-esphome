@@ -19,4 +19,6 @@ uint32_t esphome_hal_double_get_millis(void)
   return s_mock_millis;
 }
 
+unsigned xSemaphoreGive_double_count = 0;
+
 }

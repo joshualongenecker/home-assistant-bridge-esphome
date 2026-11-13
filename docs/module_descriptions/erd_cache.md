@@ -16,6 +16,7 @@ Fixed-size ERD cache with static arena storage. Stores the latest data for up to
 | `erd_cache_tick_cooldowns(self)` | Decrement publish_cooldown for all entries with `update_required = true`. Call once per second. Static inline, no-op when rate limiting is disabled. |
 | `erd_cache_snapshot_next_updated(self, iterator, entry_out, erd_out, addr_out, data_out, size_out)` | Atomically fetch the next entry with `update_required = true` and `publish_cooldown = 0` AND copy its payload out of the arena in one lock hold; clears `update_required`. Skips entries still in cooldown, keeping `update_required = true` for retry. Caller provides an iterator (`uint16_t`) initialized to 0. Returns `true` and fills the out-params if an entry was found; `false` otherwise. |
 | `erd_cache_get_count(self)` | Returns the number of valid entries currently in the cache. |
+| `erd_cache_get_dirty_count(self)` | Returns the publish backlog: valid entries currently carrying `update_required = true`. Takes the cache lock briefly. The MQTT publisher uses it to decide when a backlog justifies pacing its drain. |
 | `erd_cache_get_next_entry(self, iterator)` | Returns the next valid entry in the cache, iterating all entries. Does NOT require `update_required = true` and does NOT clear any flags — it is a read-only iteration. Resets iterator to 0 when exhausted. |
 | `erd_cache_get_update_rate(self)` | Returns the number of cache updates since the last call, then resets the window counter. |
 | `erd_cache_get_required_update_rate(self)` | Returns the number of updates that set `update_required = true` since the last call, then resets the window counter. |
@@ -99,7 +100,7 @@ typedef struct erd_cache_t {
 
 - `tiny_gea3_erd_client.h` — `tiny_erd_t` type definition
 - `<cstring>` — for `memcmp`
-- `esphome/core/log.h` — for `ESP_LOGD`, `ESP_LOGW`, `ESP_LOGE`
+- `esphome/core/log.h` — for `ESP_LOGV`, `ESP_LOGW`, `ESP_LOGE`
 
 ## Key Design Decisions
 

@@ -31,7 +31,7 @@ Scans the shared ERD cache and publishes updated ERDs to MQTT topics with `retai
 - **Stack**: 4096 bytes (static allocation via `xTaskCreateStaticPinnedToCore` on dual-core ESP32, `xTaskCreateStatic` on single-core)
 - **Priority**: 1 — below the main loop, so the loop always preempts the publisher
 - **Core**: pinned to Core 0 (off ESPHome's loop core on dual-core parts; ignored on single-core) so the publisher cannot starve the loopTask watchdog
-- **Scheduling**: Blocks on `work_semaphore` with `portMAX_DELAY` (no timeout). The main loop controls pacing via `erd_cache_mqtt_publisher_signal_work()`.
+- **Scheduling**: Blocks on `work_semaphore` with `portMAX_DELAY` (no timeout). Work is signalled via `erd_cache_mqtt_publisher_signal_work()`, which rate-limits the wake to one per 100 ms while more than 10 cache entries are dirty — boot and post-reconnect republish otherwise drain the whole cache into ESPHome's 30-slot outbound MQTT queue and overflow it. Below the threshold every call wakes the task, so ordinary changes keep their latency. The elapsed test is an unsigned modulo difference: with `portMAX_DELAY` a window that keeps reading as open against an ancient stamp would suppress every wake forever.
 
 **Concurrent task safety:**
 - `state_mutex` protects shared state (`mqtt_connected`, `paused`, counters, `first_round_done`) from torn reads during context switches between the background task and the main loop. It is never held across the slow MQTT publish.
@@ -65,6 +65,7 @@ Scans the shared ERD cache and publishes updated ERDs to MQTT topics with `retai
 | `first_round_done` | `bool` | True after the publisher has scanned the full cache with no pending entries since the last `pause()` or `on_connected()`. Set when the snapshot returns no entry. |
 | `get_time_ms` | `uint32_t (*)(void)` | Time source function pointer. Defaults to `esphome::millis`. |
 | `disconnect_start_ms` | `uint32_t` | `millis()` when MQTT disconnected; 0 if connected. Used to determine if a full republish is needed on reconnect. |
+| `last_work_signal_ms` | `uint32_t` | `get_time_ms()` at the last backlog-paced `signal_work()` that actually gave the semaphore. A zero stamp means "never stamped" and disengages the gate, so at boot and at each 2^32 ms wrap calls pass through until one records a non-zero time. Read without the state mutex: a stale read is always an older stamp, so it can only ever admit one extra wake. |
 
 ## MQTT Connect/Disconnect Handling
 
@@ -100,7 +101,7 @@ The publish path uses pre-allocated buffers in the publisher struct to keep the 
 - **Single publish path**: The task loop and the tests share one `erd_cache_mqtt_publisher_publish_one()`; there is no second synchronous implementation to drift.
 - **Concurrent task safety**: `state_mutex` protects shared state from torn reads, and `done_semaphore` ensures safe shutdown. Cache access goes through the cache's own mutex.
 - **Pre-allocated buffers**: The publish path uses struct-allocated buffers (`task_topic`, `task_hex`) to avoid heap allocation and keep the task stack small.
-- **Semaphore-based signaling**: The main loop signals work via `work_semaphore`; the task blocks with `portMAX_DELAY` (no timeout). The main loop controls pacing.
+- **Semaphore-based signaling**: The main loop signals work via `work_semaphore`; the task blocks with `portMAX_DELAY` (no timeout). `signal_work()` paces that signaling while a large backlog is queued, so a full-cache republish drains in roughly `count / 10` seconds instead of at main-loop rate.
 - **Graceful degradation**: If semaphore creation fails, the task exits immediately. If `state_mutex` creation fails, shared state is read without protection (acceptable for single-core or low-contention scenarios).
 - **No cache ownership**: The publisher does not own the cache — it only reads from it. Cache lifecycle is managed by `GeappliancesBridge`.
 - **No MQTT lifecycle ownership**: The publisher does not manage MQTT connections — it reacts to connect/disconnect events from `EsphomeMqttClientAdapter`.

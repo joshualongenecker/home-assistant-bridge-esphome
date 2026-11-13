@@ -80,7 +80,7 @@ During `startup_state_bridge_init`, `initialize_erd_bridge_()` runs:
 - Bridges: `erd_bridge_subscribe`, `erd_bridge_poll`, `erd_write_bridge`
 - `erd_poll_list_builder` — builds the probe list for the polling bridge
 - `erd_registry` — single owner of valid-ERD filter, string-type set, and registered-ERD tracking
-- `erd_cache_mqtt_publisher` — drains ERD cache updates to MQTT each `loop()`
+- `erd_cache_mqtt_publisher` — drains ERD cache updates to MQTT from its own background task, one entry per wake, paced while the backlog is large
 - `erd_bridge_common.h` — shared signals, timing constants, and utility templates
 - `DiscoveryLifecycleManager` — owns the discovery change detection, cleanup → republish → reboot phase machine, initial discovery publish, and the DiscoveryRefresh path
 - `DiagnosticSensorPublisher` — owns periodic publishing of diagnostic sensor values (ERD/MQTT publish rate, cache stats, disconnect stats)

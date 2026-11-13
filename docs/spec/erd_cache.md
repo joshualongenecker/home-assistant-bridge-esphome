@@ -34,9 +34,9 @@ void erd_cache_init(erd_cache_t* self);
 Initializes the cache for use. Safe to call on a previously-initialized cache (re-init).
 
 **Behavior:**
-1. Explicitly zeroes all entry fields (erd, board_address, data_offset, data_size, update_required, publish_cooldown, valid) — avoids UBSan issues with bool fields after `memset`
+1. Explicitly zeroes all entry fields (erd, board_address, data_offset, update_required, publish_cooldown, valid) — avoids UBSan issues with bool fields after `memset`. `data_size` is NOT zeroed; `valid` gates every read of it.
 2. Resets `arena_offset` to 0 and clears the arena itself (`memset`, `erd_cache.cpp:62`), so bytes left by a previous generation are never readable through a reused slot
-3. Resets all counters (`update_count`, `update_count_window`, `required_update_count`, `required_update_count_window`) to zero
+3. Resets all counters (`update_count`, `update_count_window`, `required_update_count`, `required_update_count_window`, `dirty_count`) to zero, plus `max_cooldown` (`erd_cache.cpp:68`) — the configured rate limit, not a counter
 4. Sets `self->initialized = true`
 
 No heap deallocation is needed — the arena is static memory.
@@ -51,8 +51,9 @@ Resets the cache. Guards against being called on a never-initialized struct (che
 
 **Behavior:**
 1. If `!self->initialized`, returns immediately
-2. Calls `erd_cache_init(self)` to reset all entries and arena pointer
-3. Sets `self->initialized = false`
+2. Deletes the mutex and sets `self->lock = NULL`
+3. Calls `erd_cache_reset()` to reset all entries, the arena pointer and the counters — outside any lock, because the mutex is already gone (this is the lifecycle reset carved out of the `dirty_count` note in §6.2)
+4. Sets `self->initialized = false`
 
 No heap deallocation is needed — the arena is static memory.
 
@@ -169,6 +170,7 @@ typedef struct erd_cache_t {
   uint32_t update_count_window;       // updates since last get_update_rate() call
   uint32_t required_update_count;     // total updates setting update_required=true since init
   uint32_t required_update_count_window; // such updates since last get_required_update_rate() call
+  uint16_t dirty_count;               // valid entries currently carrying update_required
   uint8_t max_cooldown;              // configured rate limit in seconds; 0 = disabled
   bool initialized;                   // true after first successful erd_cache_init()
 } erd_cache_t;
@@ -183,6 +185,7 @@ typedef struct erd_cache_t {
 | `update_count_window` | `uint32_t` | Updates since last `get_update_rate()` call |
 | `required_update_count` | `uint32_t` | Total updates that set `update_required=true` since init |
 | `required_update_count_window` | `uint32_t` | Such updates since last `get_required_update_rate()` call |
+| `dirty_count` | `uint16_t` | Valid entries currently carrying `update_required = true` — the publish backlog. Maintained under the cache lock at every runtime site that sets or clears the flag, counting transitions rather than assignments, so re-marking an already-dirty entry never double counts. `erd_cache_reset()` reinitializes it single-threaded instead, outside any lock: `erd_cache_init()` runs the reset before the mutex exists and `erd_cache_destroy()` after the mutex is deleted. |
 | `max_cooldown` | `uint8_t` | Configured rate limit in seconds; 0 = disabled |
 | `initialized` | `bool` | Guard for safe init/destroy |
 
@@ -209,6 +212,7 @@ typedef struct erd_cache_t {
 |----------|-----------|-------------|
 | `erd_cache_snapshot_next_updated` | `bool erd_cache_snapshot_next_updated(erd_cache_t* self, uint16_t* iterator, erd_cache_entry_t** entry_out, tiny_erd_t* erd_out, uint8_t* addr_out, uint8_t* data_out, uint8_t* size_out)` | Atomically fetch the next entry with `update_required = true` AND copy its payload out of the arena in one lock hold; clears the flag. Caller provides an iterator (`uint16_t`) initialized to 0. Entries with an active `publish_cooldown` are skipped (rate-limited) when `max_cooldown > 0`. Returns `true` and fills the out-params when an entry was found; `false` otherwise (iterator reset to 0). |
 | `erd_cache_get_count` | `uint16_t erd_cache_get_count(erd_cache_t* self)` | Returns the number of valid entries currently in the cache. |
+| `erd_cache_get_dirty_count` | `uint16_t erd_cache_get_dirty_count(erd_cache_t* self)` | Returns the publish backlog: valid entries currently carrying `update_required = true`. Takes the cache lock briefly; safe from the main loop and from the esp-mqtt task. The MQTT publisher uses it to decide when a backlog justifies pacing its drain. |
 | `erd_cache_get_next_entry` | `erd_cache_entry_t* erd_cache_get_next_entry(erd_cache_t* self, uint16_t* iterator)` | Returns the next valid entry in the cache, iterating all entries. Does NOT require `update_required = true` and does NOT clear any flags — it is a read-only iteration. Resets iterator to 0 when exhausted. |
 | `erd_cache_mark_all_updated` | `void erd_cache_mark_all_updated(erd_cache_t* self)` | Marks all valid entries as `update_required = true`. Used after a long MQTT disconnect to force a full drain of retained values to the broker. |
 
@@ -253,6 +257,8 @@ The window is determined by the call interval of the consumer (e.g., ~60 s if ca
 
 10. **Safe init/destroy:** `erd_cache_init()` and `erd_cache_destroy()` guard against non-initialized structs.
 
+11. **The backlog counter tracks transitions.** `dirty_count` is incremented only where `update_required` goes false→true and decremented only where it goes true→false, both inside the same lock hold as the flag write — at every *runtime* site. The one non-runtime site is `erd_cache_reset()`, which zeroes the counter along with the entries single-threaded and outside the lock (see the lifecycle note in the field table). That makes it exact under re-marking (`mark_all_updated` on reconnect, `mark_unpublished` after a dropped publish) without a recount pass, and it cannot underflow: the sole decrement runs only when the flag was true. Slot and arena exhaustion return before any mutation, so no uncounted dirty entry can exist.
+
 ---
 
 ## 9. Dependencies
@@ -261,7 +267,7 @@ The window is determined by the call interval of the consumer (e.g., ~60 s if ca
 |------------|---------|
 | `tiny_gea3_erd_client.h` | `tiny_erd_t` type definition |
 | `<cstring>` | `memcmp` for change detection, `memcpy` for data copy |
-| `esphome/core/log.h` | `ESP_LOGD`, `ESP_LOGW`, `ESP_LOGE` for logging |
+| `esphome/core/log.h` | `ESP_LOGV`, `ESP_LOGW`, `ESP_LOGE` for logging |
 
 ---
 

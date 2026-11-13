@@ -1174,3 +1174,283 @@ TEST(erd_cache_mqtt_publisher, secondary_address_publishes_with_prefix)
   CHECK_TRUE(published);
   STRCMP_EQUAL("geappliances/my_device/erd/0x10_0x0008/value", mqtt_double.last_published_topic_.c_str());
 }
+
+/* ---------- backlog pacing (signal_work) ----------
+ * The ESPHome MQTT backend queue is 30 deep with no depth accessor, so the
+ * publisher paces its own drain while a large backlog is queued up instead of
+ * letting a boot first round (or a post-reconnect republish) dump every cached
+ * ERD into the queue at main-loop rate.  last_work_signal_ms is only written
+ * when a wake is actually let through, so it is the observable gate. */
+
+TEST(erd_cache_mqtt_publisher, signal_work_paces_drain_while_backlog_is_large)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+
+  uint8_t data = 0x42;
+  for (uint16_t i = 0; i < 20; i++) {
+    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
+  }
+  CHECK_EQUAL(20, erd_cache_get_dirty_count(&cache));
+
+  /* The first signal passes immediately and stamps the pacing clock. */
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(1000);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(1, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL(1000, (int) publisher.last_work_signal_ms);
+
+  /* Inside the 100 ms window the wake is suppressed: no give, no restamp. */
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(1050);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(0, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL(1000, (int) publisher.last_work_signal_ms);
+
+  /* Once the interval elapses the next wake passes and restamps. */
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(1100);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(1, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL(1100, (int) publisher.last_work_signal_ms);
+
+  /* Pacing does not drop work: the backlog is still fully queued for the task. */
+  CHECK_EQUAL(20, erd_cache_get_dirty_count(&cache));
+}
+
+TEST(erd_cache_mqtt_publisher, signal_work_does_not_pace_small_backlog)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+
+  uint8_t data = 0x42;
+  for (uint16_t i = 0; i < 3; i++) {
+    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
+  }
+
+  /* Below the threshold the gate never engages: consecutive loop iterations both
+   * wake the task and the pacing clock is never written. */
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(1000);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  esphome_hal_double_set_millis(1005);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(2, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL(0, (int) publisher.last_work_signal_ms);
+}
+
+/* Every other pacing test fills the cache and the backlog with the same insert
+ * loop, so the backlog always equals the entry count - and a gate keyed on
+ * erd_cache_get_count(), or on the monotonic required_update_count, would pass all
+ * of them.  That is not academic: a deployed bridge keeps 129-151 entries cached
+ * permanently, so a count-keyed gate would stay engaged forever and cap every live
+ * ERD publish at one wake per PUBLISH_PACE_INTERVAL_MS.  This test drains the
+ * backlog through the publisher's own read path so the two numbers come apart, then
+ * requires a small backlog inside a large cache to wake unpaced. */
+TEST(erd_cache_mqtt_publisher, signal_work_ignores_clean_entries_in_a_large_cache)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+
+  uint8_t data = 0x42;
+  for (uint16_t i = 0; i < 20; i++) {
+    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
+  }
+
+  /* Drain through the same read path the publish task uses: entries stay valid and
+   * keep their payloads, only the dirty flags clear. */
+  uint16_t iter = 0;
+  while (erd_cache_snapshot_next_updated(&cache, &iter, NULL, NULL, NULL, NULL, NULL)) {
+  }
+  CHECK_EQUAL(20, (int) erd_cache_get_count(&cache));
+  CHECK_EQUAL(0, (int) erd_cache_get_dirty_count(&cache));
+
+  /* Two entries go dirty again while the cache still holds twenty. */
+  uint8_t d1 = 0x11;
+  uint8_t d2 = 0x22;
+  erd_cache_update(&cache, 0x1000, 0xFF, &d1, sizeof(d1));
+  erd_cache_update(&cache, 0x1001, 0xFF, &d2, sizeof(d2));
+  CHECK_EQUAL(2, (int) erd_cache_get_dirty_count(&cache));
+
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(1000);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  esphome_hal_double_set_millis(1005);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(2, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL(0, (int) publisher.last_work_signal_ms);
+}
+
+
+/* The threshold is exclusive, so 11 is the first backlog that gets paced.  Pinning
+ * both sides is what catches the gate being written with >= instead of >, or the
+ * threshold constant being retuned without revisiting the pacing rate. */
+TEST(erd_cache_mqtt_publisher, signal_work_paces_one_over_the_threshold)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+
+  uint8_t data = 0x42;
+  for (uint16_t i = 0; i < 11; i++) {
+    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
+  }
+  CHECK_EQUAL(11, erd_cache_get_dirty_count(&cache));
+
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(1000);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(1, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL(1000, (int) publisher.last_work_signal_ms);
+
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(1050);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(0, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL(1000, (int) publisher.last_work_signal_ms);
+}
+
+TEST(erd_cache_mqtt_publisher, signal_work_does_not_pace_at_the_threshold_itself)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+
+  uint8_t data = 0x42;
+  for (uint16_t i = 0; i < 10; i++) {
+    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
+  }
+  CHECK_EQUAL(10, erd_cache_get_dirty_count(&cache));
+
+  /* Two wakes 5 ms apart both reach the task.  With an inclusive threshold the
+   * second would be swallowed and the clock would read 1000 instead of 0. */
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(1000);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  esphome_hal_double_set_millis(1005);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(2, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL(0, (int) publisher.last_work_signal_ms);
+}
+
+/* last_work_signal_ms starts at 0, which must read as "never paced" rather than
+ * "paced at uptime 0" - otherwise a backlog that forms during the first 100 ms
+ * of boot is held back before the publish task has ever run. */
+TEST(erd_cache_mqtt_publisher, signal_work_never_suppresses_the_first_wake)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+
+  uint8_t data = 0x42;
+  for (uint16_t i = 0; i < 20; i++) {
+    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
+  }
+
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(50);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(1, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL(50, (int) publisher.last_work_signal_ms);
+
+  /* Paced from then on. */
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(60);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(0, (int) xSemaphoreGive_double_count);
+}
+
+/* The publish task blocks on the work semaphore with NO timeout, so a pacing
+ * window that still reads as open when the stamp is ancient suppresses every wake
+ * forever: the stamp is only refreshed when a wake passes, so nothing can expire
+ * it.  A signed now-last comparison does exactly that for any idle gap above
+ * 2^31 ms (~24.9 days) - it goes negative, which is less than the 100 ms interval.
+ * A bridge that idles 25 days with a small backlog and then takes a >10-entry
+ * backlog (a reconnect republish is enough) would stop publishing ERDs until the
+ * millisecond counter rolls over. */
+TEST(erd_cache_mqtt_publisher, pacing_never_locks_out_after_a_long_idle_period)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+
+  uint8_t data = 0x42;
+  for (uint16_t i = 0; i < 20; i++) {
+    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
+  }
+
+  publisher.last_work_signal_ms = 5000;
+  const uint32_t much_later = 5000u + 2147485648u;  // 2^31 + 2000 ms of idle time
+
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(much_later);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(1, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL((unsigned long) much_later, (unsigned long) publisher.last_work_signal_ms);
+}
+
+/* The pacing window measured across the millis() wrap.  A stamp just below
+ * 2^32 and a "now" just above zero are 48 ms apart, not 49.7 days apart, so the
+ * wake must still be paced; once the true gap passes the interval it must pass. */
+TEST(erd_cache_mqtt_publisher, pacing_window_is_rollover_safe)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+
+  uint8_t data = 0x42;
+  for (uint16_t i = 0; i < 20; i++) {
+    erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
+  }
+
+  publisher.last_work_signal_ms = 0xFFFFFFF0u;
+
+  /* 48 ms after the stamp, having wrapped past zero: still paced. */
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(0x20u);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(0, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL(0xFFFFFFF0u, (unsigned long) publisher.last_work_signal_ms);
+
+  /* 160 ms after it: the window has elapsed, so the wake passes and restamps. */
+  xSemaphoreGive_double_count = 0;
+  esphome_hal_double_set_millis(0x90u);
+  erd_cache_mqtt_publisher_signal_work(&publisher);
+  CHECK_EQUAL(1, (int) xSemaphoreGive_double_count);
+  CHECK_EQUAL(0x90u, (unsigned long) publisher.last_work_signal_ms);
+}

@@ -25,6 +25,17 @@ GEA_TAG(PUBLISHER_TAG) = "erd_cache_mqtt_publisher";
  * per ERD, so the retry delivers whatever is current once the queue drains. */
 static const uint32_t PUBLISH_RETRY_BACKOFF_MS = 250;
 
+/* Backlog pacing.  The ESPHome MQTT backend queue holds 30 messages and exposes
+ * no depth accessor, so overflow can only be observed as a failed publish — which
+ * PUBLISH_RETRY_BACKOFF_MS already handles reactively.  To keep the queue from
+ * filling in the first place, the drain is paced while the dirty backlog is large
+ * enough to threaten it: boot's first round and the post-reconnect drain both mark
+ * every cached ERD dirty at once.  Because the cache coalesces (the snapshot always
+ * copies the newest bytes), a slower drain delivers fresher values rather than
+ * fewer of them, so pacing costs only convergence time after boot. */
+static const uint16_t PUBLISH_PACE_BACKLOG_THRESHOLD = 10;
+static const uint32_t PUBLISH_PACE_INTERVAL_MS = 100;
+
 static void mqtt_publisher_task(void* arg)
 {
   erd_cache_mqtt_publisher_t* self = (erd_cache_mqtt_publisher_t*)arg;
@@ -35,8 +46,9 @@ static void mqtt_publisher_task(void* arg)
   }
 
   while (self->task_running) {
-    // Block until the main loop signals work. No timeout —
-    // the main loop controls pacing.
+    // Block until work is signalled. No timeout: signal_work() paces its own give
+    // while the backlog is large, and stop() gives the semaphore directly so the
+    // task always wakes to shut down.
     if (xSemaphoreTake(self->work_semaphore, portMAX_DELAY) != pdTRUE) {
       continue;
     }
@@ -254,9 +266,46 @@ void erd_cache_mqtt_publisher_stop(erd_cache_mqtt_publisher_t* self)
 
 void erd_cache_mqtt_publisher_signal_work(erd_cache_mqtt_publisher_t* self)
 {
-  if (self->work_semaphore != NULL) {
-    xSemaphoreGive(self->work_semaphore);
+  if (self->work_semaphore == NULL) {
+    return;
   }
+
+  /* Pace only while a large backlog is queued up (see the constants above).
+   * Below the threshold the task is woken every loop, so ordinary one-or-two-value
+   * changes keep their latency.  A zero last_work_signal_ms means "nothing has been
+   * paced yet", so the first wake is never suppressed: without that clause a
+   * backlog forming inside the first PUBLISH_PACE_INTERVAL_MS of uptime would be
+   * held back before the task has ever run.  Stamping a literal 0 would re-arm that
+   * bypass: get_time_ms() reads 0 during the first millisecond of uptime and again
+   * at every 2^32 ms (~49.7 day) wrap, so the bypass can come back long after boot.
+   * Every loop iteration sharing such a millisecond then wakes the task unpaced - a
+   * handful of extra wakes per boot and per wrap, closed again by the next paced
+   * wake, which stores a non-zero stamp.
+   *
+   * The elapsed test is UNSIGNED deliberately.  The publish task takes the work
+   * semaphore with portMAX_DELAY, so a window that still reads as open against an
+   * ancient stamp suppresses every wake forever - only a wake that passes refreshes
+   * the stamp, so nothing can expire it.  A signed (now - last) comparison goes
+   * negative for any idle gap above 2^31 ms (~24.9 days), which would take a bridge
+   * that idles 25 days with a small backlog and then sees a >10-entry backlog (a
+   * reconnect republish is enough) out of publishing ERDs until the millisecond
+   * counter rolls over.  Unsigned, the modulo difference is the true gap for any
+   * idle period under 2^32 ms.  False suppression then needs a stamp one OR MORE
+   * wraps plus <100 ms old - k wraps is reachable, because only a passing paced
+   * wake refreshes the stamp, so a bridge idling with the gate disengaged for
+   * ~99.4 days carries one across two wraps.  Either way it expires inside the
+   * window. */
+  if (self->cache != NULL && self->get_time_ms != NULL &&
+      erd_cache_get_dirty_count(self->cache) > PUBLISH_PACE_BACKLOG_THRESHOLD) {
+    uint32_t now = self->get_time_ms();
+    if (self->last_work_signal_ms != 0 &&
+        (now - self->last_work_signal_ms) < PUBLISH_PACE_INTERVAL_MS) {
+      return;
+    }
+    self->last_work_signal_ms = now;
+  }
+
+  xSemaphoreGive(self->work_semaphore);
 }
 
 bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self)

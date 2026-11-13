@@ -56,6 +56,8 @@ class FeatureBitManager {
   void start();
 
   uint16_t get_valid_erd_count() const;
+  /// Feature ERDs that were probed but skipped (unsupported or unreadable).
+  uint16_t get_skipped_erd_count() const;
 
   tiny_erd_t get_valid_erd(uint16_t idx) const;
 
@@ -111,6 +113,7 @@ class FeatureBitManager {
   FeatureBitErdData erd_data_;
   tiny_erd_t valid_erds_[FEATURE_BIT_MAX_ERDS];
   uint16_t valid_erds_count_{0};
+  uint16_t skipped_erds_count_{0};
   bool valid_list_ready_{false};
 
   uint8_t parse_erd_idx_{0};
