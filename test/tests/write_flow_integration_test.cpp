@@ -90,6 +90,21 @@ TEST_GROUP(write_flow_integration)
     snprintf(topic, sizeof(topic), "geappliances/test_device/erd/0x%04x/write", erd);
     mqtt_double.simulate_message(topic, payload);
   }
+
+  void when_the_write_completes(tiny_gea3_erd_client_request_id_t request_id, tiny_erd_t erd,
+    uint8_t address)
+  {
+    uint8_t dummy = 0;
+    tiny_gea3_erd_client_on_activity_args_t args;
+    args.type = tiny_gea3_erd_client_activity_type_write_completed;
+    args.address = address;
+    args.write_completed.request_id = request_id;
+    args.write_completed.erd = erd;
+    args.write_completed.data = &dummy;
+    args.write_completed.data_size = 1;
+
+    tiny_gea3_erd_client_double_trigger_activity_event(&erd_client, &args);
+  }
 };
 
 TEST(write_flow_integration, should_route_write_from_mqtt_to_erd_client)
@@ -279,6 +294,61 @@ TEST(write_flow_integration, should_route_secondary_board_write_to_secondary_add
                mqtt_double.last_published_topic_.c_str());
   STRCMP_EQUAL("ok", mqtt_double.last_published_payload_.c_str());
   CHECK(mqtt_double.last_published_retain_);
+
+  mock().checkExpectations();
+}
+
+TEST(write_flow_integration, should_queue_back_to_back_writes_from_home_assistant)
+{
+  uint8_t host = 0xC0;
+  init_all(host);
+
+  tiny_erd_t first_erd = 0x7701;
+  tiny_erd_t second_erd = 0x7702;
+  uint8_t first_value = 0x01;
+  uint8_t second_value = 0x02;
+  tiny_gea3_erd_client_request_id_t first_id{1};
+  tiny_gea3_erd_client_request_id_t second_id{2};
+
+  // Two HA commands published back to back: the second one arrives while the
+  // first is still on the bus, so it must be queued and sent afterwards
+  // instead of being dropped.
+  mock()
+    .expectOneCall("write")
+    .onObject(&erd_client)
+    .withParameter("address", host)
+    .withParameter("erd", first_erd)
+    .withMemoryBufferParameter("data", &first_value, 1)
+    .withOutputParameterReturning("request_id", &first_id, sizeof(first_id))
+    .andReturnValue(true);
+  mock()
+    .expectOneCall("write")
+    .onObject(&erd_client)
+    .withParameter("address", host)
+    .withParameter("erd", second_erd)
+    .withMemoryBufferParameter("data", &second_value, 1)
+    .withOutputParameterReturning("request_id", &second_id, sizeof(second_id))
+    .andReturnValue(true);
+
+  when_home_assistant_publishes_write(first_erd, "01");
+  when_home_assistant_publishes_write(second_erd, "02");
+
+  // Nothing is reported yet: the first write is still on the bus and the
+  // second is queued, not refused.
+  CHECK_EQUAL(0, mqtt_double.publish_calls_);
+
+  when_the_write_completes(first_id, first_erd, host);
+
+  STRCMP_EQUAL("geappliances/test_device/erd/0x7701/write_result",
+               mqtt_double.last_published_topic_.c_str());
+  STRCMP_EQUAL("ok", mqtt_double.last_published_payload_.c_str());
+
+  when_the_write_completes(second_id, second_erd, host);
+
+  STRCMP_EQUAL("geappliances/test_device/erd/0x7702/write_result",
+               mqtt_double.last_published_topic_.c_str());
+  STRCMP_EQUAL("ok", mqtt_double.last_published_payload_.c_str());
+  CHECK_EQUAL(2, mqtt_double.publish_calls_);
 
   mock().checkExpectations();
 }

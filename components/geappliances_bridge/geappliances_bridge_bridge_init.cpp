@@ -12,6 +12,14 @@
 
 GEA_TAG(TAG) = "geappliances_bridge_bridge_init";
 
+// The write bridge copies MQTT write payloads into fixed slots sized by
+// ERD_WRITE_MAX_DATA_SIZE; the MQTT adapter hands it buffers sized by
+// ERD_CACHE_MAX_DATA_SIZE. Both encode the same GEA3 on-wire limit, so they
+// must not drift apart — a smaller write slot would silently truncate a
+// payload the adapter accepted.
+static_assert(ERD_WRITE_MAX_DATA_SIZE == ERD_CACHE_MAX_DATA_SIZE,
+              "write payload limit drifted from the ERD cache payload limit");
+
 namespace esphome {
 namespace geappliances_bridge {
 
