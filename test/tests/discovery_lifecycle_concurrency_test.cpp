@@ -36,9 +36,13 @@
  * is skipped by a fast claimer. The one window that could false-positive is
  * an abort that leaves a phase inside a single loop() call (the
  * kPhaseTimeoutMs aborts, or a FAILED run) being immediately re-claimed
- * before the next sample; neither abort is reachable in this test (the
- * stepped clock never comes near the 5-minute budget, and publish runs are
- * steered to COMPLETE), so the counter stays exact here.
+ * before the next sample: the loop then sees a queued phase while still
+ * marked in-cycle and folds the two runs together.  Forcing it - lowering
+ * Cleaning's timeout to 1200 ms, which the stepped clock crosses in two
+ * iterations - folds 24 to 90 re-claims per run into the preceding cycle, so
+ * the window is real; but neither abort is reachable in this test as written
+ * (the stepped clock never comes near the 5-minute budget, and publish runs
+ * are steered to COMPLETE), so the counter stays exact here.
  *
  * Under `make test TSAN=1` ThreadSanitizer additionally checks the
  * happens-before edges: the claimer's write to trigger_ must be published by
@@ -284,7 +288,11 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
        * rather than on the phase is what makes this the backstop too: a
        * cycle that ends without a RebootPending sample - a kPhaseTimeoutMs
        * abort, a FAILED publish run - still gets its next Idle window
-       * granted to one kind instead of to both. */
+       * granted to one kind instead of to both.  It still needs one sample
+       * outside the cycle to run, so the re-claimed-before-the-next-sample
+       * window noted at the top of this loop skips it as well as the
+       * mid-cycle check; that window is unreachable here for the same reason
+       * the counter stays exact. */
       if (wanted.load(std::memory_order_relaxed) ==
           DiscoveryLifecycleManager::kTriggerNone) {
         wanted.store(cycle_trigger == DiscoveryLifecycleManager::kTriggerDiscoveryRefresh
