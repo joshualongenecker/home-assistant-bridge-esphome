@@ -236,10 +236,6 @@ static void build_device_json(ha_discovery_manager_t* self)
 static int chunk_decompress(ha_discovery_manager_t* self, const uint8_t* compressed, size_t compressed_len,
                            uint8_t* output, size_t* output_len)
 {
-#ifdef USE_ESP_IDF_STUBS
-    (void)self; (void)compressed; (void)compressed_len; (void)output; (void)output_len;
-    return -1;
-#else
     tinfl_init(self->decomp_state);
 
     size_t src_size = compressed_len;
@@ -257,7 +253,6 @@ static int chunk_decompress(ha_discovery_manager_t* self, const uint8_t* compres
 
     *output_len = dst_size;
     return 0;
-#endif
 }
 
 /* Keywords that mark an entity as internal/diagnostic.

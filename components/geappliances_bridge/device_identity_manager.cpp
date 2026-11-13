@@ -86,7 +86,6 @@ void DeviceIdentityManager::on_erd_read_completed(tiny_erd_t erd, const uint8_t*
 
 void DeviceIdentityManager::on_erd_read_failed(tiny_erd_t erd)
 {
-  // Stay in the current state and immediately re-queue the ERD read.
   // Retries indefinitely -- never give up.
   ESP_LOGW(TAG, "Failed to read ERD 0x%04X for device ID generation, retrying", erd);
   if (!this->try_queue_read_(erd)) {

@@ -43,17 +43,17 @@ TEST(geappliances_bridge_discovery, set_filter_config_topics_sets_flag_correctly
 }
 TEST(geappliances_bridge_discovery, trigger_discovery_refresh_safe_on_initialized_bridge)
 {
-  /* trigger_discovery_refresh() is protected; access via DiscoveryRefreshButton
-   * which is a friend of GeappliancesBridge.  steady_state_reached_ is false,
-   * so it returns early without side effects. */
+  /* trigger_discovery_refresh() is protected; access via DiscoveryRefreshButton.
+   * The bridge has not been set up, so the phase machine claims the request
+   * but the publish waits for steady state that never arrives here. */
   DiscoveryRefreshButton button(&bridge);
   button.press_action();
-  /* No crash = guard chain works when steady_state_reached_ is false. */
+  /* No crash = the claim path is safe on an uninitialized bridge. */
 }
 TEST(geappliances_bridge_discovery, button_press_is_idempotent)
 {
-  /* Multiple presses don't crash and don't cause side effects
-   * (steady_state_reached_ is false, so all return early). */
+  /* Multiple presses don't crash: the phase machine rejects a second claim
+   * while a run is active, and idle re-claims are harmless. */
   DiscoveryRefreshButton button(&bridge);
   button.press_action();
   button.press_action();
