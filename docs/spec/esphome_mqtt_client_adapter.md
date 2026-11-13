@@ -273,7 +273,7 @@ For each message on the write topic:
 | `tiny_event.h` | Event pub/sub system for write requests and connection events |
 | `tiny_erd.h` | `tiny_erd_t` type for ERD identifiers |
 | `tiny_gea_constants.h` | Broadcast address sentinel (`tiny_gea_broadcast_address`) |
-| `esphome::core::log` | ESPHome logging framework (`ESP_LOGD`) |
+| `esphome::core::log` | ESPHome logging framework (`ESP_LOGW`, `ESP_LOGD`) |
 
 ---
 

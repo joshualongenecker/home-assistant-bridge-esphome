@@ -144,7 +144,7 @@ Key member variables:
 2. **Probe list ownership:** The `poll_probe_list_` member stores the built probe list so the pointer passed to `erd_bridge_poll_init()` remains valid across the probe phase.
 3. **ERD cache publisher delegation:** The `erd_cache_mqtt_publisher_` drains `update_required` entries from the shared cache and publishes them to MQTT from its own background task — one entry per wake, and paced while the backlog is large (publisher spec §2.5) — decoupling the bridges from direct MQTT interaction.
 4. **Single appliance:** The bridge operates with a single discovered appliance address.
-5. **Fixed capacity arrays throughout:** All data structures use fixed-capacity arrays to avoid heap allocation (custom ERDs: 64, probe list: 649, ERD cache: 200).
+5. **Fixed capacity arrays throughout:** All data structures use fixed-capacity arrays to avoid heap allocation (custom ERDs: `CUSTOM_ERDS_MAX` = 128, probe list: `POLLING_LIST_MAX_SIZE` = 659, ERD cache: `ERD_CACHE_CAPACITY` = 300).
 
 ---
 
@@ -175,7 +175,7 @@ Key member variables:
 ## 10. Known Limitations
 
 1. **Single appliance:** The bridge operates with a single discovered appliance address. Multi-appliance support would require significant architectural changes.
-2. **Fixed capacity arrays:** All data structures use fixed-capacity arrays. If the appliance supports more ERDs than the cache can hold (200), updates are silently dropped.
+2. **Fixed capacity arrays:** All data structures use fixed-capacity arrays. If the appliance supports more ERDs than the cache can hold (`ERD_CACHE_CAPACITY` = 300 entries, or its 4096-byte arena), the entry is not cached and a warning is logged (`erd_cache_update_locked()` in `erd_cache.cpp`, once per condition) — the drop is reported, not silent.
 3. **No rollback:** The startup sequence is linear — once a phase completes, it does not re-run. If a phase fails, the bridge continues with fallback values.
 4. **GEA2 tight loop blocks the main loop:** During the 100 ms GEA2 tight loop, the ESPHome main loop is blocked. This is necessary for correct GEA2 half-duplex operation but limits the responsiveness of other ESPHome components during that window.
 5. **Startup HSM bridge access:** The startup HSM uses the `container_of` pattern via `services_from_hsm()` to recover the `IBridgeServices` pointer from the embedded `startup_hsm_wrapper_t`. This avoids a static global back-pointer and keeps the HSM self-contained.
@@ -274,7 +274,7 @@ The hash is compared against `HA_DISCOVERY_DATA_HASH`, a compile-time constant g
 
 Each `loop()` iteration delegates discovery and diagnostic work to the extracted managers:
 
-1. **Update publisher state:** Call `update_publisher_state_()` to manage the publisher pause/resume state machine and signal or run the publisher.
+1. **Update publisher state:** Call `update_publisher_state_()` to pause the publisher's background task while Home Assistant discovery is generating payloads, and to resume it otherwise. Both of an iteration's wakes of the publisher come from here: `erd_cache_mqtt_publisher_resume()` gives `work_semaphore` after clearing `paused`, and the function then calls `erd_cache_mqtt_publisher_signal_work()` directly when a cache is attached and discovery is not active.
 
 2. **Discovery lifecycle:** Delegates to `discovery_lifecycle_manager_.loop()`, which advances the discovery phase machine by at most one transition per call: initial publish (fresh install), cleanup + republish (hash/device ID change or Discovery Refresh), and the final reboot. The machine gates on steady state, MQTT initialization, and device ID completion, and handles the full lifecycle: optional cleanup, discovery publishing, safe-mode counter clearing, OTA rollback cancellation, NVS state storage, and the final reboot delay.
 
