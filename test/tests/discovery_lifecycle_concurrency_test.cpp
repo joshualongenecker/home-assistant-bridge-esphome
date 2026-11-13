@@ -39,10 +39,11 @@
  * before the next sample: the loop then sees a queued phase while still
  * marked in-cycle and folds the two runs together.  Forcing it - lowering
  * Cleaning's timeout to 1200 ms, which the stepped clock crosses in two
- * iterations - folds 24 to 90 re-claims per run into the preceding cycle, so
- * the window is real; but neither abort is reachable in this test as written
- * (the stepped clock never comes near the 5-minute budget, and publish runs
- * are steered to COMPLETE), so the counter stays exact here.
+ * iterations - folds between 5 and 596 re-claims per run (mean 116 over ten
+ * runs) into the preceding cycle, so the window is real; but neither abort is
+ * reachable in this test as written (the stepped clock never comes near the
+ * 5-minute budget, and publish runs are steered to COMPLETE), where it folds
+ * nothing - 0 in ten runs - and the counter stays exact.
  *
  * Under `make test TSAN=1` ThreadSanitizer additionally checks the
  * happens-before edges: the claimer's write to trigger_ must be published by
@@ -210,9 +211,12 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
       if (w == DiscoveryLifecycleManager::kTriggerDiscoveryRefresh ||
           w == DiscoveryLifecycleManager::kTriggerNone) {
         lifecycle_.trigger_discovery_refresh();
+        /* Count the attempt, not the loop: the gate below can hold a thread
+         * off its trigger for a whole cycle, so a loop counter would only
+         * prove the thread was scheduled. */
+        refresh_calls.fetch_add(1, std::memory_order_relaxed);
       }
       std::this_thread::yield();
-      refresh_calls.fetch_add(1, std::memory_order_relaxed);
     }
   });
   std::thread ota([&] {
@@ -221,9 +225,9 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
       if (w == DiscoveryLifecycleManager::kTriggerOta ||
           w == DiscoveryLifecycleManager::kTriggerNone) {
         lifecycle_.trigger_ota_cleanup();
+        ota_calls.fetch_add(1, std::memory_order_relaxed);
       }
       std::this_thread::yield();
-      ota_calls.fetch_add(1, std::memory_order_relaxed);
     }
   });
 
@@ -234,10 +238,19 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
   unsigned int refresh_cycles = 0;
   unsigned int ota_cycles = 0;
   unsigned int mid_cycle_trigger_change = 0;
-  /* Idle iterations to tolerate before treating the waiting kind as stuck.
-   * A healthy claim lands within a couple of iterations of Idle, so this only
-   * fires when the enabled thread cannot claim at all. */
-  static const unsigned int kIdleStallSpins = 500;
+  /* Idle iterations to tolerate before treating the waiting kind as stuck, so
+   * a dropped-claim regression fails the both-kinds check instead of burning
+   * the iteration budget.  Sized from the measured tail, not from intuition:
+   * the longest run of consecutive Idle samples a *healthy* run produced was
+   * 615 unpinned on a 24-core host, 161 pinned to two cores, 2 pinned to one,
+   * so the previous 500 did fire on healthy machines and took a window from
+   * the kind it exists to protect.  The ceiling is the iteration budget: when
+   * one kind's claim is broken *every* window ends in a stall, because the
+   * close hands it the next one, so kTargetCycles x this value has to stay
+   * inside kMaxIterations or the run ends on the cycles check instead of
+   * naming the kind.  Measured: at 2000 the dropped-claim perturbation burned
+   * the budget and failed on cycles; at 1500 it names ota_cycles in ~90 ms. */
+  static const unsigned int kIdleStallSpins = 1500;
   unsigned int idle_spins = 0;
 
   Phase previous = lifecycle_.phase();
@@ -292,7 +305,10 @@ TEST(discovery_lifecycle_concurrency, concurrent_triggers_never_corrupt_the_phas
        * outside the cycle to run, so the re-claimed-before-the-next-sample
        * window noted at the top of this loop skips it as well as the
        * mid-cycle check; that window is unreachable here for the same reason
-       * the counter stays exact. */
+       * the counter stays exact.  Its mirror is a sample landing on
+       * kPhaseClaimed: the close still fires there, but cycle_trigger then
+       * belongs to the folded-away cycle, so the grant can go to the kind that
+       * just ran.  Neither case occurs as written. */
       if (wanted.load(std::memory_order_relaxed) ==
           DiscoveryLifecycleManager::kTriggerNone) {
         wanted.store(cycle_trigger == DiscoveryLifecycleManager::kTriggerDiscoveryRefresh
