@@ -37,7 +37,7 @@ SRC_DIRS := \
   test/tests \
   test/simulation \
 
-SRC_FILES := $(wildcard components/geappliances_bridge/*.cpp)
+SRC_FILES := $(wildcard components/geappliances_bridge/*.cpp) components/geappliances_bridge/miniz_tinfl.c
 
 SRCS := $(SRC_FILES) $(shell find $(SRC_DIRS) -maxdepth 1 \( -name '*.cpp' -or -name '*.c' -or -name '*.s' \) -not -name 'startup_integration_test.cpp')
 

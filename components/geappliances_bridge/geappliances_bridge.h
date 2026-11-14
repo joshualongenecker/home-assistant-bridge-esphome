@@ -54,7 +54,7 @@ extern "C" {
 #include "discovery_lifecycle_manager.h"
 #include "diagnostic_sensor_publisher.h"
 #include "erd_poll_list_builder.h"
-#include "appliance_type_map.h"
+#include "protocol_stack.h"
 
 namespace esphome {
 namespace geappliances_bridge {
@@ -63,7 +63,6 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   friend ErdPollListResult build_poll_list_(GeappliancesBridge* bridge,
                                             const probe_entry_t* custom_erds,
                                             uint16_t custom_erds_count);
-  friend tiny_time_source_ticks_t gea2_tick_ticks(i_tiny_time_source_t*);
 
  public:
   static constexpr unsigned long baud = 230400;
@@ -137,35 +136,46 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   void initialize_erd_bridge_();
   void start_custom_erd_polling_();
   void maybe_start_custom_erd_polling_();
-  void run_gea2_iteration_();
-  void run_gea3_iteration_();
-  void run_timer_only_iteration_();
-  // Run a tight-loop for the given iteration function, bounded by a duration
-  // and a hard cap.  In test builds the loop is replaced with a single call.
-  template<typename IterFn>
-  void run_tight_loop_(IterFn iter_fn, uint32_t duration_ms,
-                        uint32_t hard_cap_ms, const char* protocol_name) {
-#ifndef UNIT_TEST_BUILD
-    uint32_t loop_start_ms = millis();
-    while (millis() - loop_start_ms < duration_ms) {
-      if (millis() - loop_start_ms >= hard_cap_ms) {
-        ESP_LOGW("geappliances_bridge", "%s tight loop exceeded hard cap (%u ms), breaking",
-                 protocol_name, static_cast<unsigned>(hard_cap_ms));
-        break;
-      }
-#ifdef USE_ESP32
-      esp_task_wdt_reset();
-#endif
-      iter_fn();
-    }
-#else
-    (void)duration_ms;
-    (void)hard_cap_ms;
-    (void)protocol_name;
-    iter_fn();
-#endif
+  // ── Data-plane phase machine (replaces the five *_initialized_ booleans) ──
+  //
+  // kIdle                       no data-plane bridge exists yet
+  // kPolling                    polling bridge only (poll mode or fallback)
+  // kSubscription               subscription bridge only; custom polling undecided
+  // kSubscriptionCustomPolling  subscription bridge + custom-ERD polling bridge
+  // kSubscriptionSettled        subscription bridge only; all custom ERDs
+  //                             covered, custom polling retired
+  //
+  // The phase never returns to kIdle: the write bridge is initialized at the
+  // end of initialize_erd_bridge_() on every path and destroyed only in
+  // teardown().
+  enum class DataPlanePhase {
+    kIdle,
+    kPolling,
+    kSubscription,
+    kSubscriptionCustomPolling,
+    kSubscriptionSettled,
+  };
+  // One-way readiness latch: true once the appliance-side data path has
+  // reached steady-state operation. Kept separate from the phase because a
+  // failure rebuild returns the phase to kPolling while the latch stays set.
+  enum class DataPlaneReadiness { kNotSteady, kSteady };
+  // Publisher pause machine: the ERD cache publisher pauses while HA
+  // discovery publishes and resumes afterwards; kResuming tracks the
+  // post-resume drain so "Device is in steady state" logs exactly once.
+  enum class PublisherPausePhase { kIdle, kPaused, kResuming };
+
+  // Whether the phase implies a live subscription/polling bridge. The
+  // subscription bridge survives a custom-polling failure and the settled
+  // state; the polling bridge exists only in the two polling phases.
+  static bool phase_has_subscription_bridge(DataPlanePhase phase) {
+    return phase == DataPlanePhase::kSubscription ||
+           phase == DataPlanePhase::kSubscriptionCustomPolling ||
+           phase == DataPlanePhase::kSubscriptionSettled;
   }
-  void run_protocol_stack_();
+  static bool phase_has_polling_bridge(DataPlanePhase phase) {
+    return phase == DataPlanePhase::kPolling ||
+           phase == DataPlanePhase::kSubscriptionCustomPolling;
+  }
   void log_poll_state_transitions_();
   void update_publisher_state_();
   // Readiness predicate handed to DiscoveryLifecycleManager: the bridge owns
@@ -180,6 +190,15 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   bool should_route_to_feature_bits_(tiny_erd_t erd);
 
   startup_hsm_wrapper_t startup_hsm_wrapper_;
+  // ── Data-plane phase machine state ──
+  DataPlanePhase data_plane_phase_{DataPlanePhase::kIdle};
+  DataPlaneReadiness data_plane_readiness_{DataPlaneReadiness::kNotSteady};
+  PublisherPausePhase publisher_pause_phase_{PublisherPausePhase::kIdle};
+
+  // Wire-level protocol machinery: UART adapters, GEA2/GEA3 interfaces, both
+  // ERD clients, the GEA2→GEA3 adapter, their buffers, the GEA2 tick source,
+  // and the shared timer group (see protocol_stack.h).
+  ProtocolStack protocol_stack_;
 
   uart::UARTComponent *uart_{nullptr};
   uart::UARTComponent *gea2_uart_{nullptr};
@@ -188,8 +207,6 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   uint8_t board_address_{0};
   bool board_address_configured_{false};
 
-  bool mqtt_client_adapter_initialized_{false};
-  bool erd_bridge_initialized_{false};
   BridgeMode mode_{BRIDGE_MODE_AUTO};
   uint32_t polling_interval_ms_{10000};
   bool appliance_api_parsing_{true};
@@ -213,32 +230,12 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   erd_set_t custom_erd_subscription_seen_erds_;
   probe_entry_t poll_probe_list_[POLLING_LIST_MAX_SIZE];
   uint16_t poll_probe_list_count_{0};
-  bool custom_erd_polling_started_{false};
 
   uint32_t startup_delay_start_ms_{0};
-
-  // GEA2 tight-loop duration: covers the full TX→RX cycle at 19200 baud
-  // (see doc/geappliances_bridge.md section 13 for detailed explanation)
-  static constexpr uint32_t GEA2_LOOP_DURATION_MS = 100;
-  // Cap on msec catchup iterations to prevent runaway loops
-  static constexpr uint32_t MSEC_CATCHUP_CAP = 1000;
-  static constexpr uint32_t GEA3_LOOP_DURATION_MS = 10;
-  static constexpr uint32_t GEA2_LOOP_HARD_CAP_MS = GEA2_LOOP_DURATION_MS * 2;
-  static constexpr uint32_t GEA3_LOOP_HARD_CAP_MS = GEA3_LOOP_DURATION_MS * 2;
-  bool gea2_protocol_active_{false}; // fallback for manual device_id when autodiscovery is skipped
-
-  // True once the appliance-side data path (subscription and/or polling
-  // bridge) has reached steady-state operation.  Set once; never cleared.
-  bool steady_state_reached_{false};
 
   DeviceIdentityManager device_identity_manager_;
 
   FeatureBitManager feature_bit_manager_;
-
-  // Guard to prevent re-initializing feature bit reading mid-sequence.
-  // start_feature_bit_reading_() checks this flag so it won't re-init()
-  // if called again while the first ERD read is still in-flight.
-  bool feature_bit_reading_started_{false};
 
   polling_state_t last_logged_poll_state_{polling_state_none};
   subscription_state_t last_logged_subscribe_state_{subscription_state_none};
@@ -254,13 +251,11 @@ class GeappliancesBridge : public Component, public IBridgeServices {
 
   ErdRegistry erd_registry_;
 
-  erd_cache_mqtt_publisher_t erd_cache_publisher_;
-  erd_cache_t erd_cache_;
+  erd_cache_mqtt_publisher_t erd_cache_publisher_{};  // zero-init: teardown() destroy guard reads cache pre-setup
+  erd_cache_t erd_cache_{};  // zero-init: teardown() destroy guard reads initialized pre-setup
 
   // HA discovery manager: publishes one-shot HA MQTT discovery payloads after steady state is reached.
-  ha_discovery_manager_t ha_discovery_manager_;
-  bool erd_cache_publisher_paused_{false};
-  bool discovery_just_resumed_{false};
+  ha_discovery_manager_t ha_discovery_manager_{};  // zero-init: teardown() frees run buffers pre-setup
 
   AutodiscoveryManager autodiscovery_manager_;
   // HA discovery lifecycle: initial publish, cleanup + republish (OTA, config
@@ -269,61 +264,12 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   DiscoveryLifecycleManager discovery_lifecycle_manager_;
   DiagnosticSensorPublisher diagnostic_sensor_publisher_;
 
-  tiny_timer_group_t timer_group_;
-
-  esphome_uart_adapter_t uart_adapter_;
-  esphome_mqtt_client_adapter_t mqtt_client_adapter_;
-
-  tiny_gea3_interface_t gea3_interface_;
-  // GEA3 receive buffer — one complete on-wire packet.
-  // Max payload is tiny_gea_packet_max_payload_length (248) + 7 bytes overhead = 255.
-  uint8_t receive_buffer_[255];
-  // GEA3 send queue — holds up to ~4 pending outbound packets (255 bytes each).
-  uint8_t send_queue_buffer_[1000];
-
-  tiny_gea3_erd_client_t erd_client_;
-  /* GEA3 client queue buffer — sized to hold enough read requests for the
-   * custom-ERD polling bridge (up to ~31 reads × 6 bytes each ≈ 188 bytes)
-   * plus in-flight subscription acknowledgments and write requests.
-   * Increased from 1024 to 2048 to prevent ring-buffer overflow when the
-   * polling bridge and subscription bridge share the same ERD client;
-   * overflow corrupts adjacent heap metadata causing
-   * prvCheckTasksWaitingTermination crashes (see erd_bridge_poll.cpp). */
-  uint8_t client_queue_buffer_[4096];
-
-  esphome_uart_adapter_t gea2_uart_adapter_;
-  tiny_gea2_interface_t gea2_interface_;
-
-  // GEA2 receive buffer — one complete on-wire packet.
-  // Max payload is tiny_gea_packet_max_payload_length (248) + 7 bytes overhead = 255.
-  uint8_t gea2_receive_buffer_[255];
-  // GEA2 send queue — larger than GEA3 to absorb more packets at 19200 baud
-  // where the slower bus means the tight loop processes fewer packets per call.
-  uint8_t gea2_send_queue_buffer_[4096];
-
-  tiny_gea2_erd_client_t gea2_erd_client_;
-  uint8_t gea2_client_queue_buffer_[4096];
-
-  // Event fired once per millisecond to drive GEA2 interface's internal timers.
-  // Published manually inside the GEA2 tight loop (not via a timer_group_ periodic
-  // timer) so the 1 ms interrupt never fires in the GEA3 single-pass path and
-  // cannot starve the GEA3/polling-bridge timers in the shared timer_group_.
-  tiny_event_t gea2_msec_interrupt_;
-  // GEA2 time tracking — moved from file-scope statics to class members
-  // so they reset on re-init (deep sleep wake, ESPHome reconfiguration).
-  tiny_time_source_ticks_t gea2_tick_count_{0};
-  uint32_t gea2_last_ms_{0};
-
-  gea2_erd_client_adapter_t gea2_erd_client_adapter_;
+  esphome_mqtt_client_adapter_t mqtt_client_adapter_{};  // zero-init: .initialized reads false pre-setup
 
   erd_bridge_subscribe_t erd_bridge_subscribe_;
   erd_bridge_poll_t erd_bridge_poll_;
 
   erd_write_bridge_t erd_write_bridge_;
-  bool write_bridge_initialized_{false};
-
-  bool subscription_bridge_initialized_{false};
-  bool polling_bridge_initialized_{false};
 
   tiny_event_subscription_t erd_client_activity_subscription_;
   tiny_event_subscription_t gea2_activity_subscription_;

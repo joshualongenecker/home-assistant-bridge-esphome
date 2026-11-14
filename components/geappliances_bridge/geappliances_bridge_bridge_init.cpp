@@ -69,14 +69,13 @@ void GeappliancesBridge::init_polling_bridge_(bool log_as_info,
 
   erd_bridge_poll_init(
       &this->erd_bridge_poll_,
-      &this->timer_group_,
+      this->protocol_stack_.timer_group(),
       this->autodiscovery_manager_.get_active_erd_client(),
       this->polling_interval_ms_,
       this->autodiscovery_manager_.get_host_address(),
       this->poll_probe_list_,
       this->poll_probe_list_count_,
       &this->erd_cache_);
-  this->polling_bridge_initialized_ = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,66 +84,54 @@ void GeappliancesBridge::init_polling_bridge_(bool log_as_info,
 
 void GeappliancesBridge::start_feature_bit_reading_()
 {
-  // Guard: don't re-initialize if the manager has already started.
-  // Any READING_* state means the manager is actively processing,
-  // PARSING/COMPLETE mean it's past the reading phase.
-  // Note: the feature_bit_reading_started_ flag prevents re-init while the first read is in-flight.
-  FeatureBitState state = this->feature_bit_manager_.get_state();
-  if (state != FEATURE_BIT_STATE_READING) {
-    return;
-  }
-  // Additional guard: if start() was already called and the first read
-  // is in-flight, the manager is still in READING_0092 but read_queued_
-  // is true. We can't check read_queued_ directly (it's private), but
-  // we track whether we've already kicked off feature bit reading via
-  // the feature_bit_reading_started_ flag.
-  if (this->feature_bit_reading_started_) {
+  // Guard: don't re-initialize while the manager already holds an ERD
+  // client — init() subscribes activity and queues the first read, so a
+  // second call while reads are in flight (or after PARSING/FAILED/COMPLETE)
+  // would double-queue. cleanup() resets the client pointer, re-arming the
+  // guard for a re-init.
+  if (this->feature_bit_manager_.is_initialized()) {
     return;
   }
 
   // Guard: only proceed once a valid ERD client is available. If the client
-  // is null (e.g. autodiscovery not yet complete), leave the flag unset so
-  // the next loop() call retries rather than getting permanently stuck.
+  // is null (e.g. autodiscovery not yet complete), return so the next loop()
+  // call retries rather than getting permanently stuck.
   i_tiny_gea3_erd_client_t* erd_client = this->autodiscovery_manager_.get_active_erd_client();
   if (erd_client == nullptr) {
     return;
   }
 
-  // Set the flag only after confirming init() will succeed, so that a
-  // transient null-client on an earlier call does not permanently block retry.
-  this->feature_bit_reading_started_ = true;
-
   this->feature_bit_manager_.init(
       erd_client,
       this->autodiscovery_manager_.get_host_address(),
-      &this->timer_group_);
+      this->protocol_stack_.timer_group());
   this->feature_bit_manager_.start();
 }
 
 void GeappliancesBridge::initialize_mqtt_client_()
 {
-  if (this->mqtt_client_adapter_initialized_) {
+  if (this->mqtt_client_adapter_.initialized) {
     return;
   }
 
-  // For manual device_id configs where autodiscovery is skipped (gea2_uart only,
-  // no GEA3 uart), mark the protocol as GEA2 so run_protocol_stack_() enables
-  // the GEA2 tight loop even before autodiscovery runs.
+  // For manual device_id configs where autodiscovery is skipped (gea2_uart
+  // only, no GEA3 uart), mark GEA2 as the active protocol so the protocol
+  // stack runs the GEA2 tight loop even before autodiscovery would run.
   if (this->autodiscovery_manager_.get_active_erd_client() == nullptr) {
     if (this->uart_ == nullptr) {
-      this->gea2_protocol_active_ = true;
+      this->protocol_stack_.set_gea2_active(true);
     }
   }
 
   esphome_mqtt_client_adapter_init(&this->mqtt_client_adapter_,
                                    this->device_identity_manager_.get_device_id());
 
-  this->mqtt_client_adapter_initialized_ = true;
 }
 
 void GeappliancesBridge::initialize_erd_bridge_()
 {
-  if (!this->mqtt_client_adapter_initialized_ || this->erd_bridge_initialized_) {
+  if (!this->mqtt_client_adapter_.initialized ||
+      this->data_plane_phase_ != DataPlanePhase::kIdle) {
     return;
   }
 
@@ -200,10 +187,10 @@ void GeappliancesBridge::initialize_erd_bridge_()
 
   if (use_polling) {
     this->init_polling_bridge_(false);
-    // Mark bridge initialized BEFORE the probe phase starts, so that if
+    // Mark the data plane active BEFORE the probe phase starts, so that if
     // the probe completes synchronously and fires signal_bridge_ready,
-    // check_steady_state() in the running entry can see the flag.
-    this->erd_bridge_initialized_ = true;
+    // check_steady_state() in the running entry can see the phase.
+    this->data_plane_phase_ = DataPlanePhase::kPolling;
   }
 
   // Initialize the subscription bridge for non-polling modes (subscribe, auto).
@@ -213,12 +200,11 @@ void GeappliancesBridge::initialize_erd_bridge_()
 
     erd_bridge_subscribe_init(
       &this->erd_bridge_subscribe_,
-      &this->timer_group_,
+      this->protocol_stack_.timer_group(),
       this->autodiscovery_manager_.get_active_erd_client(),
       this->autodiscovery_manager_.get_host_address(),
       &this->erd_cache_);
-    this->subscription_bridge_initialized_ = true;
-    this->erd_bridge_initialized_ = true;
+    this->data_plane_phase_ = DataPlanePhase::kSubscription;
 
     // Subscription bridge has no discovery phase — signal the startup HSM
     // immediately so it can transition to subscription_watch.
@@ -231,11 +217,10 @@ void GeappliancesBridge::initialize_erd_bridge_()
   // commands from Home Assistant are routed to it via on_write_request_event.
   erd_write_bridge_init(
     &this->erd_write_bridge_,
-    &this->timer_group_,
+    this->protocol_stack_.timer_group(),
     this->autodiscovery_manager_.get_active_erd_client(),
     &this->mqtt_client_adapter_.interface,
     host_addr);
-  this->write_bridge_initialized_ = true;
   esphome_mqtt_client_adapter_subscribe_write_topic(&this->mqtt_client_adapter_);
 
 }
@@ -260,7 +245,7 @@ void GeappliancesBridge::start_custom_erd_polling_()
   if (this->subscription_unseen_custom_erds_count_ == 0) {
     ESP_LOGI(TAG, "All %u custom ERDs are covered by subscription; custom polling not started",
              this->custom_erds_count_);
-    this->custom_erd_polling_started_ = true;
+    this->data_plane_phase_ = DataPlanePhase::kSubscriptionSettled;
     return;
   }
   ESP_LOGI(TAG, "Custom polling: %u subscribed ERDs skipped, %u ERDs remaining",
@@ -269,13 +254,13 @@ void GeappliancesBridge::start_custom_erd_polling_()
 
   this->init_polling_bridge_(true, this->subscription_unseen_custom_erds_,
                              this->subscription_unseen_custom_erds_count_);
-  this->custom_erd_polling_started_ = true;
+  this->data_plane_phase_ = DataPlanePhase::kSubscriptionCustomPolling;
 }
 
 void GeappliancesBridge::maybe_start_custom_erd_polling_()
 {
   if (this->custom_erds_count_ == 0 ||
-      this->custom_erd_polling_started_) {
+      this->data_plane_phase_ != DataPlanePhase::kSubscription) {
     return;
   }
 
@@ -298,11 +283,10 @@ void GeappliancesBridge::handle_polling_failed()
     return;
   }
 
-  if (this->subscription_bridge_initialized_) {
+  if (phase_has_subscription_bridge(this->data_plane_phase_)) {
     ESP_LOGW(TAG, "Custom ERD polling bridge failed; continuing with subscription only");
     erd_bridge_poll_destroy(&this->erd_bridge_poll_);
-    this->polling_bridge_initialized_ = false;
-    this->custom_erd_polling_started_ = false;
+    this->data_plane_phase_ = DataPlanePhase::kSubscription;
   } else {
     ESP_LOGE(TAG, "Primary polling bridge failed; no data path available");
     // Leave the bridge in failed state. The appliance_lost handler in
@@ -318,20 +302,17 @@ void GeappliancesBridge::handle_subscription_failed()
   }
 
   erd_bridge_subscribe_destroy(&this->erd_bridge_subscribe_);
-  this->subscription_bridge_initialized_ = false;
   this->last_logged_poll_state_ = polling_state_none;
   this->last_logged_subscribe_state_ = subscription_state_none;
 
   // Destroy any existing polling bridge (e.g., from custom ERD polling)
   // before re-initializing to avoid leaking heap allocations.
-  if (this->custom_erd_polling_started_) {
+  if (phase_has_polling_bridge(this->data_plane_phase_)) {
     erd_bridge_poll_destroy(&this->erd_bridge_poll_);
-    this->custom_erd_polling_started_ = false;
-    this->polling_bridge_initialized_ = false;
   }
 
   this->init_polling_bridge_(true);
-
+  this->data_plane_phase_ = DataPlanePhase::kPolling;
   // The startup HSM owns the subscription_watch → running transition (its
   // run_loop handler transitions right after calling this); this handler only
   // rebuilds the data path.
