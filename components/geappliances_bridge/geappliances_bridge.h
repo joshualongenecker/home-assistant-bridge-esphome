@@ -251,8 +251,8 @@ class GeappliancesBridge : public Component, public IBridgeServices {
 
   ErdRegistry erd_registry_;
 
-  erd_cache_mqtt_publisher_t erd_cache_publisher_;
-  erd_cache_t erd_cache_;
+  erd_cache_mqtt_publisher_t erd_cache_publisher_{};  // zero-init: teardown() destroy guard reads cache pre-setup
+  erd_cache_t erd_cache_{};  // zero-init: teardown() destroy guard reads initialized pre-setup
 
   // HA discovery manager: publishes one-shot HA MQTT discovery payloads after steady state is reached.
   ha_discovery_manager_t ha_discovery_manager_{};  // zero-init: teardown() frees run buffers pre-setup
