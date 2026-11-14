@@ -38,6 +38,7 @@
 
 #include <cstring>
 #include <string>
+#include <cstdio>
 
 using namespace esphome::geappliances_bridge;
 
@@ -1903,6 +1904,101 @@ TEST(startup_integration, auto_mode_subscription_failure_rebuilds_polling_bridge
     bridge->loop();
   }
   CHECK(mock_uart->write_count > writes_mid);
+
+  CHECK(bridge->teardown());
+}
+
+/* ================================================================== */
+/* Long-run heap stability                                              */
+/* ================================================================== */
+
+/* Live heap bytes as AddressSanitizer sees them. Both suites link
+ * -fsanitize=address, so this is the number of bytes the process currently
+ * holds — the quantity that must not creep while the bridge runs. A device
+ * that loses a few hundred bytes an hour dies of it in the field; this test
+ * is that failure mode, compressed into one second of host time.
+ *
+ * Scope: the component and the tiny-gea protocol stack. On the device the
+ * ESP-IDF MQTT client also copies every published payload; that churn lives
+ * outside this harness (the MQTT double stores only the last publish), so
+ * what this guards is our own code path: nothing in the data plane may hold
+ * on to memory it allocated per message. */
+extern "C" size_t __sanitizer_get_current_allocated_bytes();
+
+/* One steady-state window: 300 000 iterations at 10 ms each = 3 000 s (50 min)
+ * of device time, so the 10 s poll interval elapses hundreds of times and a
+ * full poll cycle — send the list, take every read response, complete the
+ * cycle — actually finishes inside the window. Then 500 write requests, so
+ * accepted writes, queue-full refusals and their write_result publishes all
+ * run through the ring. The simulated clock only moves forward across the
+ * two phases. */
+static void run_steady_state_window(GeappliancesBridge *bridge, LifecycleMockUart *uart,
+                                    esphome::mqtt::MqttTestDouble *mqtt, unsigned long base_ms)
+{
+  const unsigned long poll_span_ms = 300000UL * 10UL;
+  for (int j = 0; j < 300000; j++) {
+    esphome_hal_double_set_millis(base_ms + (unsigned long)j * 10);
+    bridge->loop();
+    respond_to_erd_reads(uart);
+  }
+  for (int j = 0; j < 500; j++) {
+    mqtt->simulate_message("geappliances/test-device/erd/0x1004/write", "0102");
+    esphome_hal_double_set_millis(base_ms + poll_span_ms + (unsigned long)j * 10);
+    bridge->loop();
+    respond_to_erd_reads(uart);
+  }
+}
+
+/* Growth the measured window may spend. On a correct build the warm-up
+ * window grows the live heap by a couple of hundred bytes (one-time capacity
+ * growth) and the measured window by none. The ceiling stays far below one
+ * ERD payload so a payload-sized leak per poll cycle trips it. */
+static const size_t kSteadyStateHeapSlack = 256;
+
+TEST(startup_integration, steady_state_window_leaks_no_heap)
+{
+  configure_poll_mode();
+  bridge->set_device_id("test-device");
+  bridge->set_generate_device_config(false);
+  bridge->setup();
+
+  int i = drive_past_broadcast(bridge, mock_uart);
+  queue_broadcast_response(mock_uart, 0x03);
+  for (; i <= 13500; i++) {
+    esphome_hal_double_set_millis(i * 10);
+    bridge->loop();
+    respond_to_erd_reads(mock_uart);
+  }
+
+  IBridgeServices *services = bridge;
+  CHECK(services->get_polling_state() == polling_state_polling);
+
+  /* Warm-up window: whatever the data path allocates once — string capacity
+   * growth, the first full cache sweep — lands here and is not counted. */
+  const size_t heap_cold = __sanitizer_get_current_allocated_bytes();
+  run_steady_state_window(bridge, mock_uart, mqtt_double, 135000);
+  const size_t heap_warm = __sanitizer_get_current_allocated_bytes();
+
+  const int publishes_before = mqtt_double->publish_calls_;
+  const int writes_before = mock_uart->write_count;
+
+  /* Measured window: the same 50 min again, with nothing left to allocate for
+   * the first time. Growth here is memory the data path never gives back. */
+  run_steady_state_window(bridge, mock_uart, mqtt_double, 4000000);
+  const size_t heap_after = __sanitizer_get_current_allocated_bytes();
+
+  /* Printed before the checks: CppUTest aborts the body at the first failing
+   * check, so anything printed afterwards would never show. */
+  printf("HEAPWINDOW warmup=%lld steady=%lld publishes=%d writes=%d\n",
+         (long long)(heap_warm - heap_cold), (long long)(heap_after - heap_warm),
+         mqtt_double->publish_calls_ - publishes_before,
+         mock_uart->write_count - writes_before);
+
+  /* The window has to have actually driven the data path, or the heap
+   * assertion below would be vacuous. */
+  CHECK(mqtt_double->publish_calls_ > publishes_before);
+  CHECK(mock_uart->write_count > writes_before);
+  CHECK_TRUE(heap_after <= heap_warm + kSteadyStateHeapSlack);
 
   CHECK(bridge->teardown());
 }
