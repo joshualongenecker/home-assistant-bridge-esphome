@@ -61,6 +61,13 @@ struct HookRecorder {
   int reboot_calls{0};
   int availability_calls{0};
 
+  /* The persisted discovery-abort reboot count, plus the two ways NVS can
+   * behave badly: refuse the write, or hold a count already spent. */
+  uint8_t abort_count{0};
+  bool abort_write_fails{false};
+  int abort_read_calls{0};
+  int abort_write_calls{0};
+
   void reset() { *this = HookRecorder{}; }
 };
 
@@ -88,6 +95,20 @@ void hook_watchdog(void* context) {
 
 void hook_reboot(void* context) {
   static_cast<HookRecorder*>(context)->reboot_calls++;
+}
+
+uint8_t hook_abort_read(void* context) {
+  auto* recorder = static_cast<HookRecorder*>(context);
+  recorder->abort_read_calls++;
+  return recorder->abort_count;
+}
+
+bool hook_abort_write(void* context, uint8_t count) {
+  auto* recorder = static_cast<HookRecorder*>(context);
+  recorder->abort_write_calls++;
+  if (recorder->abort_write_fails) return false;
+  recorder->abort_count = count;
+  return true;
 }
 
 void hook_availability(void* context, ha_discovery_manager_t*) {
@@ -175,6 +196,8 @@ TEST_GROUP(discovery_lifecycle_manager)
     hooks.load_discovery_record = &hook_load;
     hooks.save_discovery_record = &hook_save;
     hooks.confirm_firmware = &hook_confirm;
+    hooks.read_abort_reboot_count = &hook_abort_read;
+    hooks.write_abort_reboot_count = &hook_abort_write;
     hooks.feed_watchdog = &hook_watchdog;
     hooks.reboot = &hook_reboot;
     hooks.context = &hooks_;
@@ -574,9 +597,12 @@ TEST(discovery_lifecycle_manager, successful_publish_records_state_and_arms_rebo
   CHECK_TRUE(hooks_.saved.filter_config_topics);
   CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
   CHECK(lifecycle_.initial_publish_done());
+  /* Nothing was aborted, so the abort budget must not be written at all --
+   * clearing it unconditionally would be an NVS write on every discovery. */
+  CHECK_EQUAL(0, hooks_.abort_write_calls);
 }
 
-TEST(discovery_lifecycle_manager, failed_publish_records_nothing_and_returns_to_idle)
+TEST(discovery_lifecycle_manager, failed_publish_records_nothing_and_arms_a_recovery_reboot)
 {
   enter_publishing();
 
@@ -586,7 +612,7 @@ TEST(discovery_lifecycle_manager, failed_publish_records_nothing_and_returns_to_
    * the next boot from retrying. */
   CHECK_EQUAL(0, hooks_.save_calls);
   CHECK_EQUAL(0, hooks_.reboot_calls);
-  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
   CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
   CHECK(!lifecycle_.initial_publish_done());
   /* The firmware is still confirmed, so a good OTA is not rolled back. */
@@ -594,6 +620,14 @@ TEST(discovery_lifecycle_manager, failed_publish_records_nothing_and_returns_to_
   /* The run's buffers are released by resetting the manager to idle. */
   CHECK_EQUAL(ha_discovery_state_idle, manager_.state);
   CHECK_TRUE(manager_.decomp_buf == nullptr);
+
+  /* Releasing the run's ~52 KB does not release the fragmentation it caused --
+   * the largest free block stays collapsed for the rest of the boot -- so the
+   * armed phase has to actually reach a reset. */
+  esphome_hal_double_set_millis(DiscoveryLifecycleManager::kRebootDelayMs);
+  lifecycle_.loop();
+  CHECK_EQUAL(1, hooks_.reboot_calls);
+  CHECK_EQUAL(1, (int) hooks_.abort_count);
 }
 
 TEST(discovery_lifecycle_manager, a_failed_publish_can_be_retried)
@@ -601,9 +635,67 @@ TEST(discovery_lifecycle_manager, a_failed_publish_can_be_retried)
   enter_publishing();
   end_publish_run(ha_discovery_state_failed);
 
+  /* Drive the reboot the abort armed; the machine must be able to accept the
+   * next boot's retry once it comes back. */
+  esphome_hal_double_set_millis(DiscoveryLifecycleManager::kRebootDelayMs);
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+
   lifecycle_.check_discovery_changes(identity_.get_device_id());
 
   CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedInitial, lifecycle_.phase());
+}
+
+TEST(discovery_lifecycle_manager, abort_reboot_budget_stops_after_three_attempts)
+{
+  for (int attempt = 1; attempt <= (int) DiscoveryLifecycleManager::kMaxAbortReboots; ++attempt) {
+    enter_publishing();
+    end_publish_run(ha_discovery_state_failed);
+    CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
+    esphome_hal_double_set_millis(attempt * (int) DiscoveryLifecycleManager::kRebootDelayMs);
+    lifecycle_.loop();
+    CHECK_EQUAL(attempt, hooks_.reboot_calls);
+    CHECK_EQUAL(attempt, (int) hooks_.abort_count);
+  }
+
+  /* Budget spent. A permanently failing payload must not reboot-loop, so the
+   * next failure leaves the device up with the counter still at the budget. */
+  enter_publishing();
+  end_publish_run(ha_discovery_state_failed);
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL((int) DiscoveryLifecycleManager::kMaxAbortReboots, hooks_.reboot_calls);
+  CHECK_EQUAL((int) DiscoveryLifecycleManager::kMaxAbortReboots, (int) hooks_.abort_count);
+}
+
+TEST(discovery_lifecycle_manager, successful_publish_clears_the_abort_budget)
+{
+  hooks_.abort_count = 2;
+
+  enter_publishing();
+  end_publish_run(ha_discovery_state_complete);
+
+  /* A run that finished pays for whatever it did to the heap with its own
+   * reboot, so a later transient failure gets the full budget back. */
+  CHECK_EQUAL(0, (int) hooks_.abort_count);
+  CHECK_EQUAL(1, hooks_.abort_write_calls);
+}
+
+TEST(discovery_lifecycle_manager, unwritable_abort_budget_does_not_reboot)
+{
+  hooks_.abort_write_fails = true;
+
+  enter_publishing();
+  end_publish_run(ha_discovery_state_failed);
+
+  /* Rebooting while unable to remember that we rebooted is an unbounded retry
+   * loop with nothing to stop it, so recovery stops when the count cannot be
+   * stored. The run is still released and still unrecorded. */
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(0, hooks_.reboot_calls);
+  CHECK_EQUAL(1, hooks_.abort_write_calls);
+  CHECK_EQUAL(0, hooks_.save_calls);
+  CHECK_EQUAL(ha_discovery_state_idle, manager_.state);
 }
 
 TEST(discovery_lifecycle_manager, initial_publish_is_not_repeated_in_the_same_boot)
@@ -716,15 +808,23 @@ TEST(discovery_lifecycle_manager, publishing_phase_times_out_and_retries_next_bo
   esphome_hal_double_set_millis(DiscoveryLifecycleManager::kPhaseTimeoutMs);
   lifecycle_.loop();
 
-  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  /* Same contract as a failed run: released, unrecorded, and rebooted to
+   * recover the heap the run left fragmented. */
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
   CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
   CHECK_EQUAL(0, hooks_.save_calls);
-  CHECK_EQUAL(0, hooks_.reboot_calls);
+  CHECK_EQUAL(1, (int) hooks_.abort_count);
   /* The firmware is still confirmed, same contract as a failed run. */
   CHECK_EQUAL(1, hooks_.confirm_calls);
   /* The run's allocations are released by resetting the manager to idle. */
   CHECK_EQUAL(ha_discovery_state_idle, manager_.state);
   CHECK(!lifecycle_.initial_publish_done());
+
+  esphome_hal_double_set_millis(DiscoveryLifecycleManager::kPhaseTimeoutMs
+                                + DiscoveryLifecycleManager::kRebootDelayMs);
+  lifecycle_.loop();
+  CHECK_EQUAL(1, hooks_.reboot_calls);
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
 
   /* Nothing was recorded, so the next boot's change check retries. */
   lifecycle_.check_discovery_changes(identity_.get_device_id());
