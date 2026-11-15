@@ -42,6 +42,13 @@ void save_discovery_record(void*, const DiscoveryLifecycleManager::DiscoveryReco
 
 void confirm_firmware(void*) {}
 
+// "No abort reboot armed yet", and the write always succeeds: the same view a
+// working NVS gives at count 0. Tests that need the spent budget or a failing
+// write inject their own recorder.
+uint8_t read_abort_reboot_count(void*) { return 0; }
+
+bool write_abort_reboot_count(void*, uint8_t) { return true; }
+
 void feed_watchdog(void*) {}
 
 void reboot(void*) {}
@@ -51,6 +58,10 @@ void reboot(void*) {}
 constexpr uint32_t kDiscoveryNvsKey = 0x64697363u;
 // ESPHome's own safe-mode counter; zeroing it marks the running firmware good.
 constexpr uint32_t kSafeModeRtcKey = 233825507UL;
+// NVS key for the discovery-abort reboot budget ("drab"). Separate from the
+// record and from ESPHome's safe-mode counter: those are firmware-validation
+// state, this counts discovery runs.
+constexpr uint32_t kAbortRebootNvsKey = 0x64726162u;
 
 void apply_mqtt_availability(void*, ha_discovery_manager_t* manager) {
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
@@ -98,6 +109,23 @@ void confirm_firmware(void*) {
   ESP_LOGI(TAG, "Safe mode counter cleared, OTA rollback cancelled");
 }
 
+uint8_t read_abort_reboot_count(void*) {
+  auto pref = global_preferences->make_preference<uint8_t>(kAbortRebootNvsKey);
+  uint8_t count = 0;
+  if (!pref.load(&count)) return 0;
+  return count;
+}
+
+bool write_abort_reboot_count(void*, uint8_t count) {
+  auto pref = global_preferences->make_preference<uint8_t>(kAbortRebootNvsKey);
+  if (!pref.save(&count)) {
+    ESP_LOGE(TAG, "Could not persist the discovery-abort reboot count");
+    return false;
+  }
+  global_preferences->sync();
+  return true;
+}
+
 void feed_watchdog(void*) { esp_task_wdt_reset(); }
 
 void reboot(void*) { esphome::App.safe_reboot(); }
@@ -140,6 +168,12 @@ void DiscoveryLifecycleManager::init(
   }
   if (this->hooks_.confirm_firmware == nullptr) {
     this->hooks_.confirm_firmware = &confirm_firmware;
+  }
+  if (this->hooks_.read_abort_reboot_count == nullptr) {
+    this->hooks_.read_abort_reboot_count = &read_abort_reboot_count;
+  }
+  if (this->hooks_.write_abort_reboot_count == nullptr) {
+    this->hooks_.write_abort_reboot_count = &write_abort_reboot_count;
   }
   if (this->hooks_.feed_watchdog == nullptr) {
     this->hooks_.feed_watchdog = &feed_watchdog;
@@ -325,12 +359,11 @@ void DiscoveryLifecycleManager::finish_publish_() {
   this->hooks_.confirm_firmware(this->hooks_.context);
 
   if (discovery_failed) {
-    // Reset the manager to idle: this frees the discovery allocations (so the
-    // ~52 KB of run allocations, buffers plus tinfl state, do not linger for
-    // the rest of the boot) and clears run state.
-    // Also do not save the discovery record and do not arm the reboot:
-    // leaving the stored record stale/absent is what makes
-    // check_discovery_changes() re-trigger discovery on the next boot.
+    // abort_publish_run_() releases the discovery allocations (the ~52 KB of
+    // run buffers plus tinfl state), clears run state and decides whether to
+    // reboot. It never saves the record: leaving the stored record
+    // stale/absent is what makes check_discovery_changes() re-trigger
+    // discovery on the next boot.
     this->abort_publish_run_();
     ESP_LOGE(TAG, "HA discovery failed; not saving discovery state, will retry on next boot");
     return;
@@ -355,19 +388,55 @@ void DiscoveryLifecycleManager::finish_publish_() {
   record.filter_config_topics = this->filter_config_topics_;
   this->hooks_.save_discovery_record(this->hooks_.context, record);
 
+  // The reboot below pays for whatever the run did to the heap, so the abort
+  // budget is spent for a different reason now; clearing it gives a later
+  // transient failure its full set of attempts.
+  if (this->hooks_.read_abort_reboot_count(this->hooks_.context) != 0) {
+    this->hooks_.write_abort_reboot_count(this->hooks_.context, 0);
+  }
+
   ESP_LOGI(TAG, "%s HA discovery publish complete, preparing reboot...", trigger_kind);
 
   this->set_phase_(kPhaseRebootPending);
   this->reboot_start_ms_ = this->get_time_ms_();
 }
-// Failed-run contract shared by the publish-timeout abort and a FAILED run:
-// the run's allocations are released and no record is saved, so the next
-// boot's change check retries. The caller has already confirmed the firmware
-// (it is confirmed on success too) and logged the reason.
+// Failed-run contract shared by the publish-timeout abort and a FAILED run: the
+// run's allocations are released and no record is saved, so the next boot's
+// change check retries. The caller has already confirmed the firmware (it is
+// confirmed on success too) and logged the reason.
+//
+// Releasing the ~52 KB does not release the fragmentation it caused. Measured on
+// hardware, the largest free block after an aborted run stays at 102 400-143 360
+// B for the rest of the boot against 237 568 B after a clean one: the region is
+// bounded by other survivors while the publisher churns, so nothing re-coalesces
+// it short of a reset. Hence the reboot -- bounded, because a failed run never
+// saves the record and the next boot retries, so a permanently failing payload
+// would otherwise reboot on every boot forever.
 void DiscoveryLifecycleManager::abort_publish_run_() {
   ha_discovery_manager_init(this->ha_discovery_manager_);
   this->trigger_ = kTriggerNone;
-  this->set_phase_(kPhaseIdle);
+
+  const uint8_t armed = this->hooks_.read_abort_reboot_count(this->hooks_.context);
+  if (armed >= kMaxAbortReboots) {
+    ESP_LOGE(TAG, "HA discovery aborted and the reboot budget (%" PRIu8
+             ") is spent, staying up. Discovery Refresh or a power cycle will retry.",
+             static_cast<uint8_t>(kMaxAbortReboots));
+    this->set_phase_(kPhaseIdle);
+    return;
+  }
+  if (!this->hooks_.write_abort_reboot_count(this->hooks_.context,
+                                             static_cast<uint8_t>(armed + 1))) {
+    // Rebooting without remembering that we rebooted is an unbounded retry
+    // loop with nothing to stop it, so an unwritable counter stops recovery.
+    ESP_LOGE(TAG, "HA discovery aborted but the reboot count could not be stored; not rebooting");
+    this->set_phase_(kPhaseIdle);
+    return;
+  }
+  ESP_LOGW(TAG, "HA discovery aborted; rebooting to recover the heap (attempt %" PRIu8
+           " of %" PRIu8 ")",
+           static_cast<uint8_t>(armed + 1), static_cast<uint8_t>(kMaxAbortReboots));
+  this->set_phase_(kPhaseRebootPending);
+  this->reboot_start_ms_ = this->get_time_ms_();
 }
 
 void DiscoveryLifecycleManager::loop() {

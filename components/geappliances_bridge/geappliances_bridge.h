@@ -254,11 +254,23 @@ class GeappliancesBridge : public Component, public IBridgeServices {
 
   ErdRegistry erd_registry_;
 
-  erd_cache_mqtt_publisher_t erd_cache_publisher_;
+  // Value-initialized for the same reason as ha_discovery_manager_ below:
+  // teardown() dispatches on erd_cache_publisher_.cache being non-NULL, so a
+  // heap-allocated bridge must not start out with garbage there.
+  erd_cache_mqtt_publisher_t erd_cache_publisher_{};
   erd_cache_t erd_cache_;
 
   // HA discovery manager: publishes one-shot HA MQTT discovery payloads after steady state is reached.
-  ha_discovery_manager_t ha_discovery_manager_;
+  //
+  // Value-initialized on purpose. ha_discovery_manager_init() and
+  // ha_discovery_manager_cleanup() both free() the four run buffers before
+  // memset()ing the struct, which is only safe when those pointers start out
+  // NULL. A bridge that is heap-allocated -- every test does `new
+  // GeappliancesBridge()`, and any future dynamic instantiation would --
+  // otherwise frees whatever the allocator left in that memory. Deployed
+  // firmware hides the bug because ESPHome makes the component a static global
+  // (zeroed by the loader), so only the test heap ever saw garbage there.
+  ha_discovery_manager_t ha_discovery_manager_{};
   bool erd_cache_publisher_paused_{false};
   bool discovery_just_resumed_{false};
 
@@ -272,7 +284,9 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   tiny_timer_group_t timer_group_;
 
   esphome_uart_adapter_t uart_adapter_;
-  esphome_mqtt_client_adapter_t mqtt_client_adapter_;
+  // The i_mqtt_client_t wrappers in i_mqtt_client.h call straight through
+  // self->api, so this must start out NULL rather than whatever the heap had.
+  esphome_mqtt_client_adapter_t mqtt_client_adapter_{};
 
   tiny_gea3_interface_t gea3_interface_;
   // GEA3 receive buffer — one complete on-wire packet.
