@@ -55,6 +55,9 @@ jobs:
         run: |
           esphome compile docs/test-compile.yaml
 
+      - name: Verify diagnostic entities are published over MQTT
+        run: python3 scripts/check_diagnostic_mqtt_wrappers.py
+
       - name: Clean up secrets
         if: always()
         run: |
