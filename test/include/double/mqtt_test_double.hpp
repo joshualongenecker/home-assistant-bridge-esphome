@@ -17,6 +17,7 @@
 
 #include "esphome/components/mqtt/mqtt_client.h"
 #include <string>
+#include <vector>
 #include <functional>
 
 namespace esphome {
@@ -31,6 +32,8 @@ class MqttTestDouble : public MQTTClientComponent {
   bool last_published_retain_{false};
   int publish_calls_{0};
 
+  std::vector<std::string> subscribed_topics_;
+  std::vector<std::string> unsubscribed_topics_;
   std::function<void(const std::string&, const std::string&)> subscribe_callback_;
   std::function<void(bool)> on_connect_callback_;
   std::function<void(MQTTClientDisconnectReason)> on_disconnect_callback_;
@@ -54,13 +57,17 @@ class MqttTestDouble : public MQTTClientComponent {
     return !publish_should_fail_;
   }
 
-  void subscribe(const std::string& /*topic*/,
+  void subscribe(const std::string& topic,
                  std::function<void(const std::string&, const std::string&)> callback,
                  uint8_t /*qos*/) override {
+    subscribed_topics_.push_back(topic);
     subscribe_callback_ = callback;
   }
 
-  void unsubscribe(const std::string& /*topic*/) override { }
+  void unsubscribe(const std::string& topic) override {
+    unsubscribed_topics_.push_back(topic);
+  }
+
 
   void set_on_connect(std::function<on_connect_callback_t>&& callback) override {
     on_connect_callback_ = std::move(callback);

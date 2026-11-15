@@ -66,6 +66,11 @@ class FeatureBitManager {
 
   FeatureBitState get_state() const { return state_; }
 
+  /// True once init() has installed an ERD client; cleanup() resets it.
+  /// The bridge's start_feature_bit_reading_() guard, replacing the
+  /// bridge-side feature_bit_reading_started_ flag.
+  bool is_initialized() const { return this->erd_client_ != nullptr; }
+
  private:
   void on_erd_activity_(const void* args);
 

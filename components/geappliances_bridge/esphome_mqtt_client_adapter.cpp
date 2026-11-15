@@ -92,6 +92,7 @@ extern "C" void esphome_mqtt_client_adapter_init(
   esphome_mqtt_client_adapter_t* self,
   const char* device_id)
 {
+  self->initialized = true;
   self->interface.api = &api;
   /* Lifetime: stores a pointer into DeviceIdentityManager's buffers
    * (configured_device_id_ or generated_device_id_), which live in the
@@ -201,6 +202,7 @@ extern "C" void esphome_mqtt_client_adapter_destroy(
 
   self->write_topic_[0] = '\0';
   self->device_id = nullptr;
+  self->initialized = false;
 }
 extern "C" bool esphome_mqtt_client_adapter_publish_raw(
   i_mqtt_client_t* _self,

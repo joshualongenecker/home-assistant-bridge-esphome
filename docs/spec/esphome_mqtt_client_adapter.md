@@ -36,6 +36,9 @@ typedef struct {
   tiny_event_t on_mqtt_connect_event;
   // Tracked write topic for unsubscribe on destroy.
   char write_topic_[128];
+  // Set by init(), cleared by destroy(): the bridge's initialize/teardown
+  // guard, replacing the bridge-side mqtt_client_adapter_initialized_ flag.
+  bool initialized;
 } esphome_mqtt_client_adapter_t;
 ```
 
@@ -47,6 +50,7 @@ typedef struct {
 | `on_mqtt_disconnect_event` | `tiny_event_t` | Event published when the MQTT client disconnects |
 | `on_mqtt_connect_event` | `tiny_event_t` | Event published when the MQTT client connects |
 | `write_topic_` | `char[128]` | Tracked write topic string, populated by `subscribe_write_topic()`. Used for unsubscribe during `destroy()`. |
+| `initialized` | `bool` | Set by `init()`, cleared by `destroy()`. The bridge's initialize/teardown guard: `GeappliancesBridge::initialize_mqtt_client_()` returns early when it is already `true`, and `teardown()` destroys the adapter only when it is `true`. Replaces the old bridge-side `mqtt_client_adapter_initialized_` flag so the ownership lives with the adapter. |
 
 ### 2.2 Static vtable
 

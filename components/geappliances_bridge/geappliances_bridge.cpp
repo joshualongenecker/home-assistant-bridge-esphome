@@ -2,7 +2,6 @@
 #include "geappliances_bridge_constants.h"
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
-#include "esphome_time_source.h"
 #include "erd_cache.h"
 #include <inttypes.h>
 #include "ha_discovery_data.h"
@@ -81,76 +80,23 @@ void GeappliancesBridge::add_custom_erds_with_addresses(const uint16_t* erds, co
   }
 }
 
-static const tiny_gea3_erd_client_configuration_t client_configuration = {
-  .request_timeout = 250,
-  .request_retries = 10
-};
 
-// GEA2 ERD client: one internal retry.  With request_timeout=250ms and
-// request_retries=1, each read gets two attempts (500ms total), giving
-// appliances time to service slow first-access NVRAM lookups or transient
-// bus collisions without needing bridge-level retry logic.
-static const tiny_gea2_erd_client_configuration_t gea2_client_configuration = {
-  .request_timeout = 250,
-  .request_retries = 1
-};
-
-// Tick-counter time source for the GEA2 interface's internal timer group.
-// The counter is incremented once per real millisecond inside the GEA2 tight
-// loop so that tiny_gea2_interface's internal timers advance by at most 1 ms
-// per event regardless of the ~50 ms ESPHome framework gap between loop() calls
-// (see doc/geappliances_bridge.md §13 for the full explanation).
-//
-// The tick count and last_ms are class members (gea2_tick_count_, gea2_last_ms_)
-// so they reset on re-init (deep sleep wake, ESPHome reconfiguration).
-struct gea2_tick_source_t {
-  i_tiny_time_source_t base;
-  GeappliancesBridge* bridge;
-};
-
-tiny_time_source_ticks_t gea2_tick_ticks(i_tiny_time_source_t* _self)
-{
-  auto* src = reinterpret_cast<gea2_tick_source_t*>(_self);
-  GeappliancesBridge* br = src->bridge;
-  if (br) {
-    return br->gea2_tick_count_;
-  }
-  return 0;
-}
-static const i_tiny_time_source_api_t kGea2TickApi = { gea2_tick_ticks };
-static gea2_tick_source_t s_gea2_tick_source = { .base = { &kGea2TickApi }, .bridge = nullptr };
 
 void GeappliancesBridge::setup() {
-  // Reset GEA2 state on re-init (deep sleep wake, ESPHome reconfiguration)
-  this->gea2_tick_count_ = 0;
-  this->gea2_last_ms_ = 0;
   ESP_LOGCONFIG(TAG, "Setting up GE Appliances Bridge...");
 
-  tiny_timer_group_init(&this->timer_group_, esphome_time_source_init());
+  // Initialize the wire-level protocol stack: UART adapters, GEA2/GEA3
+  // interfaces, both ERD clients, the GEA2→GEA3 adapter, and the shared
+  // timer group every data-path component registers timers on.
+  this->protocol_stack_.init(this->client_address_, this->uart_, this->gea2_uart_);
 
   erd_cache_init(&this->erd_cache_);
   erd_set_init(&this->custom_erd_subscription_seen_erds_);
-  if (this->uart_ != nullptr) {
-    esphome_uart_adapter_init(&this->uart_adapter_, &this->timer_group_, this->uart_);
 
-    tiny_gea3_interface_init(
-      &this->gea3_interface_,
-      &this->uart_adapter_.interface,
-      this->client_address_,
-      this->send_queue_buffer_,
-      sizeof(this->send_queue_buffer_),
-      this->receive_buffer_,
-      sizeof(this->receive_buffer_),
-      false);
-
-    tiny_gea3_erd_client_init(
-      &this->erd_client_,
-      &this->timer_group_,
-      &this->gea3_interface_.interface,
-      this->client_queue_buffer_,
-      sizeof(this->client_queue_buffer_),
-      &client_configuration);
-
+  // Route ERD client activity to the bridge (see handle_erd_client_activity_).
+  // The GEA2 adapter client re-publishes GEA2 activity as GEA3-typed events,
+  // so one handler serves both protocols.
+  if (this->protocol_stack_.has_gea3_uart()) {
     tiny_event_subscription_init(
       &this->erd_client_activity_subscription_,
       this,
@@ -160,44 +106,10 @@ void GeappliancesBridge::setup() {
         self->handle_erd_client_activity_(activity_args);
       });
     tiny_event_subscribe(
-      tiny_gea3_erd_client_on_activity(&this->erd_client_.interface),
+      tiny_gea3_erd_client_on_activity(this->protocol_stack_.get_gea3_client()),
       &this->erd_client_activity_subscription_);
   }
-
-  if (this->gea2_uart_ != nullptr) {
-    esphome_uart_adapter_init(&this->gea2_uart_adapter_, &this->timer_group_, this->gea2_uart_);
-
-    // Initialize the GEA2 msec-interrupt event that drives the GEA2 interface's
-    // internal timeout counters.  The event is published manually inside the
-    // GEA2 tight loop (see loop()) so it only fires when GEA2 is actually
-    // in use — keeping the shared timer_group_ free of a 1 ms periodic timer
-    // that would starve GEA3/polling-bridge timers when GEA3 is active.
-    tiny_event_init(&this->gea2_msec_interrupt_);
-    s_gea2_tick_source.bridge = this;
-
-    tiny_gea2_interface_init(
-      &this->gea2_interface_,
-      &this->gea2_uart_adapter_.interface,
-      &s_gea2_tick_source.base,
-      &this->gea2_msec_interrupt_.interface,
-      this->client_address_,
-      this->gea2_send_queue_buffer_,
-      sizeof(this->gea2_send_queue_buffer_),
-      this->gea2_receive_buffer_,
-      sizeof(this->gea2_receive_buffer_),
-      false,
-      1);
-
-    tiny_gea2_erd_client_init(
-      &this->gea2_erd_client_,
-      &this->timer_group_,
-      &this->gea2_interface_.interface,
-      this->gea2_client_queue_buffer_,
-      sizeof(this->gea2_client_queue_buffer_),
-      &gea2_client_configuration);
-
-    gea2_erd_client_adapter_init(&this->gea2_erd_client_adapter_, &this->gea2_erd_client_.interface);
-
+  if (this->protocol_stack_.has_gea2_uart()) {
     tiny_event_subscription_init(
       &this->gea2_activity_subscription_,
       this,
@@ -207,21 +119,21 @@ void GeappliancesBridge::setup() {
         self->handle_erd_client_activity_(activity_args);
       });
     tiny_event_subscribe(
-      tiny_gea3_erd_client_on_activity(&this->gea2_erd_client_adapter_.interface),
+      tiny_gea3_erd_client_on_activity(this->protocol_stack_.get_gea2_adapter_client()),
       &this->gea2_activity_subscription_);
   }
 
   // Initialize autodiscovery manager (timer-driven, self-driving)
   // Must be called AFTER ERD clients and UART adapters are initialized.
   this->autodiscovery_manager_.init(
-      &this->timer_group_,
-      this->uart_ != nullptr ? &this->erd_client_.interface : nullptr,
-      this->gea2_uart_ != nullptr ? &this->gea2_erd_client_.interface : nullptr,
-      this->gea2_uart_ != nullptr ? &this->gea2_erd_client_adapter_.interface : nullptr,
-      this->uart_ != nullptr ? &this->uart_adapter_ : nullptr,
-      this->gea2_uart_ != nullptr ? &this->gea2_uart_adapter_ : nullptr,
-      this->uart_ != nullptr,
-      this->gea2_uart_ != nullptr,
+      this->protocol_stack_.timer_group(),
+      this->protocol_stack_.has_gea3_uart() ? this->protocol_stack_.get_gea3_client() : nullptr,
+      this->protocol_stack_.has_gea2_uart() ? this->protocol_stack_.get_gea2_client() : nullptr,
+      this->protocol_stack_.has_gea2_uart() ? this->protocol_stack_.get_gea2_adapter_client() : nullptr,
+      this->protocol_stack_.has_gea3_uart() ? this->protocol_stack_.get_gea3_uart_adapter() : nullptr,
+      this->protocol_stack_.has_gea2_uart() ? this->protocol_stack_.get_gea2_uart_adapter() : nullptr,
+      this->protocol_stack_.has_gea3_uart(),
+      this->protocol_stack_.has_gea2_uart(),
       this->client_address_);
 
   if (this->configured_device_id_[0] != '\0') {
@@ -265,7 +177,22 @@ void GeappliancesBridge::loop() {
   // MQTT operations to avoid starving UART processing on single-core
   // ESP32 variants where a blocking MQTT call can delay response
   // processing past the appliance's timeout window.
-  this->run_protocol_stack_();
+  //
+  // GEA2 work is in flight while GEA2 autodiscovery is progressing; the
+  // stack ORs in its own GEA2-active latch (manual device_id configs with
+  // only a GEA2 UART) and gates on the GEA2 UART being configured.
+  bool gea2_pending = this->autodiscovery_manager_.is_gea2_protocol() ||
+    this->autodiscovery_manager_.get_state() == AUTODISCOVERY_GEA2_BROADCAST_PENDING ||
+    this->autodiscovery_manager_.get_state() == AUTODISCOVERY_GEA2_BROADCAST_WAITING;
+  uint32_t protocol_stack_start = esphome::millis();
+  this->protocol_stack_.run(gea2_pending);
+  uint32_t stack_elapsed = esphome::millis() - protocol_stack_start;
+  if (stack_elapsed >= 1000) {
+    ESP_LOGW(TAG, "Long protocol stack run: %lums (mode=%s, polling=%s)",
+             (unsigned long)stack_elapsed,
+             this->mode_ == BRIDGE_MODE_SUBSCRIBE ? "sub" : (this->mode_ == BRIDGE_MODE_AUTO ? "auto" : "poll"),
+             this->data_plane_phase_ != DataPlanePhase::kIdle ? "yes" : "no");
+  }
 
   /* Tick ERD publish cooldowns once per second.
    * Uses a member variable (not static) so it resets on re-init and
@@ -309,11 +236,11 @@ void GeappliancesBridge::loop() {
 }
 
   /* ERD cache publisher state machine:
-   *   IDLE     — publisher active; HA discovery not processing.
-   *   PAUSED   — erd_cache_publisher_paused_ set while
-   *              ha_discovery_manager_is_processing() is true.
-   *   RESUMING — discovery_just_resumed_ set on resume; cleared once
-   *              first_round_done() confirms the post-resume drain finished. */
+   *   kIdle     — publisher active; HA discovery not processing.
+   *   kPaused   — publisher paused while ha_discovery_manager_is_processing()
+   *               is true.
+   *   kResuming — resumed after a pause; cleared once first_round_done()
+   *               confirms the post-resume drain finished. */
 void GeappliancesBridge::update_publisher_state_()
 {
   bool ha_discovery_active = ha_discovery_manager_is_processing(&this->ha_discovery_manager_);
@@ -321,18 +248,17 @@ void GeappliancesBridge::update_publisher_state_()
   if (ha_discovery_active) {
     if (this->erd_cache_publisher_.cache != nullptr) {
       erd_cache_mqtt_publisher_pause(&this->erd_cache_publisher_);
-      if (!this->erd_cache_publisher_paused_) {
+      if (this->publisher_pause_phase_ != PublisherPausePhase::kPaused) {
         ESP_LOGD(TAG, "ERD cache publisher paused during MQTT discovery payload generation");
-        this->erd_cache_publisher_paused_ = true;
+        this->publisher_pause_phase_ = PublisherPausePhase::kPaused;
       }
     }
   } else {
     if (this->erd_cache_publisher_.cache != nullptr) {
       erd_cache_mqtt_publisher_resume(&this->erd_cache_publisher_);
-      if (this->erd_cache_publisher_paused_) {
+      if (this->publisher_pause_phase_ == PublisherPausePhase::kPaused) {
         ESP_LOGD(TAG, "ERD cache publisher resumed after MQTT discovery payload generation");
-        this->erd_cache_publisher_paused_ = false;
-        this->discovery_just_resumed_ = true;
+        this->publisher_pause_phase_ = PublisherPausePhase::kResuming;
       }
     }
   }
@@ -343,10 +269,10 @@ void GeappliancesBridge::update_publisher_state_()
    * it can never advance one past this read.  The read is NOT ordered against
    * every wake: resume() above signals work on this same iteration whenever the
    * cache is attached, whether or not discovery had paused the publisher. */
-  if (this->discovery_just_resumed_ &&
+  if (this->publisher_pause_phase_ == PublisherPausePhase::kResuming &&
       erd_cache_mqtt_publisher_first_round_done(&this->erd_cache_publisher_)) {
     ESP_LOGI(TAG, "Device is in steady state");
-    this->discovery_just_resumed_ = false;
+    this->publisher_pause_phase_ = PublisherPausePhase::kIdle;
   }
 
   if (this->erd_cache_publisher_.cache != nullptr && !ha_discovery_active) {
@@ -354,91 +280,16 @@ void GeappliancesBridge::update_publisher_state_()
   }
 }
 
-void GeappliancesBridge::run_gea2_iteration_()
-{
-  if (this->gea2_last_ms_ == 0) {
-    this->gea2_last_ms_ = millis();
-  }
-  uint32_t now_ms = millis();
-  uint32_t catchup_count = 0;
-  while (this->gea2_last_ms_ < now_ms && catchup_count < MSEC_CATCHUP_CAP) {
-    this->gea2_tick_count_++;
-    tiny_event_publish(&this->gea2_msec_interrupt_, nullptr);
-    this->gea2_last_ms_++;
-    catchup_count++;
-  }
-  tiny_timer_group_run(&this->timer_group_);
-  if (this->uart_ != nullptr) {
-    tiny_timer_group_run(&this->timer_group_);
-  }
-  tiny_gea2_interface_run(&this->gea2_interface_);
-}
-
-void GeappliancesBridge::run_gea3_iteration_()
-{
-  tiny_timer_group_run(&this->timer_group_);
-  if (this->gea2_uart_ != nullptr) {
-    tiny_timer_group_run(&this->timer_group_);
-  }
-  tiny_gea3_interface_run(&this->gea3_interface_);
-}
-
-void GeappliancesBridge::run_timer_only_iteration_()
-{
-  tiny_timer_group_run(&this->timer_group_);
-  if (this->gea2_uart_ != nullptr) {
-    tiny_timer_group_run(&this->timer_group_);
-  }
-}
-
-void GeappliancesBridge::run_protocol_stack_()
-{
-  // When GEA2 is active (or during GEA2 autodiscovery), run a 100 ms
-  // wall-clock busy loop (with a 200 ms hard cap) so the full TX->RX cycle
-  // at 19200 baud completes within a single loop() call.
-  bool need_gea2_loop = this->gea2_uart_ != nullptr && (
-    this->autodiscovery_manager_.is_gea2_protocol() ||
-    this->gea2_protocol_active_ ||
-    this->autodiscovery_manager_.get_state() == AUTODISCOVERY_GEA2_BROADCAST_PENDING ||
-    this->autodiscovery_manager_.get_state() == AUTODISCOVERY_GEA2_BROADCAST_WAITING);
-
-  // When both UARTs are configured, only enable the adapter for the active
-  // protocol.  Both adapters register poll timers in the shared timer_group_,
-  // so tiny_timer_group_run() fires both poll callbacks on every call.  By
-  // disabling the inactive adapter, its poll() returns early without reading
-  // bytes or publishing events to an interface that isn't being driven.
-  uint32_t protocol_stack_start = esphome::millis();
-  if (this->gea2_uart_ != nullptr && this->uart_ != nullptr) {
-    esphome_uart_adapter_set_enabled(&this->uart_adapter_, !need_gea2_loop);
-    esphome_uart_adapter_set_enabled(&this->gea2_uart_adapter_, need_gea2_loop);
-  }
-
-  if (need_gea2_loop) {
-    this->run_tight_loop_([this]() { this->run_gea2_iteration_(); },
-                           GEA2_LOOP_DURATION_MS, GEA2_LOOP_HARD_CAP_MS, "GEA2");
-  } else if (this->uart_ != nullptr) {
-    this->run_tight_loop_([this]() { this->run_gea3_iteration_(); },
-                           GEA3_LOOP_DURATION_MS, GEA3_LOOP_HARD_CAP_MS, "GEA3");
-  } else {
-    this->run_timer_only_iteration_();
-  }
-  uint32_t loop_elapsed = esphome::millis() - protocol_stack_start;
-  if (loop_elapsed >= 1000) {
-    ESP_LOGW(TAG, "Long run_protocol_stack: %lums (mode=%s, polling=%s)",
-             (unsigned long)loop_elapsed, this->mode_ == BRIDGE_MODE_SUBSCRIBE ? "sub" : (this->mode_ == BRIDGE_MODE_AUTO ? "auto" : "poll"),
-             this->erd_bridge_initialized_ ? "yes" : "no");
-  }
-}
 
 void GeappliancesBridge::log_poll_state_transitions_()
 {
-  if (!this->erd_bridge_initialized_) {
+  if (this->data_plane_phase_ == DataPlanePhase::kIdle) {
     return;
   }
 
   subscription_state_t sub_state = this->get_subscription_state();
 
-  if (this->polling_bridge_initialized_) {
+  if (phase_has_polling_bridge(this->data_plane_phase_)) {
     polling_state_t poll_state = this->get_polling_state();
     if (poll_state != polling_state_none && poll_state != this->last_logged_poll_state_) {
       this->last_logged_poll_state_ = poll_state;
@@ -446,7 +297,7 @@ void GeappliancesBridge::log_poll_state_transitions_()
     }
   }
 
-  if (this->subscription_bridge_initialized_) {
+  if (phase_has_subscription_bridge(this->data_plane_phase_)) {
     if (sub_state != subscription_state_none && sub_state != this->last_logged_subscribe_state_) {
       ESP_LOGI(TAG, "Subscription bridge state: %s (ERDs cached: %u)",
                subscription_state_name(sub_state), erd_cache_get_count(&this->erd_cache_));
@@ -456,7 +307,7 @@ void GeappliancesBridge::log_poll_state_transitions_()
 }
 
 void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_on_activity_args_t* args) {
-  if (this->erd_bridge_initialized_ &&
+  if (this->data_plane_phase_ != DataPlanePhase::kIdle &&
       args->address == this->autodiscovery_manager_.get_host_address() &&
       args->type == tiny_gea3_erd_client_activity_type_subscription_publication_received) {
     erd_set_insert(&this->custom_erd_subscription_seen_erds_, args->subscription_publication_received.erd);
@@ -465,7 +316,7 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
   // Device ID reads (after discovery, before bridge init)
   // Note: FeatureBitManager subscribes directly to ERD client activity events,
   // so the bridge no longer routes feature bit ERDs to it.
-  if (!this->erd_bridge_initialized_ && args->address == this->autodiscovery_manager_.get_host_address()) {
+  if (this->data_plane_phase_ == DataPlanePhase::kIdle && args->address == this->autodiscovery_manager_.get_host_address()) {
     if (args->type == tiny_gea3_erd_client_activity_type_read_completed) {
       tiny_erd_t erd = args->read_completed.erd;
       const uint8_t* data = reinterpret_cast<const uint8_t*>(args->read_completed.data);
@@ -534,7 +385,7 @@ void GeappliancesBridge::dump_config() {
   if (this->feature_bit_manager_.get_state() == FEATURE_BIT_STATE_COMPLETE) {
     ESP_LOGCONFIG(TAG, "  Appliance API Valid ERDs: %u", this->feature_bit_manager_.get_valid_erd_count());
   }
-  if (this->polling_bridge_initialized_) {
+  if (phase_has_polling_bridge(this->data_plane_phase_)) {
     polling_state_t poll_state = this->get_polling_state();
     const char* poll_state_str = polling_state_name(poll_state);
     if (poll_state_str != nullptr) {
@@ -574,10 +425,9 @@ float GeappliancesBridge::get_setup_priority() const {
 }
 
 bool GeappliancesBridge::teardown() {
-  // Reset GEA2 globals so re-init starts fresh
-  s_gea2_tick_source.bridge = nullptr;
-  this->gea2_tick_count_ = 0;
-  this->gea2_last_ms_ = 0;
+  // Reset protocol-stack per-run state (GEA2 tick tracking, the GEA2-active
+  // latch) so re-init starts fresh.
+  this->protocol_stack_.teardown();
   // Clear the seen ERDs set for symmetry with erd_set_init() in setup().
   erd_set_clear(&this->custom_erd_subscription_seen_erds_);
   // Reset the feature bit failure log flag for correct behavior after re-init.
@@ -586,21 +436,19 @@ bool GeappliancesBridge::teardown() {
   this->feature_bit_manager_.cleanup();
   this->autodiscovery_manager_.cleanup();
   this->device_identity_manager_.cleanup();
-  // Destroy whichever bridge(s) were actually initialized.
-  // Using explicit ownership flags makes this unambiguous and prevents
+  // Destroy whichever bridge(s) the data-plane phase says exist. The phase
+  // never leaves kIdle before teardown, so this is unambiguous and prevents
   // double-free or missed cleanup.
-  if (this->subscription_bridge_initialized_) {
+  if (phase_has_subscription_bridge(this->data_plane_phase_)) {
     erd_bridge_subscribe_destroy(&this->erd_bridge_subscribe_);
-    this->subscription_bridge_initialized_ = false;
   }
-  if (this->polling_bridge_initialized_) {
+  if (phase_has_polling_bridge(this->data_plane_phase_)) {
     erd_bridge_poll_destroy(&this->erd_bridge_poll_);
-    this->polling_bridge_initialized_ = false;
   }
-  if (this->write_bridge_initialized_) {
+  if (this->data_plane_phase_ != DataPlanePhase::kIdle) {
     erd_write_bridge_destroy(&this->erd_write_bridge_);
-    this->write_bridge_initialized_ = false;
   }
+  this->data_plane_phase_ = DataPlanePhase::kIdle;
 
   // Clean up the HA discovery manager before the ERD cache publisher.
   // The discovery manager holds pointers to erd_cache_ and mqtt_client_adapter_
@@ -615,9 +463,8 @@ bool GeappliancesBridge::teardown() {
 
   // Free heap-allocated members of the MQTT client adapter to prevent
   // memory leaks (device_id string, pending_updates map, etc.).
-  if (this->mqtt_client_adapter_initialized_) {
+  if (this->mqtt_client_adapter_.initialized) {
     esphome_mqtt_client_adapter_destroy(&this->mqtt_client_adapter_);
-    this->mqtt_client_adapter_initialized_ = false;
   }
   Component::teardown();
   return true;
@@ -637,8 +484,10 @@ GeappliancesBridge::~GeappliancesBridge() {
 
 void GeappliancesBridge::run_autodiscovery()
 {
-  bool has_gea3_client = (this->uart_ != nullptr && this->erd_client_.interface.api != nullptr);
-  bool has_gea2_client = (this->gea2_uart_ != nullptr && this->gea2_erd_client_adapter_.interface.api != nullptr);
+  bool has_gea3_client = this->protocol_stack_.has_gea3_uart() &&
+    this->protocol_stack_.get_gea3_client()->api != nullptr;
+  bool has_gea2_client = this->protocol_stack_.has_gea2_uart() &&
+    this->protocol_stack_.get_gea2_adapter_client()->api != nullptr;
   if (!has_gea3_client && !has_gea2_client) {
     return;
   }
@@ -684,7 +533,7 @@ bool GeappliancesBridge::is_device_id_complete() const
 
 bool GeappliancesBridge::is_mqtt_client_initialized() const
 {
-  return mqtt_client_adapter_initialized_;
+  return this->mqtt_client_adapter_.initialized;
 }
 
 void GeappliancesBridge::initialize_mqtt_client()
@@ -718,7 +567,7 @@ bool GeappliancesBridge::is_startup_delay_elapsed() const
 
 bool GeappliancesBridge::is_bridge_initialized() const
 {
-  return erd_bridge_initialized_;
+  return this->data_plane_phase_ != DataPlanePhase::kIdle;
 }
 
 void GeappliancesBridge::initialize_erd_bridge()
@@ -733,27 +582,30 @@ BridgeMode GeappliancesBridge::get_mode() const
 
 subscription_state_t GeappliancesBridge::get_subscription_state() const
 {
+  if (!phase_has_subscription_bridge(this->data_plane_phase_)) {
+    return subscription_state_none;
+  }
   return this->erd_bridge_subscribe_.current_state;
 }
 
 polling_state_t GeappliancesBridge::get_polling_state() const
 {
-  if (!this->polling_bridge_initialized_) {
+  if (!phase_has_polling_bridge(this->data_plane_phase_)) {
     return polling_state_none;
   }
   return this->erd_bridge_poll_.current_state;
 }
 bool GeappliancesBridge::check_steady_state()
 {
-  bool steady = !this->steady_state_reached_ &&
-    (!this->subscription_bridge_initialized_ ||
+  bool steady = this->data_plane_readiness_ == DataPlaneReadiness::kNotSteady &&
+    (!phase_has_subscription_bridge(this->data_plane_phase_) ||
      this->erd_bridge_subscribe_.current_state == subscription_state_steady) &&
-    (!this->polling_bridge_initialized_ ||
+    (!phase_has_polling_bridge(this->data_plane_phase_) ||
      this->erd_bridge_poll_.current_state == polling_state_polling) &&
-    this->erd_bridge_initialized_;
+    this->data_plane_phase_ != DataPlanePhase::kIdle;
 
   if (steady) {
-    this->steady_state_reached_ = true;
+    this->data_plane_readiness_ = DataPlaneReadiness::kSteady;
     ESP_LOGI(TAG, "Appliance Bridge is in steady state (ERDs cached: %u, arena: %u/%u bytes, %u%%)",
              erd_cache_get_count(&this->erd_cache_),
              erd_cache_get_arena_usage(&this->erd_cache_),
@@ -765,14 +617,14 @@ bool GeappliancesBridge::check_steady_state()
      * ERD) is at VERBOSE now: ~200 boot lines of it overflowed the 30-slot
      * MQTT log queue on the busier appliances, which is what the "Dropped N
      * messages" warning was reporting. */
-    if (this->subscription_bridge_initialized_) {
+    if (phase_has_subscription_bridge(this->data_plane_phase_)) {
       ESP_LOGD(TAG, "  Subscription: %u ERDs (host board 0x%02X)",
                this->erd_bridge_subscribe_.erd_set.count,
                this->erd_bridge_subscribe_.erd_host_address);
     }
     {
       polled_erds_state_t polled;
-      polled.polling_bridge_initialized = this->polling_bridge_initialized_;
+      polled.polling_bridge_initialized = phase_has_polling_bridge(this->data_plane_phase_);
       polled.custom_erds_count = this->custom_erds_count_;
       polled.unseen_custom_count = this->subscription_unseen_custom_erds_count_;
 
@@ -836,7 +688,7 @@ void GeappliancesBridge::init_erd_cache_publisher_()
 // discovery lifecycle asks instead of holding a reference to either.
 bool GeappliancesBridge::discovery_is_ready_(void* context) {
   auto* self = static_cast<GeappliancesBridge*>(context);
-  return self->steady_state_reached_ && self->mqtt_client_adapter_initialized_;
+  return self->data_plane_readiness_ == DataPlaneReadiness::kSteady && self->mqtt_client_adapter_.initialized;
 }
 
 void GeappliancesBridge::trigger_discovery_refresh()

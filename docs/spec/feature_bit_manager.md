@@ -173,6 +173,7 @@ The class exposes two accessor methods for the valid ERD list:
 
 - `get_valid_erd_count()` returns a `uint16_t` indicating the number of valid ERDs collected. Before parsing completes, this returns 0. When in `FEATURE_BIT_STATE_FAILED`, the valid ERD count is 0 (no feature filtering is applied).
 - `get_valid_erd(uint16_t idx)` returns a `tiny_erd_t` for the ERD at the given 0-based index. If `idx` is >= `get_valid_erd_count()`, it returns 0.
+- `is_initialized()` returns `true` once `init()` has installed an ERD client and `false` after `cleanup()` resets it. The bridge's `start_feature_bit_reading_()` guard uses it instead of a bridge-side `feature_bit_reading_started_` flag: a second `init()` while reads are in flight (or after PARSING/FAILED/COMPLETE) would double-queue the first read, and `cleanup()` re-arms the guard for a re-init.
 
 The underlying storage is a public fixed array `valid_erds_[FEATURE_BIT_MAX_ERDS]` (645 elements), directly accessible by callers. The bridge uses `get_valid_erd_count()` to determine how many entries in the array are valid.
 

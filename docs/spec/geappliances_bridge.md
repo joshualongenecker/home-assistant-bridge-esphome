@@ -11,6 +11,7 @@ The main ESPHome component class that orchestrates the entire GE Appliances brid
 - Own and construct all component instances (adapters, managers, bridges)
 - Wire components together during `setup()`
 - Drive the GEA2 tight-loop and delegate ongoing work in `loop()`
+- Own the wire-level protocol machinery via the embedded `ProtocolStack` (UART adapters, GEA2/GEA3 interfaces, ERD clients, shared timer group) and drive it once per `loop()` iteration
 - Expose configuration setters called by the ESPHome code generator
 - Implement `IBridgeServices` so the startup HSM can request bridge actions without depending on this concrete class
 
@@ -20,6 +21,7 @@ The main ESPHome component class that orchestrates the entire GE Appliances brid
 - Determining which ERDs are valid (`FeatureBitManager` / `ErdRegistry`)
 - MQTT connection lifecycle (`EsphomeMqttClientAdapter`)
 - Startup phase sequencing (`StartupHsm`)
+- Wire-level protocol driving (`ProtocolStack` — adapters, interfaces, ERD clients, the GEA2 tight loop, the shared timer group)
 
 ---
 
@@ -64,7 +66,7 @@ The main ESPHome component class that orchestrates the entire GE Appliances brid
 | `should_route_to_feature_bits_(erd)` | Decide whether an ERD read goes to FeatureBitManager or DeviceIdentityManager |
 | `initialize_mqtt_client_()` | Create and configure the MQTT client adapter |
 | `initialize_erd_bridge_()` | Initialize subscription or polling bridge based on mode |
-| `run_protocol_stack_()` | Drive GEA2/GEA3 hardware (includes GEA2 tight loop) |
+| `loop()` → `protocol_stack_.run(gea2_pending)` | Drive GEA2/GEA3 hardware via the embedded `ProtocolStack` (see `protocol_stack.md`); the bridge computes `gea2_pending` from autodiscovery state |
 | `start_feature_bit_reading_()` | Start the feature bit read sequence |
 | `handle_subscription_failed()` | Handle subscription bridge failure; trigger polling fallback in AUTO mode |
 | `handle_polling_failed()` | Handle polling bridge failure; clean up or recover |
@@ -101,14 +103,14 @@ During `startup_state_bridge_init`, `initialize_erd_bridge_()` runs:
 
 ---
 
-## 6. GEA2 Tight Loop
+## 6. Protocol Stack Driving
 
-When GEA2 is active, `run_protocol_stack_()` executes a 100 ms wall-clock busy loop to ensure the full TX→RX cycle at 19200 baud completes within a single `loop()` call. A manual millisecond counter (`gea2_msec_interrupt_`) drives the GEA2 interface's internal timers without starving the shared `timer_group_`.
+The wire-level protocol machinery lives in the embedded `ProtocolStack` (see `protocol_stack.md`). Each `loop()` iteration computes `gea2_pending` from autodiscovery state and calls `protocol_stack_.run(gea2_pending)`, which executes the GEA2 tight loop (100 ms wall-clock, 200 ms hard cap) when GEA2 work is in flight, the GEA3 iteration (10 ms) otherwise, or a timer-only iteration with no UART configured. A manual millisecond counter inside the stack drives the GEA2 interface's internal timers without starving the shared timer group.
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `GEA2_LOOP_DURATION_MS` | 100 ms | Wall-clock duration for GEA2 tight loop |
-| `GEA3_LOOP_DURATION_MS` | 10 ms | Wall-clock duration for GEA3 protocol tick |
+| `kGea2LoopDurationMs` | 100 ms | Wall-clock duration for GEA2 tight loop |
+| `kGea3LoopDurationMs` | 10 ms | Wall-clock duration for GEA3 protocol tick |
 
 ---
 
@@ -118,23 +120,44 @@ Key member variables:
 
 | Member | Type | Description |
 | `startup_hsm_wrapper_` | `startup_hsm_wrapper_t` | Startup state machine wrapper (embeds `tiny_hsm_t` and `IBridgeServices*`) |
+| `protocol_stack_` | `ProtocolStack` | Wire-level protocol machinery: UART adapters, GEA2/GEA3 interfaces, ERD clients, GEA2→GEA3 adapter, buffers, GEA2 tick source, shared timer group (see `protocol_stack.md`) |
 | `uart_` / `gea2_uart_` | `UARTComponent*` | UART interfaces |
 | `erd_cache_` | `erd_cache_t` | Shared ERD cache |
 | `erd_cache_publisher_` | `erd_cache_mqtt_publisher_t` | MQTT publisher |
 | `erd_registry_` | `ErdRegistry` | Valid/registered ERD tracking |
-| `mqtt_client_adapter_` | `esphome_mqtt_client_adapter_t` | MQTT adapter |
-| `uart_adapter_` / `gea2_uart_adapter_` | `esphome_uart_adapter_t` | UART adapters |
-| `erd_client_` / `gea2_erd_client_` | ERD client | GEA3/GEA2 ERD clients |
-| `gea2_erd_client_adapter_` | `gea2_erd_client_adapter_t` | GEA2→GEA3 adapter |
+| `mqtt_client_adapter_` | `esphome_mqtt_client_adapter_t` | MQTT adapter (`.initialized` replaces the old `mqtt_client_adapter_initialized_` flag) |
 | `erd_bridge_subscribe_` | `erd_bridge_subscribe_t` | Subscription bridge |
 | `erd_bridge_poll_` | `erd_bridge_poll_t` | Polling bridge |
 | `erd_write_bridge_` | `erd_write_bridge_t` | Write bridge |
 | `autodiscovery_manager_` | `AutodiscoveryManager` | Appliance discovery |
 | `device_identity_manager_` | `DeviceIdentityManager` | Device ID generation |
-| `feature_bit_manager_` | `FeatureBitManager` | Feature bit reading |
-| `timer_group_` | `tiny_timer_group_t` | Shared timer group |
+| `feature_bit_manager_` | `FeatureBitManager` | Feature bit reading (`is_initialized()` replaces the old `feature_bit_reading_started_` flag) |
 | `custom_erds_[CUSTOM_ERDS_MAX]` | `tiny_erd_t[128]` | User-configured custom ERDs |
 | `poll_probe_list_[POLLING_LIST_MAX_SIZE]` | `uint16_t[649]` | Pre-built probe list |
+
+### 7.1 Data-Plane Phase Machine
+
+Eleven independent booleans (`erd_bridge_initialized_`, `subscription_bridge_initialized_`, `polling_bridge_initialized_`, `write_bridge_initialized_`, `custom_erd_polling_started_`, `steady_state_reached_`, `mqtt_client_adapter_initialized_`, `feature_bit_reading_started_`, `gea2_protocol_active_`, `erd_cache_publisher_paused_`, `discovery_just_resumed_`) were only valid in the handful of combinations the previous `loop()` source order happened to produce. They are replaced by three small machines:
+
+| Machine | States | Replaces |
+|---------|--------|----------|
+| `DataPlanePhase data_plane_phase_` | `kIdle`, `kPolling`, `kSubscription`, `kSubscriptionCustomPolling`, `kSubscriptionSettled` | `erd_bridge_initialized_`, `subscription_bridge_initialized_`, `polling_bridge_initialized_`, `write_bridge_initialized_`, `custom_erd_polling_started_` |
+| `DataPlaneReadiness data_plane_readiness_` | `kNotSteady`, `kSteady` (one-way latch) | `steady_state_reached_` |
+| `PublisherPausePhase publisher_pause_phase_` | `kIdle`, `kPaused`, `kResuming` | `erd_cache_publisher_paused_`, `discovery_just_resumed_` |
+
+Two more booleans became owner-side state instead of bridge-side copies: `mqtt_client_adapter_initialized_` → `mqtt_client_adapter_.initialized` (set by `esphome_mqtt_client_adapter_init()`, cleared by `destroy()`), and `feature_bit_reading_started_` → `feature_bit_manager_.is_initialized()` (true once `init()` installed an ERD client; `cleanup()` resets it). `gea2_protocol_active_` became `protocol_stack_.set_gea2_active()`.
+
+Phase transitions (all inside `initialize_erd_bridge_()`, `start_custom_erd_polling_()`, `handle_polling_failed()`, `handle_subscription_failed()`, and `teardown()`):
+
+```text
+kIdle --initialize_erd_bridge_()--> kPolling | kSubscription
+kSubscription --start_custom_erd_polling_()--> kSubscriptionCustomPolling | kSubscriptionSettled
+kSubscriptionCustomPolling --handle_polling_failed()--> kSubscription
+kSubscription* --handle_subscription_failed()--> kPolling   (AUTO-mode fallback rebuild)
+any phase --teardown()--> kIdle
+```
+
+The phase never returns to `kIdle` before teardown: the write bridge is initialized at the end of `initialize_erd_bridge_()` on every path and destroyed only in `teardown()`. `is_bridge_initialized()` is `data_plane_phase_ != kIdle`; the getters `get_subscription_state()` / `get_polling_state()` return `*_state_none` when the phase does not imply a live bridge of that kind (`phase_has_subscription_bridge()` / `phase_has_polling_bridge()`), so a stale bridge struct can never be read through the public interface.
 
 ---
 
@@ -215,8 +238,7 @@ Both setters store their value directly into the corresponding member variable. 
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `erd_cache_publisher_paused_` | `bool` | Tracks whether the ERD cache publisher was paused during discovery activity. Set to `true` when `pause()` is called, and `false` when `resume()` is called. Used to avoid redundant pause/resume calls across `loop()` iterations. Initialized to `false`. |
-| `discovery_just_resumed_` | `bool` | Set to `true` when the publisher is resumed after discovery activity ends. Cleared to `false` once `erd_cache_mqtt_publisher_first_round_done()` returns `true`, indicating the publisher has completed a full cache round after resuming. Initialized to `false`. |
+| `publisher_pause_phase_` | `PublisherPausePhase` | Publisher pause machine (`kIdle` / `kPaused` / `kResuming`), replacing the old `erd_cache_publisher_paused_` / `discovery_just_resumed_` boolean pair. `kPaused` while `ha_discovery_manager_is_processing()` holds; on resume the phase becomes `kResuming` and returns to `kIdle` once `erd_cache_mqtt_publisher_first_round_done()` confirms the post-resume drain finished — so the "Device is in steady state" log fires exactly once per pause cycle. |
 
 The following state variables were previously members of `GeappliancesBridge` but have been extracted into their respective managers:
 
@@ -334,4 +356,4 @@ The ERD cache publisher is paused during discovery activity to avoid competing f
 - Retained-clear messages from cleanup being overwritten by late cache publishes
 - Unpredictable ordering of discovery config vs. value messages on the broker
 
-The pause/resume cycle ensures a clean separation: discovery messages are published without interference, then the cache publisher resumes and drains accumulated updates. The `first_round_done` mechanism confirms the publisher has completed a full cache round after resuming, clearing `discovery_just_resumed_`. The `steady_state_reached_` flag is set by `check_steady_state()` (called from the startup HSM), which also triggers discovery change detection at that point; this is the signal that gates HA discovery startup.
+The pause/resume cycle ensures a clean separation: discovery messages are published without interference, then the cache publisher resumes and drains accumulated updates. The `first_round_done` mechanism confirms the publisher has completed a full cache round after resuming, returning `publisher_pause_phase_` from `kResuming` to `kIdle`. The `data_plane_readiness_` latch (`kSteady`) is set by `check_steady_state()` (called from the startup HSM), which also triggers discovery change detection at that point; this is the signal that gates HA discovery startup.

@@ -22,7 +22,7 @@ Own every one-time initialization step for the MQTT client adapter and the bridg
 - Feature-bit parsing and valid-ERD computation (owned by `FeatureBitManager`).
 - Startup phase sequencing (owned by `StartupHsm` via `IBridgeServices`).
 - MQTT connection lifecycle (owned by `EsphomeMqttClientAdapter`).
-- GEA2/GEA3 protocol stack driving (owned by `run_protocol_stack_` in the main bridge file).
+- GEA2/GEA3 protocol stack driving (owned by the embedded `ProtocolStack`; see `protocol_stack.md`).
 
 ---
 
@@ -94,29 +94,29 @@ The poll list returned by `build_poll_list_()` MUST be copied into the bridge's 
 
 #### Requirement 3.2.3: Bridge Initialization Parameters
 
-`erd_bridge_poll_init()` MUST receive: the polling bridge struct, the shared timer group, the active ERD client, the configured polling interval, the host address, the probe list, and the ERD cache.
+`erd_bridge_poll_init()` MUST receive: the polling bridge struct, the protocol stack's shared timer group (`protocol_stack_.timer_group()`), the active ERD client, the configured polling interval, the host address, the probe list, and the ERD cache.
 
 **Implementation:** `geappliances_bridge_bridge_init.cpp` lines 98–107.
 
-#### Requirement 3.2.4: Initialization Flag
+#### Requirement 3.2.4: Data-Plane Phase Marking
 
-`polling_bridge_initialized_` MUST be set to `true` after successful initialization.
+`init_polling_bridge_()` MUST NOT set any bridge-side flag; the caller marks the data-plane phase (`data_plane_phase_ = kPolling` for the primary path, `kSubscriptionCustomPolling` for custom ERD polling) after `init_polling_bridge_()` returns.
 
-**Implementation:** `geappliances_bridge_bridge_init.cpp` line 108.
+**Implementation:** `geappliances_bridge_bridge_init.cpp` — `initialize_erd_bridge_()` and `start_custom_erd_polling_()`.
 
 ### 3.3 Feature-Bit Reading Startup
 
 #### Requirement 3.3.1: Guard Against Re-Initialization
 
-`start_feature_bit_reading_()` MUST return immediately if the feature bit manager is not in `FEATURE_BIT_STATE_READING_0092`, or if `feature_bit_reading_started_` is already `true`.
+`start_feature_bit_reading_()` MUST return immediately if `feature_bit_manager_.is_initialized()` is `true` (the manager already holds an ERD client).
 
-**Rationale:** The startup HSM may call this method multiple times per loop iteration. The state check ensures the manager is at the correct phase; the flag prevents re-initialization while the first ERD read is in-flight (the manager stays in `READING_0092` during this time).
+**Rationale:** The startup HSM may call this method multiple times per loop iteration. `init()` subscribes activity and queues the first read, so a second call while reads are in flight (or after PARSING/FAILED/COMPLETE) would double-queue; `cleanup()` resets the client pointer, re-arming the guard for a re-init.
 
 **Implementation:** `geappliances_bridge_bridge_init.cpp` lines 121–132.
 
 #### Requirement 3.3.2: ERD Client Availability Guard
 
-The method MUST return immediately (without setting the started flag) if `get_active_erd_client()` returns `nullptr`. The flag remains unset so the next `loop()` call retries.
+The method MUST return immediately if `get_active_erd_client()` returns `nullptr`. Because the started guard is the manager's own `is_initialized()`, a transient null leaves nothing set and the next `loop()` call retries.
 
 **Rationale:** Autodiscovery may not yet have produced an ERD client. Setting the flag on a transient null would permanently block retry.
 
@@ -124,7 +124,7 @@ The method MUST return immediately (without setting the started flag) if `get_ac
 
 #### Requirement 3.3.3: Feature Bit Manager Initialization
 
-Once guards pass, the method MUST set `feature_bit_reading_started_` to `true`, then call `feature_bit_manager_.init()` with the ERD client, host address, and timer group, followed by `feature_bit_manager_.start()`.
+Once guards pass, the method MUST call `feature_bit_manager_.init()` with the ERD client, host address, and the protocol stack's timer group, followed by `feature_bit_manager_.start()`. `init()` installing the ERD client is what makes `is_initialized()` true.
 
 **Implementation:** `geappliances_bridge_bridge_init.cpp` lines 144–150.
 
@@ -132,25 +132,24 @@ Once guards pass, the method MUST set `feature_bit_reading_started_` to `true`, 
 
 #### Requirement 3.4.1: Idempotency
 
-`initialize_mqtt_client_()` MUST return immediately if `mqtt_client_adapter_initialized_` is already `true`.
+`initialize_mqtt_client_()` MUST return immediately if `mqtt_client_adapter_.initialized` is already `true` (set by `esphome_mqtt_client_adapter_init()`, cleared by `destroy()`).
 
 **Implementation:** `geappliances_bridge_bridge_init.cpp` lines 159–161.
 
 #### Requirement 3.4.2: GEA2 Protocol Detection for Manual Configs
 
-When no active ERD client is available (autodiscovery skipped) and no GEA3 UART is configured (`uart_` is `nullptr`), the method MUST set `gea2_protocol_active_` to `true`.
+When no active ERD client is available (autodiscovery skipped) and no GEA3 UART is configured (`uart_` is `nullptr`), the method MUST call `protocol_stack_.set_gea2_active(true)`.
 
-**Rationale:** Manual `device_id` configurations with only a GEA2 UART bypass autodiscovery. This flag ensures `run_protocol_stack_()` enables the GEA2 tight loop before autodiscovery runs.
+**Rationale:** Manual `device_id` configurations with only a GEA2 UART bypass autodiscovery. The latch makes the protocol stack run the GEA2 tight loop before autodiscovery would run.
 
 **Implementation:** `geappliances_bridge_bridge_init.cpp` lines 166–170.
 
 #### Requirement 3.4.3: Adapter Binding
 
 The method MUST:
-1. Call `esphome_mqtt_client_adapter_init()` with the device ID from `device_identity_manager_`.
-2. Set `mqtt_client_adapter_initialized_` to `true`.
+1. Call `esphome_mqtt_client_adapter_init()` with the device ID from `device_identity_manager_` (which sets `initialized` on the adapter).
 
-**Rationale:** The adapter is the write path's MQTT handle; the flag gates `initialize_erd_bridge_()`, which needs it for the write bridge and the write-topic subscription.
+**Rationale:** The adapter is the write path's MQTT handle; its `initialized` field gates `initialize_erd_bridge_()`, which needs it for the write bridge and the write-topic subscription.
 
 **Implementation:** `geappliances_bridge_bridge_init.cpp`, `initialize_mqtt_client_()`.
 
@@ -158,7 +157,7 @@ The method MUST:
 
 #### Requirement 3.5.1: Precondition Guards
 
-`initialize_erd_bridge_()` MUST return immediately if `mqtt_client_adapter_initialized_` is `false` or `erd_bridge_initialized_` is already `true`.
+`initialize_erd_bridge_()` MUST return immediately if `mqtt_client_adapter_.initialized` is `false` or `data_plane_phase_` is not `kIdle`.
 
 **Rationale:** The MQTT adapter must be ready (it is used by the write bridge), and the method must not run twice.
 
@@ -186,17 +185,17 @@ The method MUST determine the operating mode as follows:
 
 When `use_polling` is `true`, the method MUST:
 1. Call `init_polling_bridge_(false)`.
-2. Set `erd_bridge_initialized_` to `true` after `init_polling_bridge_()` returns.
+2. Set `data_plane_phase_` to `kPolling` after `init_polling_bridge_()` returns.
 
-**Rationale:** The synchronous completion race is real — if the probe list is small and the appliance responds immediately, the discovery-complete callback fires during `erd_bridge_poll_init()`. The flag is set after the init call completes; the startup HSM checks it via `check_steady_state()` on the next loop iteration after the signal is processed.
+**Rationale:** The synchronous completion race is real — if the probe list is small and the appliance responds immediately, the discovery-complete callback fires during `erd_bridge_poll_init()`. The phase is set after the init call completes; the startup HSM checks it via `check_steady_state()` on the next loop iteration after the signal is processed.
 
 **Implementation:** `geappliances_bridge_bridge_init.cpp` lines 229–234.
 
 #### Requirement 3.5.5: Subscription Bridge Path
 
 When `use_polling` is `false`, the method MUST:
-1. Call `erd_bridge_subscribe_init()` with the subscription bridge struct, timer group, active ERD client, host address, and ERD cache.
-2. Set `subscription_bridge_initialized_` and `erd_bridge_initialized_` to `true`.
+1. Call `erd_bridge_subscribe_init()` with the subscription bridge struct, the protocol stack's timer group, active ERD client, host address, and ERD cache.
+2. Set `data_plane_phase_` to `kSubscription`.
 3. Send `signal_bridge_ready` to the startup HSM immediately (the subscription bridge has no discovery phase).
 
 **Implementation:** `geappliances_bridge_bridge_init.cpp` lines 240–253.
@@ -205,9 +204,10 @@ When `use_polling` is `false`, the method MUST:
 
 Regardless of mode, the method MUST:
 1. Get the host address from the autodiscovery manager.
-2. Call `erd_write_bridge_init()` with the write bridge struct, timer group, active ERD client, the MQTT adapter's interface, and the host address.
-3. Set `write_bridge_initialized_` to `true`.
-4. Subscribe to the wildcard write topic via `esphome_mqtt_client_adapter_subscribe_write_topic()`.
+2. Call `erd_write_bridge_init()` with the write bridge struct, the protocol stack's timer group, active ERD client, the MQTT adapter's interface, and the host address.
+3. Subscribe to the wildcard write topic via `esphome_mqtt_client_adapter_subscribe_write_topic()`.
+
+The write bridge has no flag of its own: the phase never returns to `kIdle` before teardown, and `teardown()` destroys the write bridge whenever the phase is not `kIdle`.
 
 **Rationale:** The write bridge is always needed (it handles Home Assistant write commands). Autodiscovery is complete by this point, so the real host address is available.
 
@@ -217,7 +217,7 @@ Regardless of mode, the method MUST:
 
 #### Requirement 3.6.1: Deferred Start
 
-`maybe_start_custom_erd_polling_()` MUST return immediately if there are no custom ERDs, custom ERD polling has already started, or the subscription bridge is not in `subscription_state_steady`.
+`maybe_start_custom_erd_polling_()` MUST return immediately if there are no custom ERDs, or the data-plane phase is not `kSubscription` (which covers both "custom polling already started" and "the subscription bridge has not reached steady state" — the phase only becomes `kSubscriptionCustomPolling`/`kSubscriptionSettled` from `start_custom_erd_polling_()`, which is gated on `subscription_state_steady`).
 
 **Rationale:** Waiting for the subscription bridge to reach steady state gives it time to publish its ERDs first, so the custom ERD polling bridge can avoid redundant polling of ERDs already covered by subscription.
 
@@ -235,7 +235,7 @@ Regardless of mode, the method MUST:
 
 `handle_polling_failed()` MUST:
 - Return immediately if the polling state is not `polling_state_failed`.
-- If the polling bridge is running alongside a subscription bridge (custom ERD polling): destroy the polling bridge, reset `polling_bridge_initialized_` and `custom_erd_polling_started_`, and continue with subscription only.
+- If the polling bridge is running alongside a subscription bridge (custom ERD polling): destroy the polling bridge, set `data_plane_phase_` to `kSubscription`, and continue with subscription only.
 - If the polling bridge is the primary data path (POLL mode or GEA2): log an error and leave the bridge in a failed state. The appliance-lost handler in the startup HSM's `state_failed` state will re-probe if the appliance comes back.
 - In both cases, reset `last_logged_poll_state_` to `polling_state_none`.
 
@@ -245,10 +245,10 @@ Regardless of mode, the method MUST:
 
 `handle_subscription_failed()` MUST:
 - Return immediately if the mode is not `BRIDGE_MODE_AUTO` (POLL and SUBSCRIBE modes have no fallback).
-- Destroy the subscription bridge and reset `subscription_bridge_initialized_`.
+- Destroy the subscription bridge. The phase machine keeps `kSubscription`-implying states only while the bridge lives; the fallback below re-marks the phase.
 - Reset `last_logged_poll_state_` to `polling_state_none` and `last_logged_subscribe_state_` to `subscription_state_none`.
-- Destroy any existing polling bridge (e.g., from custom ERD polling) to avoid leaking heap allocations, resetting `custom_erd_polling_started_` and `polling_bridge_initialized_`.
-- Call `init_polling_bridge_(true)` to re-initialize the polling bridge as the full data path.
+- Destroy any existing polling bridge (e.g., from custom ERD polling) to avoid leaking heap allocations whenever `phase_has_polling_bridge(data_plane_phase_)`.
+- Call `init_polling_bridge_(true)` to re-initialize the polling bridge as the full data path, then set `data_plane_phase_` to `kPolling`.
 - Leave the state transition to the caller: `startup_state_subscription_watch` invokes this handler from its `signal_run_loop` branch and transitions to `startup_state_running` itself.
 
 **Rationale:** In AUTO mode, subscription failure is expected (the appliance may not support it). Falling back to polling ensures the bridge still functions. Destroying the old polling bridge before re-initialization prevents memory leaks from the `erd_bridge_poll_init()` heap allocations.
@@ -262,7 +262,7 @@ Regardless of mode, the method MUST:
 1. **Phase ordering.** The startup HSM drives the sequence: protocol stack → autodiscovery → device ID → MQTT client init (Phase 4) → feature bits → bridge init (Phase 6) → subscription watch → running. This file implements the Phase 4 and Phase 6 actions, plus the feature-bit kick-off that occurs between them.
 
 2. **Three polling bridge init paths.** `init_polling_bridge_()` is called from three contexts: (a) primary polling mode (POLL or GEA2), (b) custom ERD polling alongside subscription (AUTO mode), and (c) full fallback from subscription failure (AUTO mode). The `log_as_info` parameter controls log level — `true` for fallback (user-visible), `false` for normal polling init.
-3. **Synchronous discovery race.** The polling bridge's discovery phase can complete synchronously during `erd_bridge_poll_init()` if the probe list is small. The discovery-complete callback is wired before init. `erd_bridge_initialized_` is set after `init_polling_bridge_()` returns; the startup HSM checks it via `check_steady_state()` on the next loop iteration after the signal is processed.
+3. **Synchronous discovery race.** The polling bridge's discovery phase can complete synchronously during `erd_bridge_poll_init()` if the probe list is small. The discovery-complete callback is wired before init. `data_plane_phase_` becomes `kPolling` after `init_polling_bridge_()` returns; the startup HSM checks it via `check_steady_state()` on the next loop iteration after the signal is processed.
 
 4. **Write bridge is always initialized.** Unlike the data-path bridges (poll/subscribe), the write bridge is initialized regardless of mode. It is needed to relay Home Assistant write commands to the appliance, and it depends on the MQTT adapter's interface being available.
 

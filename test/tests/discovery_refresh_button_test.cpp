@@ -23,8 +23,8 @@ TEST_GROUP(discovery_refresh_button)
   void setup()
   {
     // Each test gets a fresh bridge with default member values.
-    // steady_state_reached_ = false, discovery_refresh_in_progress_ = false,
-    // ha_discovery_manager_ is zero-initialized (state = idle after init).
+    // data_plane_readiness_ = kNotSteady, the lifecycle phase machine is
+    // idle, and ha_discovery_manager_ is zero-initialized.
   }
 };
 
@@ -36,16 +36,18 @@ TEST(discovery_refresh_button, can_be_constructed_with_bridge_pointer)
 }
 TEST(discovery_refresh_button, press_action_does_not_crash_with_uninitialized_bridge)
 {
-  /* Bridge has not been set up (steady_state_reached_ is false).
-   * trigger_discovery_refresh() will early-return due to the steady-state guard. */
+  /* Bridge has not been set up (data_plane_readiness_ is kNotSteady).
+   * trigger_discovery_refresh() claims the phase machine regardless; the
+   * publish only runs once the bridge reports steady state. */
   DiscoveryRefreshButton button(&bridge);
   button.press_action();
   /* No crash = pass. */
 }
 TEST(discovery_refresh_button, press_action_is_idempotent_after_successful_trigger)
 {
-  /* We cannot directly set steady_state_reached_ from test code (it's private),
-   * but we can verify that calling press_action() multiple times is safe. */
+  /* The phase machine serializes requests itself: a second claim while a
+   * run is active is rejected. Verify that calling press_action() multiple
+   * times is safe. */
   DiscoveryRefreshButton button(&bridge);
   button.press_action();
   button.press_action();

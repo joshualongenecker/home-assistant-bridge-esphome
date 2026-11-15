@@ -6,7 +6,7 @@
  * teardown(), verifying component initialization, IBridgeServices contract,
  * teardown symmetry, and resilience under various configurations.
  *
- * The GEA3/GEA2 tight loops in run_protocol_stack_() are replaced with
+ * The GEA3/GEA2 tight loops in ProtocolStack::run() are replaced with
  * single-pass iterations in test builds (UNIT_TEST_BUILD) to avoid infinite
  * loops when millis() is mocked.
  *
@@ -27,6 +27,10 @@
 #ifdef new
 #undef new
 #endif
+#include "tiny_gea_constants.h"
+#include "tiny_gea_packet.h"
+#include "tiny_crc16.h"
+#include "tiny_gea3_erd_api.h"
 
 #include "double/esphome_hal_double.hpp"
 #include "double/mqtt_test_double.hpp"
@@ -41,22 +45,28 @@ using namespace esphome::geappliances_bridge;
 /* Mock UARTComponent for integration testing                           */
 /* ------------------------------------------------------------------ */
 
-struct MockUartComponent : public esphome::uart::UARTComponent {
+struct LifecycleMockUart : public esphome::uart::UARTComponent {
   int available_count;
   uint8_t read_buffer[256];
   int read_buffer_index;
   int read_buffer_size;
   int write_count;
+  /* Outbound byte log + responder scan position: the lifecycle tests answer
+   * the device identity manager's ERD reads by watching what the bridge
+   * writes (see respond_to_erd_reads). */
+  uint8_t write_log[8192];
+  int write_log_len;
+  int respond_scan_pos;
   uint8_t last_written_byte;
 
-  MockUartComponent()
+  LifecycleMockUart()
     : available_count(0), read_buffer_index(0), read_buffer_size(0),
-      write_count(0), last_written_byte(0)
+      write_count(0), write_log_len(0), respond_scan_pos(0), last_written_byte(0)
   {
     std::memset(read_buffer, 0, sizeof(read_buffer));
   }
 
-  ~MockUartComponent() override = default;
+  ~LifecycleMockUart() override = default;
 
   void clear()
   {
@@ -64,7 +74,8 @@ struct MockUartComponent : public esphome::uart::UARTComponent {
     read_buffer_index = 0;
     read_buffer_size = 0;
     write_count = 0;
-    last_written_byte = 0;
+    write_log_len = 0;
+    respond_scan_pos = 0;
     std::memset(read_buffer, 0, sizeof(read_buffer));
   }
 
@@ -82,6 +93,9 @@ struct MockUartComponent : public esphome::uart::UARTComponent {
   {
     last_written_byte = data;
     write_count++;
+    if (write_log_len < (int)sizeof(write_log)) {
+      write_log[write_log_len++] = data;
+    }
   }
 
   void write(const uint8_t* data, size_t len) override
@@ -89,6 +103,9 @@ struct MockUartComponent : public esphome::uart::UARTComponent {
     for (size_t i = 0; i < len; i++) {
       last_written_byte = data[i];
       write_count++;
+      if (write_log_len < (int)sizeof(write_log)) {
+        write_log[write_log_len++] = data[i];
+      }
     }
   }
 
@@ -106,6 +123,9 @@ struct MockUartComponent : public esphome::uart::UARTComponent {
   {
     last_written_byte = byte;
     write_count++;
+    if (write_log_len < (int)sizeof(write_log)) {
+      write_log[write_log_len++] = byte;
+    }
   }
 };
 
@@ -116,7 +136,7 @@ struct MockUartComponent : public esphome::uart::UARTComponent {
 TEST_GROUP(startup_integration)
 {
   GeappliancesBridge *bridge;
-  MockUartComponent *mock_uart;
+  LifecycleMockUart *mock_uart;
   esphome::mqtt::MqttTestDouble *mqtt_double;
 
   void setup()
@@ -125,7 +145,7 @@ TEST_GROUP(startup_integration)
     mock().strictOrder();
     esphome_hal_double_set_millis(0);
     bridge = new GeappliancesBridge();
-    mock_uart = new MockUartComponent();
+    mock_uart = new LifecycleMockUart();
     mqtt_double = new esphome::mqtt::MqttTestDouble();
     mock_uart->clear();
     esphome::mqtt::global_mqtt_client = mqtt_double;
@@ -1627,5 +1647,262 @@ TEST(startup_integration, full_startup_stress_with_all_uart_combinations)
     esphome_hal_double_set_millis(30000 + AUTODISCOVERY_STARTUP_DELAY_MS + 1000 + i * 100);
     bridge->loop();
   }
+  CHECK(bridge->teardown());
+}
+
+/* ================================================================== */
+/* Full lifecycle: phase machine + ProtocolStack through the real HSM   */
+/* ================================================================== */
+
+/* Append a GEA3 frame (STX | destination | payload_length | source | payload |
+ * CRC(2) | ETX) to the mock uart's read buffer. The autodiscovery manager and
+ * the GEA3 ERD client both consume these bytes through the uart adapter's
+ * receive event. */
+static void append_gea3_frame(LifecycleMockUart *uart, const uint8_t *payload,
+                              int payload_len)
+{
+  uint8_t frame[64];
+  int frame_idx = 0;
+  frame[frame_idx++] = 0xE4;  // destination: bridge client address
+  frame[frame_idx++] = tiny_gea_packet_transmission_overhead + payload_len;
+  frame[frame_idx++] = 0xB8;  // source: board address
+  for (int i = 0; i < payload_len; i++) {
+    frame[frame_idx++] = payload[i];
+  }
+  int frame_len = frame_idx;
+
+  uint16_t crc = tiny_gea_crc_seed;
+  for (int i = 0; i < frame_len; i++) {
+    crc = tiny_crc16_byte(crc, frame[i]);
+  }
+
+  int idx = uart->read_buffer_size;
+  if (uart->read_buffer_index >= uart->read_buffer_size) {
+    /* Fully consumed: restart at the front so the 256-byte buffer never
+     * overflows across the many responses a lifecycle run generates. */
+    uart->read_buffer_index = 0;
+    uart->read_buffer_size = 0;
+    idx = 0;
+  }
+  uart->read_buffer[idx++] = tiny_gea_stx;
+  for (int i = 0; i < frame_len; i++) {
+    /* Escape exactly like tiny_gea3_interface's sender: any byte in
+     * 0xE0-0xEF goes out as ESC + raw byte. Without this the receiver
+     * mis-reads a bare 0xE0 as an escape prefix (swallowing the next
+     * byte), a bare 0xE2 as STX (resetting the frame), and a bare 0xE3
+     * as ETX (validating a truncated frame), silently dropping responses
+     * whose payload or CRC contains those values. */
+    uint8_t b = frame[i];
+    if ((b & 0xFC) == tiny_gea_esc) {
+      uart->read_buffer[idx++] = tiny_gea_esc;
+    }
+    uart->read_buffer[idx++] = b;
+  }
+  const uint8_t crc_bytes[2] = { (uint8_t)((crc >> 8) & 0xFF),
+                                 (uint8_t)(crc & 0xFF) };
+  for (int i = 0; i < 2; i++) {
+    if ((crc_bytes[i] & 0xFC) == tiny_gea_esc) {
+      uart->read_buffer[idx++] = tiny_gea_esc;
+    }
+    uart->read_buffer[idx++] = crc_bytes[i];
+  }
+  uart->read_buffer[idx++] = tiny_gea_etx;
+  uart->read_buffer_size = idx;
+  uart->available_count = idx;
+}
+
+static void queue_broadcast_response(LifecycleMockUart *uart, uint8_t appliance_type)
+{
+  uint8_t payload[16];
+  payload[0] = tiny_gea3_erd_api_command_read_response;
+  payload[1] = 0;  // request_id
+  payload[2] = tiny_gea3_erd_api_read_result_success;
+  payload[3] = (ERD_APPLIANCE_TYPE >> 8) & 0xFF;
+  payload[4] = ERD_APPLIANCE_TYPE & 0xFF;
+  payload[5] = 1;  // data_size
+  payload[6] = appliance_type;
+  append_gea3_frame(uart, payload, 7);
+}
+
+/* Queue a successful GEA3 read response for one of the identity ERDs. */
+static void queue_read_response(LifecycleMockUart *uart, uint8_t request_id,
+                                uint16_t erd)
+{
+  uint8_t payload[16];
+  int payload_len = 7;
+  payload[0] = tiny_gea3_erd_api_command_read_response;
+  payload[1] = request_id;
+  payload[2] = tiny_gea3_erd_api_read_result_success;
+  payload[3] = (erd >> 8) & 0xFF;
+  payload[4] = erd & 0xFF;
+  payload[5] = 1;  // data_size
+  payload[6] = (erd == ERD_APPLIANCE_TYPE) ? 0x03
+               : (erd == ERD_MODEL_NUMBER) ? 'M' : 'S';
+  append_gea3_frame(uart, payload, payload_len);
+}
+
+/* Watch the bridge's outbound bytes and answer every GEA3 read request the
+ * bridge sends (identity ERDs, feature-bit ERDs, poll-list probes) so the
+ * startup lifecycle completes quickly. The GEA3 client validates each
+ * response against its own request id, so duplicate answers to retried
+ * requests are harmlessly ignored. */
+static void respond_to_erd_reads(LifecycleMockUart *uart)
+{
+  int i = uart->respond_scan_pos;
+  while (i < uart->write_log_len) {
+    if (uart->write_log[i] != tiny_gea_stx) {
+      i++;
+      continue;
+    }
+    /* Collect the frame, unescaping 0xE0-prefixed control bytes. */
+    uint8_t frame[64];
+    int n = 0;
+    int j = i + 1;
+    bool complete = false;
+    while (j < uart->write_log_len && n < 64) {
+      uint8_t b = uart->write_log[j++];
+      if (b == tiny_gea_esc) {
+        if (j < uart->write_log_len) {
+          frame[n++] = uart->write_log[j++];
+        }
+        continue;
+      }
+      if (b == tiny_gea_etx) {
+        complete = true;
+        break;
+      }
+      frame[n++] = b;
+    }
+    if (!complete) {
+      break;  // packet still mid-flight; wait for more bytes
+    }
+    uart->respond_scan_pos = j;
+    i = j;
+    if (n < 7) {
+      continue;
+    }
+    uint8_t payload_len = frame[1] - tiny_gea_packet_transmission_overhead;
+    if (payload_len < 4 || frame[3] != tiny_gea3_erd_api_command_read_request) {
+      continue;
+    }
+    uint8_t request_id = frame[4];
+    uint16_t erd = (uint16_t)(frame[5] << 8) | frame[6];
+    queue_read_response(uart, request_id, erd);
+  }
+}
+
+
+/* Drive the bridge from setup() until the autodiscovery broadcast has gone
+ * out over the uart (the HSM's startup delay plus the manager's broadcast).
+ * Returns the loop counter so callers continue the same simulated clock. */
+static int drive_past_broadcast(GeappliancesBridge *bridge, LifecycleMockUart *uart)
+{
+  int i = 1;
+  for (; i <= 1500 && uart->write_count == 0; i++) {
+    esphome_hal_double_set_millis(i * 10);
+    bridge->loop();
+    respond_to_erd_reads(uart);
+  }
+  return i;
+}
+TEST(startup_integration, full_lifecycle_poll_mode_reaches_running_and_publishes_discovery)
+{
+  configure_poll_mode();
+  bridge->set_device_id("test-device");
+  bridge->set_generate_device_config(true);
+  bridge->setup();
+
+  int i = drive_past_broadcast(bridge, mock_uart);
+  CHECK(mock_uart->write_count > 0);  // autodiscovery broadcast went out
+  queue_broadcast_response(mock_uart, 0x03);
+
+  for (; i <= 13500; i++) {
+    esphome_hal_double_set_millis(i * 10);
+    bridge->loop();
+    respond_to_erd_reads(mock_uart);
+  }
+
+  // Bridge init ran: the write bridge subscribed the write topic filter.
+  const std::string write_filter = "geappliances/test-device/erd/+/write";
+  bool write_subscribed = false;
+  for (const auto &t : mqtt_double->subscribed_topics_) {
+    if (t == write_filter) {
+      write_subscribed = true;
+    }
+  }
+  CHECK(write_subscribed);
+
+  // Steady state latched: the lifecycle manager ran the initial HA
+  // discovery publish (the only publishes here — the ERD cache publisher's
+  // task never runs under the harness and nothing writes).
+  CHECK(mqtt_double->publish_calls_ > 0);
+  CHECK(mqtt_double->last_published_topic_.find("homeassistant/") != std::string::npos);
+
+  // The poll bridge is alive: uart writes keep growing in the tail.
+  int writes_mid = mock_uart->write_count;
+  for (int j = 0; j < 2000; j++) {
+    esphome_hal_double_set_millis(52000 + j * 10);
+    bridge->loop();
+  }
+  CHECK(mock_uart->write_count > writes_mid);
+
+  // Steady state is observable through the IBridgeServices getter: the phase
+  // classifier must report the polling bridge and the bridge must be in
+  // its polling state, not merely latched early during the probe.
+  IBridgeServices *services = bridge;
+  CHECK(services->get_polling_state() == polling_state_polling);
+
+  CHECK(bridge->teardown());
+
+  // Phase-based teardown destroyed the write bridge: topic unsubscribed.
+  bool write_unsubscribed = false;
+  for (const auto &t : mqtt_double->unsubscribed_topics_) {
+    if (t == write_filter) {
+      write_unsubscribed = true;
+    }
+  }
+  CHECK(write_unsubscribed);
+}
+
+TEST(startup_integration, auto_mode_subscription_failure_rebuilds_polling_bridge)
+{
+  bridge->set_gea3_uart(mock_uart);
+  bridge->set_mode(BRIDGE_MODE_AUTO);
+  bridge->set_appliance_api_parsing(false);
+  bridge->set_device_id("test-device");
+  bridge->set_generate_device_config(false);
+  bridge->setup();
+
+  int i = drive_past_broadcast(bridge, mock_uart);
+  CHECK(mock_uart->write_count > 0);
+  queue_broadcast_response(mock_uart, 0x03);
+
+  for (; i <= 13500; i++) {
+    esphome_hal_double_set_millis(i * 10);
+    bridge->loop();
+    respond_to_erd_reads(mock_uart);
+  }
+
+  // Bridge init ran (subscription bridge first): the write topic filter
+  // was subscribed exactly once across the quiet-period failure and the
+  // polling rebuild.
+  const std::string write_filter = "geappliances/test-device/erd/+/write";
+  int write_subscribe_count = 0;
+  for (const auto &t : mqtt_double->subscribed_topics_) {
+    if (t == write_filter) {
+      write_subscribe_count++;
+    }
+  }
+  CHECK(write_subscribe_count == 1);
+
+  // The rebuilt polling bridge is alive: uart writes keep growing in the
+  // tail (poll reads go out every 10 s interval).
+  int writes_mid = mock_uart->write_count;
+  for (int j = 0; j < 2000; j++) {
+    esphome_hal_double_set_millis(52000 + j * 10);
+    bridge->loop();
+  }
+  CHECK(mock_uart->write_count > writes_mid);
+
   CHECK(bridge->teardown());
 }
