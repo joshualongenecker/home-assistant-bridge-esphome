@@ -164,44 +164,44 @@ CONFIG_SCHEMA = cv.Schema(
         ), cv.Length(max=128)),
         cv.Optional(CONF_THROTTLE_RATE_SECONDS, default=1): cv.int_range(min=0, max=255),
         cv.Optional(CONF_ERD_PUBLISH_RATE_SENSOR, default={}): cv.Any(
-            cv.boolean,
+            cv.boolean_false,
             sensor.sensor_schema(state_class="measurement").extend(cv.Schema({
                 cv.Optional("name", default="ERD Publish Rate"): cv.string,
             })),
         ),
         cv.Optional(CONF_ERD_CACHE_ENTRIES_SENSOR, default={}): cv.Any(
-            cv.boolean,
+            cv.boolean_false,
             sensor.sensor_schema(state_class="measurement", accuracy_decimals=0).extend(cv.Schema({
                 cv.Optional("name", default="ERD Cache Entries"): cv.string,
             })),
         ),
         cv.Optional(CONF_ERD_CACHE_UPDATES_SENSOR, default={}): cv.Any(
-            cv.boolean,
+            cv.boolean_false,
             sensor.sensor_schema(state_class="measurement").extend(cv.Schema({
                 cv.Optional("name", default="ERD Cache Update Rate"): cv.string,
             })),
         ),
         cv.Optional(CONF_MQTT_PUBLISH_RATE_SENSOR, default={}): cv.Any(
-            cv.boolean,
+            cv.boolean_false,
             sensor.sensor_schema(state_class="measurement").extend(cv.Schema({
                 cv.Optional("name", default="MQTT Publish Rate"): cv.string,
             })),
         ),
         cv.Optional(CONF_MQTT_DISCONNECT_COUNT_SENSOR, default={}): cv.Any(
-            cv.boolean,
+            cv.boolean_false,
             sensor.sensor_schema(state_class="total_increasing", accuracy_decimals=0).extend(cv.Schema({
                 cv.Optional("name", default="MQTT Disconnect Count"): cv.string,
             })),
         ),
         cv.Optional(CONF_MQTT_DISCONNECT_DURATION_SENSOR, default={}): cv.Any(
-            cv.boolean,
+            cv.boolean_false,
             sensor.sensor_schema(state_class="measurement", unit_of_measurement="ms").extend(cv.Schema({
                 cv.Optional("name", default="MQTT Last Disconnect Duration"): cv.string,
             })),
         ),
         cv.Optional(CONF_FILTER_CONFIG_TOPICS, default=True): cv.boolean,
         cv.Optional(CONF_DISCOVERY_REFRESH_BUTTON, default={}): cv.Any(
-            cv.boolean,
+            cv.boolean_false,
             button.button_schema(DiscoveryRefreshButton).extend(cv.Schema({
                 cv.Optional("name", default="Discovery Refresh"): cv.string,
             })),
