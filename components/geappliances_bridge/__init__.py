@@ -10,8 +10,8 @@ from pathlib import Path
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import button, sensor, uart
-from esphome.const import CONF_ID, CONF_STATE_CLASS
-from esphome.core import CORE, EnumValue, ID
+from esphome.const import CONF_ID
+from esphome.core import CORE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,42 +67,46 @@ DiscoveryRefreshButton = geappliances_bridge_ns.class_(
 )
 
 
-async def _create_diagnostic_sensor(config: dict[str, Any], config_key: str, default_name: str, sensor_id: str, state_class: str, var: Any, setter_name: str, extra: dict[str, Any] | None = None) -> None:
-    """Create a diagnostic sensor if enabled in config.
-    
-    Args:
-        config: The full configuration dictionary.
-        config_key: The config key to check for the sensor setting.
-        default_name: Default display name for the sensor.
-        sensor_id: The ID slug for the sensor (used for CONF_ID).
-        state_class: Home Assistant state class (e.g. "measurement", "total_increasing").
-        var: The GeappliancesBridge variable to set the sensor on.
-        setter_name: Name of the setter method on var (e.g. "set_erd_publish_rate_sensor").
-        extra: Optional extra sensor config keys (e.g. {"accuracy_decimals": 0}).
+# Diagnostic entities are created unless their option is set to `false`. Their defaults live
+# in CONFIG_SCHEMA so config validation materializes the entity `id` and, because this
+# component depends on `mqtt`, an `mqtt_id`. Codegen emits the MQTTSensorComponent /
+# MQTTButton wrapper that publishes an entity's state only for entities carrying that key,
+# so entities assembled by hand here were registered but never published.
+DIAGNOSTIC_ENTITY_KEYS = (
+    CONF_ERD_PUBLISH_RATE_SENSOR,
+    CONF_ERD_CACHE_ENTRIES_SENSOR,
+    CONF_ERD_CACHE_UPDATES_SENSOR,
+    CONF_MQTT_PUBLISH_RATE_SENSOR,
+    CONF_MQTT_DISCONNECT_COUNT_SENSOR,
+    CONF_MQTT_DISCONNECT_DURATION_SENSOR,
+    CONF_DISCOVERY_REFRESH_BUTTON,
+)
+
+
+def expand_diagnostic_entity_defaults(config: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a literal `true` diagnostic-entity option to `{}` before validation.
+
+    ESPHome validates schema defaults, so an absent option validated as a mapping receives
+    the full entity defaults (name, state class, id, mqtt_id). A literal `true` matched the
+    boolean branch instead and produced an entity with no MQTT wrapper.
     """
-    val = config.get(config_key, True)
-    if val is not False:
-        if val is True:
-            val = {
-                "name": default_name,
-                CONF_ID: ID(sensor_id, is_declaration=True, type=sensor.Sensor),
-                CONF_STATE_CLASS: _make_state_class(state_class),
-                "disabled_by_default": False,
-                "force_update": False,
-            }
-            if extra:
-                val.update(extra)
-        sens = await sensor.new_sensor(val)
-        cg.add(getattr(var, setter_name)(sens))
+    for key in DIAGNOSTIC_ENTITY_KEYS:
+        if config.get(key) is True:
+            config[key] = {}
+    return config
 
 
-def _make_state_class(value: str):
-    """Wrap a state_class string as an EnumValue for codegen."""
-    v = cv.add_class_to_obj(value, EnumValue)
-    v.enum_value = sensor.STATE_CLASSES[value]
-    return v
+async def _create_diagnostic_sensor(config: dict[str, Any], config_key: str, var: Any, setter_name: str) -> None:
+    """Create a diagnostic sensor unless its option is `false`.
 
-
+    The option is validated by sensor.sensor_schema(), so the value already carries the
+    name, state class, id and the mqtt_id that codegen needs to publish the entity.
+    """
+    val = config.get(config_key)
+    if val is None or val is False:
+        return
+    sens = await sensor.new_sensor(val)
+    cg.add(getattr(var, setter_name)(sens))
 
 
 def validate_at_least_one_uart(config: dict[str, Any]) -> dict[str, Any]:
@@ -159,45 +163,45 @@ CONFIG_SCHEMA = cv.Schema(
             cv.int_range(min=0, max=0xFFFF)
         ), cv.Length(max=128)),
         cv.Optional(CONF_THROTTLE_RATE_SECONDS, default=1): cv.int_range(min=0, max=255),
-        cv.Optional(CONF_ERD_PUBLISH_RATE_SENSOR, default=True): cv.Any(
-            cv.boolean,
+        cv.Optional(CONF_ERD_PUBLISH_RATE_SENSOR, default={}): cv.Any(
+            cv.boolean_false,
             sensor.sensor_schema(state_class="measurement").extend(cv.Schema({
                 cv.Optional("name", default="ERD Publish Rate"): cv.string,
             })),
         ),
-        cv.Optional(CONF_ERD_CACHE_ENTRIES_SENSOR, default=True): cv.Any(
-            cv.boolean,
-            sensor.sensor_schema().extend(cv.Schema({
+        cv.Optional(CONF_ERD_CACHE_ENTRIES_SENSOR, default={}): cv.Any(
+            cv.boolean_false,
+            sensor.sensor_schema(state_class="measurement", accuracy_decimals=0).extend(cv.Schema({
                 cv.Optional("name", default="ERD Cache Entries"): cv.string,
             })),
         ),
-        cv.Optional(CONF_ERD_CACHE_UPDATES_SENSOR, default=True): cv.Any(
-            cv.boolean,
+        cv.Optional(CONF_ERD_CACHE_UPDATES_SENSOR, default={}): cv.Any(
+            cv.boolean_false,
             sensor.sensor_schema(state_class="measurement").extend(cv.Schema({
                 cv.Optional("name", default="ERD Cache Update Rate"): cv.string,
             })),
         ),
-        cv.Optional(CONF_MQTT_PUBLISH_RATE_SENSOR, default=True): cv.Any(
-            cv.boolean,
+        cv.Optional(CONF_MQTT_PUBLISH_RATE_SENSOR, default={}): cv.Any(
+            cv.boolean_false,
             sensor.sensor_schema(state_class="measurement").extend(cv.Schema({
                 cv.Optional("name", default="MQTT Publish Rate"): cv.string,
             })),
         ),
-        cv.Optional(CONF_MQTT_DISCONNECT_COUNT_SENSOR, default=True): cv.Any(
-            cv.boolean,
-            sensor.sensor_schema(state_class="total_increasing").extend(cv.Schema({
+        cv.Optional(CONF_MQTT_DISCONNECT_COUNT_SENSOR, default={}): cv.Any(
+            cv.boolean_false,
+            sensor.sensor_schema(state_class="total_increasing", accuracy_decimals=0).extend(cv.Schema({
                 cv.Optional("name", default="MQTT Disconnect Count"): cv.string,
             })),
         ),
-        cv.Optional(CONF_MQTT_DISCONNECT_DURATION_SENSOR, default=True): cv.Any(
-            cv.boolean,
-            sensor.sensor_schema(state_class="measurement").extend(cv.Schema({
+        cv.Optional(CONF_MQTT_DISCONNECT_DURATION_SENSOR, default={}): cv.Any(
+            cv.boolean_false,
+            sensor.sensor_schema(state_class="measurement", unit_of_measurement="ms").extend(cv.Schema({
                 cv.Optional("name", default="MQTT Last Disconnect Duration"): cv.string,
             })),
         ),
         cv.Optional(CONF_FILTER_CONFIG_TOPICS, default=True): cv.boolean,
-        cv.Optional(CONF_DISCOVERY_REFRESH_BUTTON, default=True): cv.Any(
-            cv.boolean,
+        cv.Optional(CONF_DISCOVERY_REFRESH_BUTTON, default={}): cv.Any(
+            cv.boolean_false,
             button.button_schema(DiscoveryRefreshButton).extend(cv.Schema({
                 cv.Optional("name", default="Discovery Refresh"): cv.string,
             })),
@@ -205,7 +209,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_CUSTOM_HA_DISCOVERY_FILE): cv.file_,
     }
 ).extend(cv.COMPONENT_SCHEMA)
-CONFIG_SCHEMA = cv.All(CONFIG_SCHEMA, validate_at_least_one_uart, validate_board_address_not_adapter_address)
+CONFIG_SCHEMA = cv.All(expand_diagnostic_entity_defaults, CONFIG_SCHEMA, validate_at_least_one_uart, validate_board_address_not_adapter_address)
 
 
 async def to_code(config: dict[str, Any]) -> None:
@@ -314,23 +318,17 @@ async def to_code(config: dict[str, Any]) -> None:
                 cg.RawExpression("custom_ha_discovery_erds"),
                 cg.RawExpression("CUSTOM_HA_DISCOVERY_ERD_COUNT")))
     # Create diagnostic sensors (auto-created by default, set to false to disable)
-    await _create_diagnostic_sensor(config, CONF_ERD_PUBLISH_RATE_SENSOR, "ERD Publish Rate", "erd_publish_rate", "measurement", var, "set_erd_publish_rate_sensor")
-    await _create_diagnostic_sensor(config, CONF_ERD_CACHE_ENTRIES_SENSOR, "ERD Cache Entries", "erd_cache_entries", "measurement", var, "set_erd_cache_entries_sensor", {"accuracy_decimals": 0})
-    await _create_diagnostic_sensor(config, CONF_ERD_CACHE_UPDATES_SENSOR, "ERD Cache Update Rate", "erd_cache_updates", "measurement", var, "set_erd_cache_updates_sensor")
-    await _create_diagnostic_sensor(config, CONF_MQTT_PUBLISH_RATE_SENSOR, "MQTT Publish Rate", "mqtt_publish_rate", "measurement", var, "set_mqtt_publish_rate_sensor")
-    await _create_diagnostic_sensor(config, CONF_MQTT_DISCONNECT_COUNT_SENSOR, "MQTT Disconnect Count", "mqtt_disconnect_count", "total_increasing", var, "set_mqtt_disconnect_count_sensor", {"accuracy_decimals": 0})
-    await _create_diagnostic_sensor(config, CONF_MQTT_DISCONNECT_DURATION_SENSOR, "MQTT Last Disconnect Duration", "mqtt_disconnect_duration", "measurement", var, "set_mqtt_disconnect_duration_sensor", {"unit_of_measurement": "ms"})
+    await _create_diagnostic_sensor(config, CONF_ERD_PUBLISH_RATE_SENSOR, var, "set_erd_publish_rate_sensor")
+    await _create_diagnostic_sensor(config, CONF_ERD_CACHE_ENTRIES_SENSOR, var, "set_erd_cache_entries_sensor")
+    await _create_diagnostic_sensor(config, CONF_ERD_CACHE_UPDATES_SENSOR, var, "set_erd_cache_updates_sensor")
+    await _create_diagnostic_sensor(config, CONF_MQTT_PUBLISH_RATE_SENSOR, var, "set_mqtt_publish_rate_sensor")
+    await _create_diagnostic_sensor(config, CONF_MQTT_DISCONNECT_COUNT_SENSOR, var, "set_mqtt_disconnect_count_sensor")
+    await _create_diagnostic_sensor(config, CONF_MQTT_DISCONNECT_DURATION_SENSOR, var, "set_mqtt_disconnect_duration_sensor")
 
 
     # Create discovery refresh button (auto-created by default, set to false to disable)
-    val = config.get(CONF_DISCOVERY_REFRESH_BUTTON, True)
-    if val is not False:
-        if val is True:
-            val = {
-                "name": "Discovery Refresh",
-                CONF_ID: ID("discovery_refresh", is_declaration=True, type=DiscoveryRefreshButton),
-                "disabled_by_default": False,
-            }
+    val = config.get(CONF_DISCOVERY_REFRESH_BUTTON)
+    if val is not None and val is not False:
         btn = cg.new_Pvariable(val[CONF_ID], var)
         await button.register_button(btn, val)
 
