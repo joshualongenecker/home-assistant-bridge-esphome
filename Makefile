@@ -96,6 +96,13 @@ CFLAGS += -std=c11 -pedantic
 CPPFLAGS += $(SANITIZE_FLAGS) -fno-omit-frame-pointer -fprofile-arcs -ftest-coverage -DUSE_ESP_IDF -DUSE_ESP_IDF_STUBS -DUNIT_TEST_BUILD -DHA_DISCOVERY_TEST_EXPORT -DHA_DISCOVERY_CLEANUP_TEST_BUF_SIZE=512 -DHA_CLEANUP_TEST_BUF_SIZE=512 -DHA_DISCOVERY_CLEANUP_TEST_EXPORT 
 CPPFLAGS += $(INC_FLAGS) $(CPPUTEST_INC) -MMD -MP -g -Wall -Wextra -Wcast-qual -Werror
 CXXFLAGS += -std=c++17 -pthread
+# Extra flags for a variant build that must keep the suite's own flags, e.g.
+# the pattern-init gate in CI:
+#   make integration-test BUILD_DIR=./build-pattern \
+#     EXTRA_CXXFLAGS=-ftrivial-auto-var-init=pattern
+# BUILD_DIR has to differ from the default: otherwise make considers the
+# objects built without the flag up to date and the variant tests nothing.
+CXXFLAGS += $(EXTRA_CXXFLAGS)
 LDFLAGS := $(SANITIZE_FLAGS) $(CPPUTEST_LIB) --coverage -pthread
 LDLIBS := -lstdc++ -lCppUTest -lCppUTestExt -lm --coverage
 

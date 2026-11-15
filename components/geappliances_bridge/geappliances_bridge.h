@@ -251,11 +251,25 @@ class GeappliancesBridge : public Component, public IBridgeServices {
 
   ErdRegistry erd_registry_;
 
-  erd_cache_mqtt_publisher_t erd_cache_publisher_{};  // zero-init: teardown() destroy guard reads cache pre-setup
-  erd_cache_t erd_cache_{};  // zero-init: teardown() destroy guard reads initialized pre-setup
+  // Value-initialized on purpose: teardown() dispatches on
+  // erd_cache_publisher_.cache, and erd_cache_destroy() guards on
+  // self->initialized before deleting self->lock, so a heap-allocated bridge
+  // must not start out with garbage in either field -- those guards decide
+  // whether the destroy paths run at all.
+  erd_cache_mqtt_publisher_t erd_cache_publisher_{};
+  erd_cache_t erd_cache_{};
 
   // HA discovery manager: publishes one-shot HA MQTT discovery payloads after steady state is reached.
-  ha_discovery_manager_t ha_discovery_manager_{};  // zero-init: teardown() frees run buffers pre-setup
+  //
+  // Value-initialized on purpose. ha_discovery_manager_init() and
+  // ha_discovery_manager_cleanup() both free() the four run buffers before
+  // memset()ing the struct, which is only safe when those pointers start out
+  // NULL. A bridge that is heap-allocated -- every test does `new
+  // GeappliancesBridge()`, and any future dynamic instantiation would --
+  // otherwise frees whatever the allocator left in that memory. Deployed
+  // firmware hides the bug because ESPHome makes the component a static global
+  // (zeroed by the loader), so only the test heap ever saw garbage there.
+  ha_discovery_manager_t ha_discovery_manager_{};
 
   AutodiscoveryManager autodiscovery_manager_;
   // HA discovery lifecycle: initial publish, cleanup + republish (OTA, config
@@ -264,7 +278,9 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   DiscoveryLifecycleManager discovery_lifecycle_manager_;
   DiagnosticSensorPublisher diagnostic_sensor_publisher_;
 
-  esphome_mqtt_client_adapter_t mqtt_client_adapter_{};  // zero-init: .initialized reads false pre-setup
+  // The i_mqtt_client_t wrappers in i_mqtt_client.h call straight through
+  // self->api, so this must start out NULL rather than whatever the heap had.
+  esphome_mqtt_client_adapter_t mqtt_client_adapter_{};
 
   erd_bridge_subscribe_t erd_bridge_subscribe_;
   erd_bridge_poll_t erd_bridge_poll_;

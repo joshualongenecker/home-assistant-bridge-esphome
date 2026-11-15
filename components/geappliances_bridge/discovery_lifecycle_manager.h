@@ -89,6 +89,13 @@ class DiscoveryLifecycleManager {
   // cleanup + publish converges in seconds.
   static constexpr uint32_t kPhaseTimeoutMs = 5u * 60u * 1000u;
 
+  // How many reboots an aborted discovery run may arm before the machine gives
+  // up and stays up. A freed run allocation does not re-coalesce (see
+  // abort_publish_run_()), and a failed run never saves the record, so the next
+  // boot retries -- without a bound a permanently failing payload (a corrupt
+  // discovery data blob, say) would reboot on every boot forever.
+  static constexpr uint8_t kMaxAbortReboots = 3;
+
   // Why the current phase was entered. Orthogonal to the phase: the same
   // cleanup -> publish -> reboot sequence runs for every trigger, and a few
   // transitions depend on which one started it.
@@ -108,8 +115,8 @@ class DiscoveryLifecycleManager {
   //   QueuedCleanup --ready--> Cleaning
   //   Cleaning --cleanup done--> Publishing
   //   Cleaning --kPhaseTimeoutMs elapsed--> Idle   (aborted, no record)
-  //   Publishing --run failed--> Idle              (no record saved, no reboot)
-  //   Publishing --kPhaseTimeoutMs elapsed--> Idle (aborted, no record)
+  //   Publishing --run failed--> RebootPending (budget left) / Idle (spent)
+  //   Publishing --kPhaseTimeoutMs elapsed--> same as a failed run
   //   Publishing --run complete--> RebootPending
   //   RebootPending --kRebootDelayMs elapsed--> Idle
   enum Phase : uint8_t {
@@ -139,6 +146,14 @@ class DiscoveryLifecycleManager {
     void (*save_discovery_record)(void* context, const DiscoveryRecord& record);
     // Clears the safe-mode counter and cancels the OTA rollback.
     void (*confirm_firmware)(void* context);
+    // Reads how many discovery-abort reboots have already been armed (0 when
+    // nothing is stored). Persisted because the reboot itself erases the only
+    // in-RAM evidence that the run failed.
+    uint8_t (*read_abort_reboot_count)(void* context);
+    // Persists that count; false when the write failed, which makes the abort
+    // path stay up instead of rebooting -- an unbounded retry is a reboot loop
+    // with no way to stop it.
+    bool (*write_abort_reboot_count)(void* context, uint8_t count);
     // Feeds the task watchdog while waiting out the reboot delay.
     void (*feed_watchdog)(void* context);
     // Restarts the device.
@@ -201,11 +216,17 @@ class DiscoveryLifecycleManager {
   void begin_cleanup_();
   // Resets, configures and starts a discovery run.
   void begin_publish_();
-  // Drives a run to completion; records the outcome and either returns to
-  // Idle (failure) or arms the reboot (success).
+  // Drives a run to completion: a successful run records the outcome and arms
+  // the reboot, a failed one goes through abort_publish_run_().
   void finish_publish_();
-  // Releases the run's allocations and returns to Idle without saving a
-  // record; the caller has already confirmed the firmware and logged why.
+  // Releases the run's allocations without saving a record, so the next boot's
+  // change check retries, then arms a reboot while the kMaxAbortReboots budget
+  // lasts. Freeing the ~52 KB of run allocations does not restore the heap:
+  // measured on hardware, the largest free block after an aborted run stays at
+  // 102 400-143 360 B for the rest of the boot against 237 568 B after a clean
+  // one, because the region is bounded by other survivors while the publisher
+  // churns. Only a reset re-coalesces it. The caller has already confirmed the
+  // firmware and logged why.
   void abort_publish_run_();
 
   ha_discovery_manager_t* ha_discovery_manager_{nullptr};
