@@ -8,7 +8,7 @@ Complete reference for all MQTT topics used by the GE Appliances Bridge.
 
 | Property | Value |
 |---|---|
-| **Topic** | `geappliances/{device_id}/erd/0x{ERD_ID:04X}/value` |
+| **Topic** | `geappliances/{device_id}/erd/0x{ERD_ID:04x}/value` |
 | **Direction** | Bridge → Broker (published by bridge) |
 | **QoS** | 0 |
 | **Retain** | `true` |
@@ -27,7 +27,7 @@ The `0x0008` ERD (appliance type) has value `06` (Dishwasher), published as the 
 
 | Property | Value |
 |---|---|
-| **Topic** | `geappliances/{device_id}/erd/0x{ERD_ID:04X}/write` |
+| **Topic** | `geappliances/{device_id}/erd/0x{ERD_ID:04x}/write` |
 | **Direction** | Client → Bridge (subscribed by bridge via wildcard) |
 | **QoS** | 0 |
 | **Retain** | `false` |
@@ -46,7 +46,7 @@ This writes `0x01` to ERD `0x7001`.
 
 | Property | Value |
 |---|---|
-| **Topic** | `geappliances/{device_id}/erd/0x{ERD_ID:04X}/write_result` |
+| **Topic** | `geappliances/{device_id}/erd/0x{ERD_ID:04x}/write_result` |
 | **Direction** | Bridge → Broker (published by bridge) |
 | **QoS** | 0 |
 | **Retain** | `false` |
@@ -105,6 +105,28 @@ geappliances/{device_id}/erd/+/write
 ```
 
 The `+` wildcard matches any single topic level (the ERD ID).
+
+## Topic Case Rules
+
+Everything the bridge publishes is **lowercase**: the `0x` prefix, the hex digits, and the
+operation name. Publish writes in lowercase — that is the canonical form, and it is what the
+bridge's own Home Assistant discovery records point at.
+
+On input, exactly one part of the topic is case-tolerant:
+
+| Topic part | Accepted | Canonical |
+|---|---|---|
+| `0x` prefix | lowercase only | lowercase |
+| hex digits of `{ERD_ID}` and `{ADDR}` | `0-9a-f` and `0-9A-F` | lowercase |
+| operation (`value`, `write`, `write_result`) | lowercase only | lowercase |
+| `{device_id}` | exact match against the configured or detected id | — |
+
+A topic that does not match the grammar is dropped and the bridge logs a warning naming it.
+The usual cause is a capital `X`: `.../erd/0X770A/write` is not the grammar and is ignored,
+while both `.../erd/0x770A/write` and `.../erd/0x770a/write` are accepted.
+
+The grammar is defined once in `components/geappliances_bridge/erd_topic.h` and pinned by
+`test/tests/erd_topic_test.cpp`.
 
 ## Device ID in Topics
 

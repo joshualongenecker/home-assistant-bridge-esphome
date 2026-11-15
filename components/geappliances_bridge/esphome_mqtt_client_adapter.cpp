@@ -144,12 +144,19 @@ extern "C" void esphome_mqtt_client_adapter_subscribe_write_topic(
     // Grammar and sentinel rules live in erd_topic.h: no-prefix topics
     // parse to the ERD_TOPIC_PRIMARY (0xFF) sentinel, which the write
     // bridge resolves to the detected host address; a secondary board at
-    // 0x00 parses as 0x00 and stays distinct from the sentinel. Topics
-    // that do not match the grammar exactly are dropped.
+    // 0x00 parses as 0x00 and stays distinct from the sentinel. Topics that do
+    // not match the grammar are dropped -- and now say so, because the usual
+    // cause is a capital X in the 0x prefix, which is not the grammar and from
+    // outside looked like a write the bridge silently ignored.
     uint8_t board_address = 0;
     uint16_t erd = 0;
     erd_topic_op_t op = ERD_TOPIC_OP_VALUE;
-    if (!erd_topic_parse(topic.c_str(), self->device_id, &board_address, &erd, &op)) return;
+    if (!erd_topic_parse(topic.c_str(), self->device_id, &board_address, &erd, &op)) {
+      ESP_LOGW(TAG, "Ignoring write on non-grammar topic \"%s\": the 0x prefix and the "
+                    "operation name must be lowercase (docs/reference/mqtt-topics.md)",
+               topic.c_str());
+      return;
+    }
     if (op != ERD_TOPIC_OP_WRITE) return;
 
     // Decode hex payload to a local stack buffer to avoid race condition:
