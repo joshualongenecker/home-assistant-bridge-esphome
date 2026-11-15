@@ -13,6 +13,7 @@ Run after ``esphome compile docs/test-compile.yaml`` (see .github/workflows/esph
 
 from __future__ import annotations
 
+import difflib
 import re
 import sys
 from pathlib import Path
@@ -50,19 +51,38 @@ def main(argv: list[str]) -> int:
         for kind, var, name in REGISTRATION_RE.findall(source)
     }
 
+    names_by_kind = {"sensor": [], "button": []}
+    for (kind, name) in registered:
+        names_by_kind[kind].append(name)
+
+    expected_list = {"sensor": "EXPECTED_SENSORS", "button": "EXPECTED_BUTTONS"}
+
+    def missing_registration(kind: str, name: str) -> str:
+        """Describe an expected entity that has no registration at all.
+
+        A renamed display name lands here too, and the fix for that is the EXPECTED_*
+        list, not the component -- so name the closest registered entity instead of
+        sending the reader to the schema.
+        """
+        near = difflib.get_close_matches(name, names_by_kind[kind], n=1, cutoff=0.6)
+        if near:
+            return (f'{kind} "{name}" is not registered at all, but "{near[0]}" is; if the '
+                    f'display name changed on purpose, update {expected_list[kind]}')
+        return f'{kind} "{name}" is not registered at all'
+
     missing = []
     for name in EXPECTED_SENSORS:
         var = registered.get(("sensor", name))
         if var is None:
-            missing.append(f"sensor \"{name}\" is not registered at all")
+            missing.append(missing_registration("sensor", name))
         elif (var, "Sensor") not in wrapped:
-            missing.append(f"sensor \"{name}\" ({var}) has no MQTTSensorComponent wrapper")
+            missing.append(f'sensor "{name}" ({var}) has no MQTTSensorComponent wrapper')
     for name in EXPECTED_BUTTONS:
         var = registered.get(("button", name))
         if var is None:
-            missing.append(f"button \"{name}\" is not registered at all")
+            missing.append(missing_registration("button", name))
         elif (var, "Button") not in wrapped:
-            missing.append(f"button \"{name}\" ({var}) has no MQTTButtonComponent wrapper")
+            missing.append(f'button "{name}" ({var}) has no MQTTButtonComponent wrapper')
 
     if missing:
         print("Diagnostic entities will not appear in Home Assistant:", file=sys.stderr)

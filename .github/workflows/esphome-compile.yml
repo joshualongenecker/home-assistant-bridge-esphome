@@ -5,6 +5,14 @@ on:
     branches:
       - main
       - develop
+  # The wrapper guard below only prevents a regression if it runs before merge.
+  # Scoped to the inputs that can break it, so a test- or docs-only PR does not
+  # pay for a full ESP-IDF compile.
+  pull_request:
+    paths:
+      - 'components/geappliances_bridge/**'
+      - 'scripts/check_diagnostic_mqtt_wrappers.py'
+      - '.github/workflows/esphome-compile.yml'
 
 jobs:
   compile-test:

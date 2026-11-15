@@ -148,6 +148,17 @@ pytest:
 check-generated:
 	@bash scripts/check_generated_sync.sh
 
+.PHONY: check-diagnostic-mqtt
+# Regenerate the CI config's sources and assert every component-created diagnostic
+# entity got an MQTT wrapper. --only-generate is what makes this cheap: the check
+# reads generated main.cpp, it does not need the ESP-IDF build. docs/secrets.yaml
+# is gitignored and only ever holds the throwaway values from docs/test-secrets.yaml.
+check-diagnostic-mqtt:
+	@cp docs/test-secrets.yaml docs/secrets.yaml
+	@trap 'rm -f docs/secrets.yaml' EXIT; \
+	esphome compile --only-generate docs/test-compile.yaml && \
+	python3 scripts/check_diagnostic_mqtt_wrappers.py
+
 .PHONY: integration-test
 integration-test:
 	@echo Building integration tests...
