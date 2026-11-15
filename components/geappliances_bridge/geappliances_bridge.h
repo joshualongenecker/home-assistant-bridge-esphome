@@ -258,7 +258,16 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   erd_cache_t erd_cache_;
 
   // HA discovery manager: publishes one-shot HA MQTT discovery payloads after steady state is reached.
-  ha_discovery_manager_t ha_discovery_manager_;
+  //
+  // Value-initialized on purpose. ha_discovery_manager_init() and
+  // ha_discovery_manager_cleanup() both free() the four run buffers before
+  // memset()ing the struct, which is only safe when those pointers start out
+  // NULL. A bridge that is heap-allocated -- every test does `new
+  // GeappliancesBridge()`, and any future dynamic instantiation would --
+  // otherwise frees whatever the allocator left in that memory. Deployed
+  // firmware hides the bug because ESPHome makes the component a static global
+  // (zeroed by the loader), so only the test heap ever saw garbage there.
+  ha_discovery_manager_t ha_discovery_manager_{};
   bool erd_cache_publisher_paused_{false};
   bool discovery_just_resumed_{false};
 
