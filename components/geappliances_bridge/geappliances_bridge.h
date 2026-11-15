@@ -254,7 +254,10 @@ class GeappliancesBridge : public Component, public IBridgeServices {
 
   ErdRegistry erd_registry_;
 
-  erd_cache_mqtt_publisher_t erd_cache_publisher_;
+  // Value-initialized for the same reason as ha_discovery_manager_ below:
+  // teardown() dispatches on erd_cache_publisher_.cache being non-NULL, so a
+  // heap-allocated bridge must not start out with garbage there.
+  erd_cache_mqtt_publisher_t erd_cache_publisher_{};
   erd_cache_t erd_cache_;
 
   // HA discovery manager: publishes one-shot HA MQTT discovery payloads after steady state is reached.
@@ -281,7 +284,9 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   tiny_timer_group_t timer_group_;
 
   esphome_uart_adapter_t uart_adapter_;
-  esphome_mqtt_client_adapter_t mqtt_client_adapter_;
+  // The i_mqtt_client_t wrappers in i_mqtt_client.h call straight through
+  // self->api, so this must start out NULL rather than whatever the heap had.
+  esphome_mqtt_client_adapter_t mqtt_client_adapter_{};
 
   tiny_gea3_interface_t gea3_interface_;
   // GEA3 receive buffer — one complete on-wire packet.
