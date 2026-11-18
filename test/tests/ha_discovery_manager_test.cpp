@@ -8,6 +8,22 @@
 
 #include "CppUTest/TestHarness.h"
 
+/* The publish-backoff tests drive the real publish path through the ESPHome
+ * MQTT test double, which pulls in <string>/<vector>/<functional> — CppUTest's
+ * new macro must be gone before any STL header (same order as
+ * erd_cache_mqtt_publisher_test.cpp). */
+#ifdef new
+#undef new
+#endif
+
+extern "C" {
+#include "erd_cache.h"
+}
+
+#include "esphome_mqtt_client_adapter.h"
+#include "double/mqtt_test_double.hpp"
+#include "double/esphome_hal_double.hpp"
+
 TEST_GROUP(ha_discovery_manager)
 {
 };
@@ -309,4 +325,123 @@ TEST(ha_discovery_manager_run_memory, reinit_after_start_releases_the_run_memory
 
     LONGS_EQUAL(ha_discovery_state_idle, manager.state);
     CHECK_TRUE(all_run_memory_released());
+}
+
+/* Dropped-config-publish backoff. Drives the real publish path — the generated
+ * discovery data is inflated with tinfl and published through the ESPHome MQTT
+ * double — so the only variable is whether the backend accepts the publish.
+ * Only the first few common-category ERDs are registered, so the run publishes a
+ * short series of entities and every publish attempt is visible on the double. */
+TEST_GROUP(ha_discovery_manager_publish_backoff)
+{
+    ha_discovery_manager_t manager;
+    erd_cache_t cache;
+    esphome_mqtt_client_adapter_t adapter;
+    esphome::mqtt::MqttTestDouble mqtt_double;
+
+    void setup()
+    {
+        memset(&manager, 0, sizeof(manager));
+        erd_cache_init(&cache);
+        /* Register the first common-category ERDs so the run publishes a whole
+         * series of entities (0x0005 alone yields three); every other line of
+         * the run is filtered as unregistered. */
+        static const uint16_t kRegisteredErds[] = {0x0001, 0x0002, 0x0004, 0x0005,
+                                                   0x0006, 0x0007, 0x0008, 0x0009};
+        uint8_t value = 0x42;
+        for (uint16_t erd : kRegisteredErds) {
+            erd_cache_update(&cache, (tiny_erd_t)erd, 0xFF, &value, sizeof(value));
+        }
+        esphome::mqtt::global_mqtt_client = &mqtt_double;
+        mqtt_double.connected_ = true;
+        esphome_mqtt_client_adapter_init(&adapter, "backoff-test");
+
+        ha_discovery_manager_init(&manager);
+        ha_discovery_manager_set_time_fn(&manager, esphome_hal_double_get_millis);
+        ha_discovery_manager_configure(&manager, "backoff-test", NULL, NULL, 0,
+                                       false, &cache, &adapter.interface);
+        /* Frozen clock: 1000 ms at start, so an armed window lands at 1250. */
+        esphome_hal_double_set_millis(1000);
+        ha_discovery_manager_start(&manager);
+    }
+
+    void teardown()
+    {
+        ha_discovery_manager_cleanup(&manager);
+        esphome_mqtt_client_adapter_destroy(&adapter);
+        esphome::mqtt::global_mqtt_client = nullptr;
+        erd_cache_destroy(&cache);
+    }
+
+    /* run() until the manager makes one more publish attempt. Bounded so a run
+     * that stops attempting fails the test instead of hanging it. */
+    bool attempts_one_more_publish(int previous_attempts)
+    {
+        for (int i = 0; i < 10000 &&
+                      mqtt_double.publish_calls_ <= previous_attempts; i++) {
+            ha_discovery_manager_run(&manager);
+        }
+        return mqtt_double.publish_calls_ > previous_attempts;
+    }
+};
+
+TEST(ha_discovery_manager_publish_backoff, dropped_publish_arms_window_and_suppresses_retries)
+{
+    CHECK_TRUE(attempts_one_more_publish(0));
+    LONGS_EQUAL(1, mqtt_double.publish_calls_);
+    UNSIGNED_LONGS_EQUAL(0, manager.retry_backoff_until_ms);
+
+    /* Backend queue full: the drop arms the window, measured from the attempt
+     * (t=1000, zero-length publish, +250 ms). */
+    mqtt_double.publish_should_fail_ = true;
+    CHECK_TRUE(attempts_one_more_publish(1));
+    LONGS_EQUAL(2, mqtt_double.publish_calls_);
+    UNSIGNED_LONGS_EQUAL(1250, manager.retry_backoff_until_ms);
+
+    /* While the window is open run() must not attempt at all — retrying on
+     * every main-loop pass against a full queue is the storm this removes. The
+     * entity stays at its offset, so nothing is lost by waiting. */
+    mqtt_double.publish_should_fail_ = false;
+    for (int i = 0; i < 100; i++) {
+        ha_discovery_manager_run(&manager);
+    }
+    LONGS_EQUAL(2, mqtt_double.publish_calls_);
+
+    /* Past the window the same entity is retried and goes through, and the
+     * window is cleared for the next entity. */
+    esphome_hal_double_set_millis(1300);
+    CHECK_TRUE(attempts_one_more_publish(2));
+    LONGS_EQUAL(3, mqtt_double.publish_calls_);
+    UNSIGNED_LONGS_EQUAL(0, manager.retry_backoff_until_ms);
+}
+
+/* The armed window must survive the ~49-day millis() wrap. A plain unsigned
+ * now < until compare gets this wrong in one direction or the other depending
+ * on which side of the wrap it lands, and a rollover-safe diff against a
+ * cleared (0) window blocks for ~25 days, so both halves are pinned here. */
+TEST(ha_discovery_manager_publish_backoff, armed_window_survives_the_millis_roll_over)
+{
+    /* Arm the window 16 ms before the counter wraps; a cleared window must not
+     * block at this clock value. */
+    esphome_hal_double_set_millis(0xFFFFFFF0u);
+    CHECK_TRUE(attempts_one_more_publish(0));
+
+    mqtt_double.publish_should_fail_ = true;
+    CHECK_TRUE(attempts_one_more_publish(1));
+    /* 0xFFFFFFF0 + 250 wraps to 234. */
+    UNSIGNED_LONGS_EQUAL(234, manager.retry_backoff_until_ms);
+
+    /* 100 ms after the wrap only 100 of the 250 ms have passed: no attempt. */
+    mqtt_double.publish_should_fail_ = false;
+    esphome_hal_double_set_millis(0xFFFFFFF0u + 100u);
+    for (int i = 0; i < 100; i++) {
+        ha_discovery_manager_run(&manager);
+    }
+    LONGS_EQUAL(2, mqtt_double.publish_calls_);
+
+    /* 300 ms after the arming attempt the window has elapsed across the wrap,
+     * and the entity goes through. */
+    esphome_hal_double_set_millis(0xFFFFFFF0u + 300u);
+    CHECK_TRUE(attempts_one_more_publish(2));
+    LONGS_EQUAL(3, mqtt_double.publish_calls_);
 }
