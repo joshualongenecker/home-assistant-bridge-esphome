@@ -391,7 +391,7 @@ Once the state transitions to FAILED, there is no automatic recovery. The caller
 (30 slots, `MQTT_QUEUE_LENGTH`) or the client is not connected. On a drop the manager:
 
 - Leaves `current_offset` unchanged, so the same entity is republished — a drop never loses an entity.
-- Arms `retry_backoff_until_ms` = attempt time + `HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS` (250 ms).
+- Arms `retry_backoff_until_ms` = the timestamp after the attempt + `HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS` (64 ms) — i.e. attempt time + measured publish elapsed + 64 ms.
 - Returns without any further work while that window is open.
 
 Retrying on every main-loop pass instead would hit a full queue at main-loop rate: each failed
@@ -403,8 +403,12 @@ comparison, because that comparison reads `now - 0` as negative once `millis()` 
 would otherwise stall every publish until the counter wraps.
 
 The wait costs convergence time only. `DiscoveryLifecycleManager` bounds the publish phase with
-`kPhaseTimeoutMs` (5 min); 250 ms per dropped entity stays under it while the broker is reachable
-and an unreachable broker fails the run either way.
+`kPhaseTimeoutMs` (5 min). The 64 ms value — rather than the cache publisher's 250 ms, which has no
+deadline — is sized so the worst case stays under that bound: in a congested-broker regime every
+entity of the run drops at least once, so the cost is (entities in the run) × 64 ms. The largest run
+is a range appliance (common + energy + range = 3605 entities); 3605 × 64 ms = 231 s stays under
+the 300 s timeout with margin for per-entity parse/publish overhead, whereas 250 ms would push the
+same run to 901 s and abort it. An unreachable broker fails the run either way.
 
 ---
 

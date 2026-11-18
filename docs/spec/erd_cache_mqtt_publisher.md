@@ -171,7 +171,7 @@ The single publish path: the background task calls it once per wake, and tests d
    - Hex buffer is 512 bytes (max 248 bytes of data = 496 hex chars + null)
 5. Publish via `mqtt_client_publish_raw(self->mqtt_client, topic, hex, data_len * 2, true)` — `retain=true`
 6. Measure per-publish elapsed time; log a warning if ≥ 1000 ms
-7. On success: call `erd_cache_mark_published(self->cache, entry)` to reload the publish cooldown and clear `retry_backoff_until_ms`. On drop: `erd_cache_mark_unpublished()` re-sets `update_required` so the entry is retried, and arms `retry_backoff_until_ms` = attempt time + `PUBLISH_RETRY_BACKOFF_MS` (250 ms).
+7. On success: call `erd_cache_mark_published(self->cache, entry)` to reload the publish cooldown and clear `retry_backoff_until_ms`. On drop: `erd_cache_mark_unpublished()` re-sets `update_required` so the entry is retried, and arms `retry_backoff_until_ms` = the timestamp after the attempt + `PUBLISH_RETRY_BACKOFF_MS` (250 ms) — i.e. attempt time + measured publish elapsed + 250 ms.
 8. Update stats: increment `total_published` and `publish_count_window`; set `first_round_done` when the scan found no entry. All under the state mutex when available.
 **One entry per call:** the background task publishes exactly one entry per wake. Wake cadence comes from the main loop's `signal_work()` calls, which `signal_work()` paces while the publish backlog exceeds `PUBLISH_PACE_BACKLOG_THRESHOLD` (see §2.5).
 

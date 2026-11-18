@@ -39,8 +39,16 @@ GEA_TAG(TAG) = "ha_discovery";
  * main-loop rate against a full queue churns the backend's drop counter and
  * flaps the MQTT component's publish warning; the run's offset is not advanced
  * on a drop, so the retry republishes the same entity once the queue has
- * drained. Mirrors PUBLISH_RETRY_BACKOFF_MS in erd_cache_mqtt_publisher. */
-static const uint32_t HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS = 250;
+ * drained.
+ *
+ * Sized for the publish phase's kPhaseTimeoutMs (5 min), not for the cache
+ * publisher's PUBLISH_RETRY_BACKOFF_MS (250 ms, which has no deadline): in a
+ * congested-broker regime every entity of the run drops at least once, so the
+ * worst case is (entities in the run) x this value. The largest run is a range
+ * appliance (common + energy + range = 3605 entities); 3605 x 64 ms = 231 s
+ * stays under the 300 s timeout with margin for per-entity parse/publish
+ * overhead, whereas 250 ms would push the same run to 901 s and abort it. */
+static const uint32_t HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS = 64;
 
 /* Extract a JSON string value for the given key.
  * Returns a pointer to the first character of the value (after opening quote)

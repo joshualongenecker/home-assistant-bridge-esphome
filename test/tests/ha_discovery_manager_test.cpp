@@ -360,7 +360,7 @@ TEST_GROUP(ha_discovery_manager_publish_backoff)
         ha_discovery_manager_set_time_fn(&manager, esphome_hal_double_get_millis);
         ha_discovery_manager_configure(&manager, "backoff-test", NULL, NULL, 0,
                                        false, &cache, &adapter.interface);
-        /* Frozen clock: 1000 ms at start, so an armed window lands at 1250. */
+        /* Frozen clock: 1000 ms at start, so an armed window lands at 1064. */
         esphome_hal_double_set_millis(1000);
         ha_discovery_manager_start(&manager);
     }
@@ -371,6 +371,10 @@ TEST_GROUP(ha_discovery_manager_publish_backoff)
         esphome_mqtt_client_adapter_destroy(&adapter);
         esphome::mqtt::global_mqtt_client = nullptr;
         erd_cache_destroy(&cache);
+        /* The HAL double's clock is a process-wide global; the roll-over test
+         * leaves it near 2^32, so return it to 0 for any test that never
+         * installs a fake. */
+        esphome_hal_double_set_millis(0);
     }
 
     /* run() until the manager makes one more publish attempt. Bounded so a run
@@ -392,11 +396,11 @@ TEST(ha_discovery_manager_publish_backoff, dropped_publish_arms_window_and_suppr
     UNSIGNED_LONGS_EQUAL(0, manager.retry_backoff_until_ms);
 
     /* Backend queue full: the drop arms the window, measured from the attempt
-     * (t=1000, zero-length publish, +250 ms). */
+     * (t=1000, zero-length publish, +64 ms). */
     mqtt_double.publish_should_fail_ = true;
     CHECK_TRUE(attempts_one_more_publish(1));
     LONGS_EQUAL(2, mqtt_double.publish_calls_);
-    UNSIGNED_LONGS_EQUAL(1250, manager.retry_backoff_until_ms);
+    UNSIGNED_LONGS_EQUAL(1064, manager.retry_backoff_until_ms);
 
     /* While the window is open run() must not attempt at all — retrying on
      * every main-loop pass against a full queue is the storm this removes. The
@@ -428,20 +432,20 @@ TEST(ha_discovery_manager_publish_backoff, armed_window_survives_the_millis_roll
 
     mqtt_double.publish_should_fail_ = true;
     CHECK_TRUE(attempts_one_more_publish(1));
-    /* 0xFFFFFFF0 + 250 wraps to 234. */
-    UNSIGNED_LONGS_EQUAL(234, manager.retry_backoff_until_ms);
+    /* 0xFFFFFFF0 + 64 wraps to 48. */
+    UNSIGNED_LONGS_EQUAL(48, manager.retry_backoff_until_ms);
 
-    /* 100 ms after the wrap only 100 of the 250 ms have passed: no attempt. */
+    /* 32 ms after the wrap only 32 of the 64 ms have passed: no attempt. */
     mqtt_double.publish_should_fail_ = false;
-    esphome_hal_double_set_millis(0xFFFFFFF0u + 100u);
+    esphome_hal_double_set_millis(0xFFFFFFF0u + 32u);
     for (int i = 0; i < 100; i++) {
         ha_discovery_manager_run(&manager);
     }
     LONGS_EQUAL(2, mqtt_double.publish_calls_);
 
-    /* 300 ms after the arming attempt the window has elapsed across the wrap,
+    /* 100 ms after the arming attempt the window has elapsed across the wrap,
      * and the entity goes through. */
-    esphome_hal_double_set_millis(0xFFFFFFF0u + 300u);
+    esphome_hal_double_set_millis(0xFFFFFFF0u + 100u);
     CHECK_TRUE(attempts_one_more_publish(2));
     LONGS_EQUAL(3, mqtt_double.publish_calls_);
 }
