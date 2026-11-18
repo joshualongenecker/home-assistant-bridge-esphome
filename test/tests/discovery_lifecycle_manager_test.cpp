@@ -831,6 +831,44 @@ TEST(discovery_lifecycle_manager, publishing_phase_times_out_and_retries_next_bo
   CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedInitial, lifecycle_.phase());
 }
 
+TEST(discovery_lifecycle_manager, publishing_progress_resets_the_idle_timeout)
+{
+  /* The publish timeout is an idle timeout on successful publishes, not a
+   * wall-clock bound on the run: a congested broker makes every entity drop
+   * and retry through the manager's publish backoff, and the largest runs
+   * legitimately outlive kPhaseTimeoutMs while still publishing. Steering
+   * total_published is the same convention this file uses for manager_.state:
+   * the manager's own publish path is covered in ha_discovery_manager_test. */
+  enter_publishing();
+
+  /* One more publish just under the budget restarts the clock, so the phase
+   * survives the wall-clock bound a congested 3605-entity run exceeds. */
+  esphome_hal_double_set_millis(DiscoveryLifecycleManager::kPhaseTimeoutMs - 1);
+  manager_.total_published = 1;
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhasePublishing, lifecycle_.phase());
+
+  esphome_hal_double_set_millis(DiscoveryLifecycleManager::kPhaseTimeoutMs);
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhasePublishing, lifecycle_.phase());
+  CHECK_EQUAL(0, (int) hooks_.abort_count);
+
+  /* Progress resets repeatedly, not a one-shot grace period. */
+  esphome_hal_double_set_millis(2 * DiscoveryLifecycleManager::kPhaseTimeoutMs - 1);
+  manager_.total_published = 2;
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhasePublishing, lifecycle_.phase());
+
+  /* A full budget of silence after the last publish is still wedged, and
+   * aborts with the same contract as the zero-progress case. */
+  esphome_hal_double_set_millis(3 * DiscoveryLifecycleManager::kPhaseTimeoutMs);
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
+  CHECK_EQUAL(1, (int) hooks_.abort_count);
+  CHECK_EQUAL(0, hooks_.save_calls);
+  CHECK_EQUAL(ha_discovery_state_idle, manager_.state);
+}
+
 /* ------------------------------------------------------------------ */
 /* full paths                                                          */
 /* ------------------------------------------------------------------ */

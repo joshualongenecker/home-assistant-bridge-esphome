@@ -403,12 +403,20 @@ comparison, because that comparison reads `now - 0` as negative once `millis()` 
 would otherwise stall every publish until the counter wraps.
 
 The wait costs convergence time only. `DiscoveryLifecycleManager` bounds the publish phase with
-`kPhaseTimeoutMs` (5 min). The 64 ms value — rather than the cache publisher's 250 ms, which has no
-deadline — is sized so the worst case stays under that bound: in a congested-broker regime every
-entity of the run drops at least once, so the cost is (entities in the run) × 64 ms. The largest run
-is a range appliance (common + energy + range = 3605 entities); 3605 × 64 ms = 231 s stays under
-the 300 s timeout with margin for per-entity parse/publish overhead, whereas 250 ms would push the
-same run to 901 s and abort it. An unreachable broker fails the run either way.
+`kPhaseTimeoutMs` (5 min), but that bound is an **idle timeout on successful publishes**, not a
+wall-clock limit on the run's duration: the phase machine snapshots
+`ha_discovery_manager_total_published()` each loop and only aborts after `kPhaseTimeoutMs` with no
+increase. A congested-but-progressing run is therefore never aborted, however long the backlog
+takes; a run that publishes nothing (broker down, or a stalled run) aborts on the same schedule as
+before.
+
+The 64 ms value — rather than the cache publisher's 250 ms — is then a plain storm-reduction /
+convergence trade. In a congested-broker regime every entity of the run drops at least once, and one
+entity costs `ceil(B/L)·L + L`, where `B` is this backoff and `L` the main-loop period (the run
+publishes one entity per iteration). At the fleet-typical `L ≈ 29 ms` the largest run — a range
+appliance, common + energy + range = 3605 entities — converges in about 3605 × 116 ms ≈ 7 min,
+against ≈ 17 min at 250 ms. A value below `L` buys nothing: the retry would fire on the next
+iteration anyway. An unreachable broker fails the run either way.
 
 ---
 

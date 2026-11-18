@@ -272,8 +272,8 @@ QueuedInitial --ready--> Publishing
 QueuedCleanup --ready--> Cleaning
 Cleaning --cleanup done--> Publishing
 Cleaning --kPhaseTimeoutMs elapsed--> Idle   (aborted, no record)
-Publishing --run failed--> Idle               (no record saved, no reboot)
-Publishing --kPhaseTimeoutMs elapsed--> Idle  (aborted, firmware confirmed, no record)
+Publishing --run failed--> RebootPending       (budget left) / Idle (spent)
+Publishing --kPhaseTimeoutMs with no successful publish--> same as a failed run
 Publishing --run complete--> RebootPending
 RebootPending --5 s elapsed--> Idle
 ```

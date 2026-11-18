@@ -188,6 +188,8 @@ void DiscoveryLifecycleManager::init(
   this->initial_publish_done_ = false;
   this->reboot_start_ms_ = 0;
   this->phase_start_ms_ = 0;
+  this->publish_progress_ms_ = 0;
+  this->published_snapshot_ = 0;
 }
 
 const char* DiscoveryLifecycleManager::phase_name(Phase phase) {
@@ -344,6 +346,10 @@ void DiscoveryLifecycleManager::begin_publish_() {
   this->hooks_.apply_mqtt_availability(this->hooks_.context, this->ha_discovery_manager_);
   ha_discovery_manager_start(this->ha_discovery_manager_);
   this->phase_start_ms_ = this->get_time_ms_();
+  // The run was just init()ed above, so its publish count is zero; the idle
+  // timeout measures silence from phase entry until the first publish lands.
+  this->publish_progress_ms_ = this->phase_start_ms_;
+  this->published_snapshot_ = 0;
   this->set_phase_(kPhasePublishing);
 }
 
@@ -487,8 +493,18 @@ void DiscoveryLifecycleManager::loop() {
 
     case kPhasePublishing:
       if (ha_discovery_manager_is_processing(this->ha_discovery_manager_)) {
-        if (this->get_time_ms_() - this->phase_start_ms_ >= kPhaseTimeoutMs) {
-          ESP_LOGE(TAG, "HA discovery publish did not finish within %" PRIu32
+        // Idle timeout, not a wall-clock bound on the run: a congested broker
+        // makes entities drop and retry through the manager's publish backoff,
+        // and the largest runs can exceed any fixed entry-based bound while
+        // still publishing. Only a run that stops publishing is wedged.
+        const uint32_t published =
+          ha_discovery_manager_total_published(this->ha_discovery_manager_);
+        if (published != this->published_snapshot_) {
+          this->published_snapshot_ = published;
+          this->publish_progress_ms_ = this->get_time_ms_();
+        }
+        if (this->get_time_ms_() - this->publish_progress_ms_ >= kPhaseTimeoutMs) {
+          ESP_LOGE(TAG, "HA discovery publish made no progress for %" PRIu32
                    " ms; aborting. Discovery Refresh or a reboot will retry.",
                    kPhaseTimeoutMs);
           // Same contract as the failed-run path: the firmware is confirmed

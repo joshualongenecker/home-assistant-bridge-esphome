@@ -41,13 +41,16 @@ GEA_TAG(TAG) = "ha_discovery";
  * on a drop, so the retry republishes the same entity once the queue has
  * drained.
  *
- * Sized for the publish phase's kPhaseTimeoutMs (5 min), not for the cache
- * publisher's PUBLISH_RETRY_BACKOFF_MS (250 ms, which has no deadline): in a
- * congested-broker regime every entity of the run drops at least once, so the
- * worst case is (entities in the run) x this value. The largest run is a range
- * appliance (common + energy + range = 3605 entities); 3605 x 64 ms = 231 s
- * stays under the 300 s timeout with margin for per-entity parse/publish
- * overhead, whereas 250 ms would push the same run to 901 s and abort it. */
+ * This does NOT threaten the publish phase's abort path: that timeout is an
+ * idle timeout on successful publishes (DiscoveryLifecycleManager), so a
+ * congested-but-progressing run is never aborted however long it takes. The
+ * value is a plain storm-reduction / convergence trade. In the regime where
+ * every entity drops once, an entity costs ceil(B/L)*L + L with L the
+ * main-loop period (one publish per iteration), so the largest run (a range
+ * appliance: common + energy + range = 3605 entities) converges in about
+ * 3605 * 116 ms ~= 7 min at the fleet-typical L ~= 29 ms, versus ~17 min at
+ * the cache publisher's 250 ms -- which has no deadline and can afford it.
+ * B below L buys nothing: the retry would fire on the next iteration anyway. */
 static const uint32_t HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS = 64;
 
 /* Extract a JSON string value for the given key.
@@ -1168,4 +1171,9 @@ bool ha_discovery_manager_is_processing(ha_discovery_manager_t* self)
 ha_discovery_state_t ha_discovery_manager_get_state(ha_discovery_manager_t* self)
 {
     return self->state;
+}
+
+uint32_t ha_discovery_manager_total_published(const ha_discovery_manager_t* self)
+{
+    return self->total_published;
 }

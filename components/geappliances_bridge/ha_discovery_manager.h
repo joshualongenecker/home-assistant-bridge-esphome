@@ -236,6 +236,12 @@ bool ha_discovery_manager_is_processing(ha_discovery_manager_t* self);
 
 ha_discovery_state_t ha_discovery_manager_get_state(ha_discovery_manager_t* self);
 
+/* Entities published successfully so far in the current run. Survives
+ * cleanup_resources(), so a caller can tell a slow-but-progressing run from a
+ * stalled one -- the lifecycle phase machine uses it as its publish-progress
+ * signal. Only ha_discovery_manager_init()/cleanup() reset it. */
+uint32_t ha_discovery_manager_total_published(const ha_discovery_manager_t* self);
+
 /* Test-only exports. */
 #ifdef HA_DISCOVERY_TEST_EXPORT
 void cleanup_topic_callback(const char* topic, const char* payload, size_t payload_len, void* arg);

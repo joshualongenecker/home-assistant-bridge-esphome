@@ -396,11 +396,14 @@ TEST(ha_discovery_manager_publish_backoff, dropped_publish_arms_window_and_suppr
     UNSIGNED_LONGS_EQUAL(0, manager.retry_backoff_until_ms);
 
     /* Backend queue full: the drop arms the window, measured from the attempt
-     * (t=1000, zero-length publish, +64 ms). */
+     * (t=1000, zero-length publish, +64 ms). The double records the topic even
+     * for a dropped publish, so this is the entity the window was armed for. */
     mqtt_double.publish_should_fail_ = true;
     CHECK_TRUE(attempts_one_more_publish(1));
     LONGS_EQUAL(2, mqtt_double.publish_calls_);
     UNSIGNED_LONGS_EQUAL(1064, manager.retry_backoff_until_ms);
+    const std::string dropped_topic = mqtt_double.last_published_topic_;
+    CHECK_TRUE(!dropped_topic.empty());
 
     /* While the window is open run() must not attempt at all — retrying on
      * every main-loop pass against a full queue is the storm this removes. The
@@ -411,11 +414,14 @@ TEST(ha_discovery_manager_publish_backoff, dropped_publish_arms_window_and_suppr
     }
     LONGS_EQUAL(2, mqtt_double.publish_calls_);
 
-    /* Past the window the same entity is retried and goes through, and the
-     * window is cleared for the next entity. */
+    /* Past the window the SAME entity is retried and goes through — the topic
+     * pins it: a regression that advanced the offset on the drop would retry
+     * the next entity here and silently lose this one. The window is cleared
+     * for the next entity. */
     esphome_hal_double_set_millis(1300);
     CHECK_TRUE(attempts_one_more_publish(2));
     LONGS_EQUAL(3, mqtt_double.publish_calls_);
+    STRCMP_EQUAL(dropped_topic.c_str(), mqtt_double.last_published_topic_.c_str());
     UNSIGNED_LONGS_EQUAL(0, manager.retry_backoff_until_ms);
 }
 
