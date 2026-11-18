@@ -119,18 +119,17 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
      * here -- the MQTT callback only appends -- so the topic copied above is
      * still at the front when the publish lands, even if callbacks appended
      * while it was in flight. */
-    const uint32_t t_publish = self->get_time_ms();
-
     if (!mqtt_client_publish_raw(self->mqtt_client, topic, "", 0, true)) {
-        self->retry_backoff_until_ms = t_publish
-            + (self->get_time_ms() - t_publish)
+        /* Post-attempt timestamp + backoff. queue_count is read unlocked on
+         * purpose: a single aligned uint16_t load, and the return value is an
+         * estimate for the caller's logging, not a decision. */
+        self->retry_backoff_until_ms = self->get_time_ms()
             + HA_CLEANUP_PUBLISH_RETRY_BACKOFF_MS;
         ESP_LOGW(TAG, "Cleanup publish dropped, will retry: %s", topic);
         return self->queue_count;
     }
 
     self->retry_backoff_until_ms = 0;
-    self->total_removed_count++;
 
     taskENTER_CRITICAL(&self->mux);
     /* Belt-and-braces against a future caller violating the single-threaded
@@ -152,6 +151,10 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
     self->pass_removed_count++;
     remaining = self->queue_count;
     taskEXIT_CRITICAL(&self->mux);
+
+    /* Counted only after the compaction succeeded: the bail path above leaves
+     * the topic queued, and the retry that eventually removes it counts then. */
+    self->total_removed_count++;
 
     ESP_LOGD(TAG, "Removed old topic: %s", topic);
 

@@ -490,7 +490,7 @@ void DiscoveryLifecycleManager::loop() {
         // Aborting is the only way the machine can accept another request in
         // this boot; the record was never saved, so the next boot's change
         // check retries too.
-        ESP_LOGE(TAG, "HA discovery cleanup removed no topics for %" PRIu32
+        ESP_LOGE(TAG, "HA discovery cleanup made no removal progress for %" PRIu32
                  " ms; aborting. Discovery Refresh or a reboot will retry.",
                  kPhaseTimeoutMs);
         ha_discovery_cleanup_destroy(&this->ha_discovery_manager_->cleanup);

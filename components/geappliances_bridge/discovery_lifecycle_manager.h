@@ -93,11 +93,15 @@ class DiscoveryLifecycleManager {
   // and remove one topic / publish one entity per main-loop iteration, so a
   // congested broker stretches a run to (work items) x (window + loop period).
   // The largest discovery run (3605 entities) needs ~418 s at the fleet-typical
-  // 29 ms loop period, and a loop spike to 150 ms pushes any of these runs past
-  // a fixed entry-based bound while they are still working. A phase that
-  // publishes nothing is wedged; one that is slow is not.
-  // On timeout the phase is aborted with no record saved, so the next request
-  // (or the next boot's change check) retries.
+  // 29 ms loop period; cleaning needs the same headroom because its per-pass
+  // queue (~150 topics) refills across passes until the device's ~3605 stale
+  // configs are gone, and a loop spike to 150 ms pushes runs of those sizes
+  // past any fixed entry-based bound while they are still working. A phase
+  // that publishes nothing is wedged; one that is slow is not. The one wedge
+  // this contract accepts: a publisher that re-announces stale topics faster
+  // than removals can defer done indefinitely (ha_discovery_cleanup.md
+  // limitation 8). On timeout the phase is aborted with no record saved, so
+  // the next request (or the next boot's change check) retries.
   static constexpr uint32_t kPhaseTimeoutMs = 5u * 60u * 1000u;
 
   // How many reboots an aborted discovery run may arm before the machine gives
@@ -127,7 +131,7 @@ class DiscoveryLifecycleManager {
   //   Cleaning --cleanup done--> Publishing
   //   Cleaning --kPhaseTimeoutMs with no topic removed--> Idle   (aborted, no record)
   //   Publishing --run failed--> RebootPending (budget left) / Idle (spent)
-  //   Publishing --kPhaseTimeoutMs with no topic published--> same as a failed run
+  //   Publishing --kPhaseTimeoutMs with no successful publish--> same as a failed run
   //   Publishing --run complete--> RebootPending
   //   RebootPending --kRebootDelayMs elapsed--> Idle
   enum Phase : uint8_t {
@@ -264,8 +268,9 @@ class DiscoveryLifecycleManager {
   // republished a second time in the same boot.
   bool initial_publish_done_{false};
   uint32_t reboot_start_ms_{0};
-  // When Cleaning/Publishing was entered. Only the reboot-grace and the log
-  // messages use it now: both in-flight phases time out from progress_ms_.
+  // When Cleaning/Publishing was entered; seeds progress_ms_ at phase entry
+  // and is not read anywhere else -- both in-flight phases time out from
+  // progress_ms_.
   uint32_t phase_start_ms_{0};
   // Last loop() that saw the active phase do work -- a topic removed while
   // Cleaning, an entity published while Publishing -- and the work counter it

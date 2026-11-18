@@ -348,11 +348,13 @@ uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self);
 8. Safety clamp: if `consumed > queue_write_pos`, clamp to `queue_write_pos`
 9. Publish empty retained payload: `mqtt_client_publish_raw(mqtt_client, topic, "", 0, true)` — **before** touching the queue
 10. If the publish was dropped: arm `retry_backoff_until_ms` (post-attempt timestamp + `HA_CLEANUP_PUBLISH_RETRY_BACKOFF_MS`), log "Cleanup publish dropped, will retry", and return `queue_count` with the queue **untouched**
-11. On success: clear `retry_backoff_until_ms` and increment `total_removed_count`
-12. Enter critical section; compact: `memmove` remaining data to front of `topic_buf`; decrement `queue_write_pos` by `consumed`, decrement `queue_count`, increment `pass_removed_count`
-13. Read `remaining = queue_count` while still in critical section; exit critical section
-14. Log debug: "Removed old topic: {topic}"
-15. Return `remaining` (number of topics still in queue)
+11. On success: clear `retry_backoff_until_ms`
+12. Enter critical section; **invariant check:** if `queue_count == 0` or `consumed > queue_write_pos`, log "Queue changed under the removal publish; skipping compaction", exit the critical section, and return `queue_count` — the topic stays queued and the next flush republishes it (an empty retained payload, harmless). Only `cleanup_flush_queue()` (main loop) shrinks the queue and `ha_discovery_cleanup_destroy()` is main-loop too, so this bail is unreachable today; it exists so a future caller that breaks the invariant cannot turn `queue_write_pos - consumed` into an underflowed `memmove` length.
+13. Compact: `memmove` remaining data to front of `topic_buf`; decrement `queue_write_pos` by `consumed`, decrement `queue_count`, increment `pass_removed_count`
+14. Read `remaining = queue_count` while still in critical section; exit critical section
+15. Increment `total_removed_count` — **after** the compaction, so the bail path above does not count a removal whose topic is still queued (the retry that eventually removes it counts then)
+16. Log debug: "Removed old topic: {topic}"
+17. Return `remaining` (number of topics still in queue)
 
 **No delay:** The function does not call `vTaskDelay()` — it flushes one topic per call to keep the main loop responsive.
 
@@ -442,7 +444,7 @@ The cleanup module is independent of the discovery manager's own state and buffe
 8. **Echo suppression:** Topics with empty payloads are skipped — they are the module's own echo from previous clear operations.
 9. **Optimistic drain detection:** The drain wait uses `last_activity_ms` to detect when the inbound queue is truly empty. If a late callback fires after drain started, the timer is reset from the new activity time.
 10. **Clean destroy:** `destroy()` unsubscribes if still subscribed, preventing dangling callbacks after the struct is zeroed.
-11. **Publish before remove:** a removal publish is attempted before the queue is compacted, so a dropped publish leaves the topic queued. The compaction overwrites the front topic's bytes and cannot be undone by restoring the counters.
+11. **Publish before remove:** a removal publish is attempted before the queue is compacted, so a dropped publish leaves the topic queued. The compaction overwrites the front topic's bytes and cannot be undone by restoring the counters. The publish's front is stable: the callback only appends (never shrinks `queue_write_pos` or moves the front) and `destroy()` runs on the main loop, the same task as the flush, so the topic copied in step 5 is still at the front when the compaction runs. The step-12 invariant check defends exactly this assumption: if a future caller breaks it, the flush bails instead of underflowing.
 
 ---
 
