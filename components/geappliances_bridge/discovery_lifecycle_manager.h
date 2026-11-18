@@ -86,7 +86,7 @@ class DiscoveryLifecycleManager {
   // would otherwise reject every later request for the rest of the boot.
   // Publishing measures from the last successful publish rather than from
   // entry: a congested broker makes entities drop and retry (see
-  // HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS in ha_discovery_manager.c), and the
+  // HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS in ha_discovery_manager.cpp), and the
   // largest runs (3605 entities, one per main-loop iteration plus a backoff
   // window per drop) can legitimately exceed any fixed entry-based bound while
   // still making progress. A run that publishes nothing is wedged.
