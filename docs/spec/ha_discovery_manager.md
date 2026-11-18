@@ -416,7 +416,9 @@ entity costs `ceil(B/L)·L + L`, where `B` is this backoff and `L` the main-loop
 publishes one entity per iteration). At the fleet-typical `L ≈ 29 ms` the largest run — a range
 appliance, common + energy + range = 3605 entities — converges in about 3605 × 116 ms ≈ 7 min,
 against ≈ 17 min at 250 ms. A value below `L` buys nothing: the retry would fire on the next
-iteration anyway. An unreachable broker fails the run either way.
+iteration anyway. An unreachable broker fails the run either way. `ha_discovery_cleanup` uses the same
+64 ms window for its removal publishes (§8.2 of `ha_discovery_cleanup.md`), so all three publish
+paths — cache values, discovery config, cleanup removals — now back off identically.
 
 ---
 

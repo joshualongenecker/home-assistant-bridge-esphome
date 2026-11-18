@@ -188,8 +188,8 @@ void DiscoveryLifecycleManager::init(
   this->initial_publish_done_ = false;
   this->reboot_start_ms_ = 0;
   this->phase_start_ms_ = 0;
-  this->publish_progress_ms_ = 0;
-  this->published_snapshot_ = 0;
+  this->progress_ms_ = 0;
+  this->progress_snapshot_ = 0;
 }
 
 const char* DiscoveryLifecycleManager::phase_name(Phase phase) {
@@ -328,6 +328,12 @@ void DiscoveryLifecycleManager::begin_cleanup_() {
     ESP_LOGI(TAG, "Starting OTA-triggered HA discovery cleanup...");
   }
   this->phase_start_ms_ = this->get_time_ms_();
+  // Idle timeout: measures silence from phase entry until the module removes
+  // its first topic. The snapshot is seeded from the module instead of assumed
+  // zero, so a re-run can never inherit a stale count.
+  this->progress_ms_ = this->phase_start_ms_;
+  this->progress_snapshot_ =
+    ha_discovery_cleanup_total_removed(&this->ha_discovery_manager_->cleanup);
   this->set_phase_(kPhaseCleaning);
 }
 
@@ -346,10 +352,11 @@ void DiscoveryLifecycleManager::begin_publish_() {
   this->hooks_.apply_mqtt_availability(this->hooks_.context, this->ha_discovery_manager_);
   ha_discovery_manager_start(this->ha_discovery_manager_);
   this->phase_start_ms_ = this->get_time_ms_();
-  // The run was just init()ed above, so its publish count is zero; the idle
-  // timeout measures silence from phase entry until the first publish lands.
-  this->publish_progress_ms_ = this->phase_start_ms_;
-  this->published_snapshot_ = 0;
+  // Idle timeout: measures silence from phase entry until the first entity is
+  // published. Seeded from the run, which init() above just zeroed.
+  this->progress_ms_ = this->phase_start_ms_;
+  this->progress_snapshot_ =
+    ha_discovery_manager_total_published(this->ha_discovery_manager_);
   this->set_phase_(kPhasePublishing);
 }
 
@@ -468,12 +475,22 @@ void DiscoveryLifecycleManager::loop() {
       return;
 
     case kPhaseCleaning: {
-      if (this->get_time_ms_() - this->phase_start_ms_ >= kPhaseTimeoutMs) {
-        // The cleanup module never settled (e.g. the broker connection
-        // dropped mid-run). Aborting is the only way the machine can accept
-        // another request in this boot; the record was never saved, so the
-        // next boot's change check retries too.
-        ESP_LOGE(TAG, "HA discovery cleanup did not finish within %" PRIu32
+      // Idle timeout on topics removed: a congested broker makes removal
+      // publishes drop and retry through the cleanup module's backoff, one
+      // topic per main-loop iteration, so a large cleanup can exceed any fixed
+      // entry-based bound while still working. Only a run that stops removing
+      // is wedged (e.g. the broker connection dropped mid-run).
+      const uint32_t removed =
+        ha_discovery_cleanup_total_removed(&this->ha_discovery_manager_->cleanup);
+      if (removed != this->progress_snapshot_) {
+        this->progress_snapshot_ = removed;
+        this->progress_ms_ = this->get_time_ms_();
+      }
+      if (this->get_time_ms_() - this->progress_ms_ >= kPhaseTimeoutMs) {
+        // Aborting is the only way the machine can accept another request in
+        // this boot; the record was never saved, so the next boot's change
+        // check retries too.
+        ESP_LOGE(TAG, "HA discovery cleanup removed no topics for %" PRIu32
                  " ms; aborting. Discovery Refresh or a reboot will retry.",
                  kPhaseTimeoutMs);
         ha_discovery_cleanup_destroy(&this->ha_discovery_manager_->cleanup);
@@ -499,11 +516,11 @@ void DiscoveryLifecycleManager::loop() {
         // still publishing. Only a run that stops publishing is wedged.
         const uint32_t published =
           ha_discovery_manager_total_published(this->ha_discovery_manager_);
-        if (published != this->published_snapshot_) {
-          this->published_snapshot_ = published;
-          this->publish_progress_ms_ = this->get_time_ms_();
+        if (published != this->progress_snapshot_) {
+          this->progress_snapshot_ = published;
+          this->progress_ms_ = this->get_time_ms_();
         }
-        if (this->get_time_ms_() - this->publish_progress_ms_ >= kPhaseTimeoutMs) {
+        if (this->get_time_ms_() - this->progress_ms_ >= kPhaseTimeoutMs) {
           ESP_LOGE(TAG, "HA discovery publish made no progress for %" PRIu32
                    " ms; aborting. Discovery Refresh or a reboot will retry.",
                    kPhaseTimeoutMs);

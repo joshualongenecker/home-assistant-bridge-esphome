@@ -80,18 +80,24 @@ class DiscoveryLifecycleManager {
   // discovery packets leave through MQTT before the reset.
   static constexpr uint32_t kRebootDelayMs = 5000;
 
-  // Upper bound on how long Cleaning may run from phase entry, and on how long
-  // Publishing may go WITHOUT a successful publish. Both phases depend on the
-  // broker settling; if the underlying module never reports done, the machine
-  // would otherwise reject every later request for the rest of the boot.
-  // Publishing measures from the last successful publish rather than from
-  // entry: a congested broker makes entities drop and retry (see
-  // HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS in ha_discovery_manager.cpp), and the
-  // largest runs (3605 entities, one per main-loop iteration plus a backoff
-  // window per drop) can legitimately exceed any fixed entry-based bound while
-  // still making progress. A run that publishes nothing is wedged.
-  // On timeout the phase is aborted back to Idle with no record saved, so the
-  // next request (or the next boot's change check) retries.
+  // Upper bound on how long Cleaning or Publishing may go WITHOUT progress:
+  // Cleaning measures from the last topic removed, Publishing from the last
+  // successful publish. Both phases depend on the broker settling; if the
+  // underlying module never reports done, the machine would otherwise reject
+  // every later request for the rest of the boot, so a phase that stops making
+  // progress has to be aborted.
+  //
+  // Measuring from progress rather than from phase entry is what makes the
+  // bound safe: both modules retry dropped publishes through a backoff window
+  // (HA_CLEANUP_PUBLISH_RETRY_BACKOFF_MS, HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS)
+  // and remove one topic / publish one entity per main-loop iteration, so a
+  // congested broker stretches a run to (work items) x (window + loop period).
+  // The largest discovery run (3605 entities) needs ~418 s at the fleet-typical
+  // 29 ms loop period, and a loop spike to 150 ms pushes any of these runs past
+  // a fixed entry-based bound while they are still working. A phase that
+  // publishes nothing is wedged; one that is slow is not.
+  // On timeout the phase is aborted with no record saved, so the next request
+  // (or the next boot's change check) retries.
   static constexpr uint32_t kPhaseTimeoutMs = 5u * 60u * 1000u;
 
   // How many reboots an aborted discovery run may arm before the machine gives
@@ -119,9 +125,9 @@ class DiscoveryLifecycleManager {
   //   QueuedInitial --ready--> Publishing
   //   QueuedCleanup --ready--> Cleaning
   //   Cleaning --cleanup done--> Publishing
-  //   Cleaning --kPhaseTimeoutMs elapsed--> Idle   (aborted, no record)
+  //   Cleaning --kPhaseTimeoutMs with no topic removed--> Idle   (aborted, no record)
   //   Publishing --run failed--> RebootPending (budget left) / Idle (spent)
-  //   Publishing --kPhaseTimeoutMs with no successful publish--> same as a failed run
+  //   Publishing --kPhaseTimeoutMs with no topic published--> same as a failed run
   //   Publishing --run complete--> RebootPending
   //   RebootPending --kRebootDelayMs elapsed--> Idle
   enum Phase : uint8_t {
@@ -258,14 +264,15 @@ class DiscoveryLifecycleManager {
   // republished a second time in the same boot.
   bool initial_publish_done_{false};
   uint32_t reboot_start_ms_{0};
-  // When Cleaning/Publishing was entered; basis for the kPhaseCleaning
-  // timeout. kPhasePublishing measures from publish_progress_ms_ instead.
+  // When Cleaning/Publishing was entered. Only the reboot-grace and the log
+  // messages use it now: both in-flight phases time out from progress_ms_.
   uint32_t phase_start_ms_{0};
-  // Last loop() that saw the run publish another entity, and the count it
-  // saw. The publishing timeout is an idle timeout on this progress: a
-  // congested-but-progressing run is never aborted, a silent one is.
-  uint32_t publish_progress_ms_{0};
-  uint32_t published_snapshot_{0};
+  // Last loop() that saw the active phase do work -- a topic removed while
+  // Cleaning, an entity published while Publishing -- and the work counter it
+  // saw. kPhaseTimeoutMs is an idle timeout on this progress, so a
+  // congested-but-progressing phase is never aborted and a silent one is.
+  uint32_t progress_ms_{0};
+  uint32_t progress_snapshot_{0};
 };
 
 }  // namespace geappliances_bridge

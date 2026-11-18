@@ -796,6 +796,48 @@ TEST(discovery_lifecycle_manager, cleaning_phase_times_out_and_can_be_retried)
   CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
 }
 
+TEST(discovery_lifecycle_manager, cleaning_progress_resets_the_idle_timeout)
+{
+  /* Same contract as publishing: the cleanup timeout is an idle timeout on
+   * topics removed. The cleanup module retries dropped removal publishes
+   * through its own backoff window and removes one topic per main-loop
+   * iteration, so a congested broker stretches a large cleanup past any fixed
+   * entry-based bound while it is still working. */
+  enter_cleaning();
+  manager_.cleanup.state = ha_cleanup_state_cleaning;
+
+  /* One more topic removed just under the budget restarts the clock. */
+  esphome_hal_double_set_millis(DiscoveryLifecycleManager::kPhaseTimeoutMs - 1);
+  manager_.cleanup.total_removed_count = 1;
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
+
+  esphome_hal_double_set_millis(DiscoveryLifecycleManager::kPhaseTimeoutMs);
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
+
+  esphome_hal_double_set_millis(2 * DiscoveryLifecycleManager::kPhaseTimeoutMs - 1);
+  manager_.cleanup.total_removed_count = 2;
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
+
+  /* A full budget with nothing removed is wedged: abort back to Idle -- no
+   * reboot, since a cleanup run holds none of the publish run's allocations --
+   * and the module is left reusable. */
+  esphome_hal_double_set_millis(3 * DiscoveryLifecycleManager::kPhaseTimeoutMs);
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
+  CHECK_EQUAL(0, hooks_.save_calls);
+  CHECK_EQUAL(0, hooks_.reboot_calls);
+
+  /* A fresh request is accepted again and reaches Cleaning: the abort left the
+   * cleanup module reusable. */
+  lifecycle_.trigger_discovery_refresh();
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
+}
+
 TEST(discovery_lifecycle_manager, publishing_phase_times_out_and_retries_next_boot)
 {
   enter_publishing();
