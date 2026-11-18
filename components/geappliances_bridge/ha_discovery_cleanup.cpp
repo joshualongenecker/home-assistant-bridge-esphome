@@ -133,6 +133,18 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
     self->total_removed_count++;
 
     taskENTER_CRITICAL(&self->mux);
+    /* Belt-and-braces against a future caller violating the single-threaded
+     * invariant: only this function (main loop) shrinks the queue, and
+     * ha_discovery_cleanup_destroy() is main-loop too, so the front this
+     * publish used cannot have moved. If that ever stops holding, bail here
+     * instead of letting queue_write_pos - consumed underflow and smear the
+     * heap; the topic stays queued and the next flush republishes it, which is
+     * harmless (an empty retained payload). */
+    if (self->queue_count == 0 || consumed > self->queue_write_pos) {
+        taskEXIT_CRITICAL(&self->mux);
+        ESP_LOGE(TAG, "Queue changed under the removal publish; skipping compaction");
+        return self->queue_count;
+    }
     memmove(self->topic_buf, self->topic_buf + consumed,
             self->queue_write_pos - consumed);
     self->queue_write_pos -= consumed;
@@ -357,13 +369,24 @@ void ha_discovery_cleanup_run(ha_discovery_cleanup_t* self)
             return;
         }
 
-        /* Two clean passes only prove no NEW topics arrived. Topics still
-         * queued from a dropped removal publish are not finished: declaring
-         * done here would leave stale discovery topics in Home Assistant while
-         * the caller records the cleanup as having run. */
-        if (self->queue_count > 0) {
+        /* Two clean passes only prove no NEW topics arrived; topics still
+         * queued from a dropped removal publish are outstanding work, and
+         * declaring done there would leave stale discovery topics in Home
+         * Assistant while the caller records the cleanup as having run. Read
+         * the queue and declare done under the same lock the callback appends
+         * under: an unlocked read could see 0 while a callback is appending on
+         * the MQTT task. A topic a callback lands after this still sits queued
+         * until the next run rediscovers it -- the same residual loss the
+         * two-pass design already accepts, now with an accurate done report. */
+        taskENTER_CRITICAL(&self->mux);
+        const uint16_t queued = self->queue_count;
+        if (queued == 0) {
+            self->state = ha_cleanup_state_done;
+        }
+        taskEXIT_CRITICAL(&self->mux);
+        if (queued > 0) {
             ESP_LOGW(TAG, "  Pass %u: %u topics still queued for removal, retrying",
-                self->pass_number, self->queue_count);
+                self->pass_number, queued);
             return;
         }
 
