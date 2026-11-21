@@ -48,6 +48,9 @@ TEST_GROUP(erd_cache_mqtt_publisher)
     esphome_mqtt_client_adapter_destroy(&adapter);
     esphome::mqtt::global_mqtt_client = nullptr;
     mqtt_double.connected_ = false;
+    /* The HAL double's clock is a process-wide global; the rollover tests leave
+     * it near 2^32, so return it to 0 for any test that never installs a fake. */
+    esphome_hal_double_set_millis(0);
   }
 };
 
@@ -338,6 +341,66 @@ TEST(erd_cache_mqtt_publisher, publish_backoff_suppresses_attempts_until_window_
   CHECK_TRUE(erd_cache_mqtt_publisher_publish_one(&publisher));
   CHECK_EQUAL(2, mqtt_double.publish_calls_);
   CHECK_EQUAL(1u, publisher.total_published);
+  CHECK_EQUAL(0u, publisher.retry_backoff_until_ms);
+}
+
+/* Past 2^31 ms of uptime (~24.9 days) the rollover-safe signed diff against a
+ * CLEARED window reads negative. Without the "0 means no window armed" test
+ * first, every publish would then be blocked until the counter wraps ~25 days
+ * later — a silent data outage on any long-running bridge. */
+TEST(erd_cache_mqtt_publisher, cleared_backoff_does_not_block_after_the_millis_roll_over)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+  erd_cache_mqtt_publisher_on_connected(&publisher);
+  esphome_hal_double_set_millis(0x90000000u);
+
+  uint8_t data = 0x42;
+  erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
+
+  CHECK_TRUE(erd_cache_mqtt_publisher_publish_one(&publisher));
+  CHECK_EQUAL(1, mqtt_double.publish_calls_);
+  CHECK_EQUAL(0u, publisher.retry_backoff_until_ms);
+}
+
+/* An ARMED window must still be honored across the wrap, then release. */
+TEST(erd_cache_mqtt_publisher, armed_backoff_survives_the_millis_roll_over)
+{
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &adapter.interface,
+    "device",
+    0xE0);
+  erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
+  erd_cache_mqtt_publisher_on_connected(&publisher);
+  esphome_hal_double_set_millis(0xFFFFFFF0u);
+
+  uint8_t data = 0x42;
+  erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
+
+  mqtt_double.publish_should_fail_ = true;
+  CHECK_FALSE(erd_cache_mqtt_publisher_publish_one(&publisher));
+  /* 0xFFFFFFF0 + 250 wraps to 234. */
+  CHECK_EQUAL(234u, publisher.retry_backoff_until_ms);
+
+  /* 100 ms after the wrap only 100 of the 250 ms have passed: no attempt. */
+  mqtt_double.publish_should_fail_ = false;
+  esphome_hal_double_set_millis(0xFFFFFFF0u + 100u);
+  CHECK_FALSE(erd_cache_mqtt_publisher_publish_one(&publisher));
+  CHECK_EQUAL(1, mqtt_double.publish_calls_);
+
+  /* Past the window the entry is retried (one scan wraps the iterator, the
+   * next finds the entry). */
+  esphome_hal_double_set_millis(0xFFFFFFF0u + 300u);
+  CHECK_FALSE(erd_cache_mqtt_publisher_publish_one(&publisher));
+  CHECK_TRUE(erd_cache_mqtt_publisher_publish_one(&publisher));
+  CHECK_EQUAL(2, mqtt_double.publish_calls_);
   CHECK_EQUAL(0u, publisher.retry_backoff_until_ms);
 }
 

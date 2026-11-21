@@ -149,6 +149,21 @@ typedef struct {
   uint32_t custom_data_hash;
   ha_discovery_cleanup_t cleanup;
 
+  /* Time injection — mirrors erd_bridge_poll_t::get_time_ms and
+   * erd_cache_mqtt_publisher_t::get_time_ms. ha_discovery_manager_init()
+   * installs esphome::millis; tests install a fake through
+   * ha_discovery_manager_set_time_fn() so the publish-backoff window is
+   * exercised against a deterministic clock instead of the HAL double's frozen
+   * counter. run() does no publish work while this is NULL, which only ever
+   * happens after ha_discovery_manager_cleanup() zeroed the struct. */
+  uint32_t (*get_time_ms)(void);
+
+  /* Config publish attempts are suppressed until this timestamp after one was
+   * dropped by the MQTT backend. 0 means no window is armed;
+   * ha_discovery_manager_init() zeroes it, so every run starts with an
+   * immediate attempt. */
+  uint32_t retry_backoff_until_ms;
+
   /* Pre-computed "homeassistant/{domain}/{device_id}/" prefix to avoid
    * repeated snprintf during discovery publish. */
   char domain_topic_prefix[128];
@@ -205,11 +220,27 @@ void ha_discovery_manager_start(ha_discovery_manager_t* self);
 
 void ha_discovery_manager_run(ha_discovery_manager_t* self);
 
+/* Override the time source after init (test seam; mirrors
+ * erd_bridge_poll_set_time_fn). MUST be called after
+ * ha_discovery_manager_init(): init installs the HAL default unconditionally
+ * (the struct is a plain member that may hold garbage, so a preserve-if-
+ * non-NULL check would read garbage and skip the default). A NULL argument
+ * restores the default. */
+void ha_discovery_manager_set_time_fn(
+  ha_discovery_manager_t* self,
+  uint32_t (*get_time_ms)(void));
+
 void ha_discovery_manager_cleanup(ha_discovery_manager_t* self);
 
 bool ha_discovery_manager_is_processing(ha_discovery_manager_t* self);
 
 ha_discovery_state_t ha_discovery_manager_get_state(ha_discovery_manager_t* self);
+
+/* Entities published successfully so far in the current run. Survives
+ * cleanup_resources(), so a caller can tell a slow-but-progressing run from a
+ * stalled one -- the lifecycle phase machine uses it as its publish-progress
+ * signal. Only ha_discovery_manager_init()/cleanup() reset it. */
+uint32_t ha_discovery_manager_total_published(const ha_discovery_manager_t* self);
 
 /* Test-only exports. */
 #ifdef HA_DISCOVERY_TEST_EXPORT

@@ -75,7 +75,9 @@ void ha_discovery_manager_init(ha_discovery_manager_t* self);
 ```
 
 `init()` MUST:
-- Zero the struct with `memset`
+- Zero the struct with `memset` (which also clears the §8.6 publish-backoff window, so every run
+  starts with an immediate attempt)
+- Install the default time source: `get_time_ms = esphome::millis` (see §3.2.2)
 - Set `state = ha_discovery_state_idle`
 - On ESP-IDF:
   - Initialize embedded `cleanup` module via `ha_discovery_cleanup_init()`
@@ -129,6 +131,17 @@ availability (`global_mqtt_client->get_availability()`, default `<topic_prefix>/
   (e.g. `mqtt: topic_prefix` or node name) or to the payloads triggers the standard cleanup/republish path.
   With availability unset the hash is unchanged, so those installs do not republish.
 
+### 3.2.2 Set Time Function
+
+```c
+void ha_discovery_manager_set_time_fn(ha_discovery_manager_t* self, uint32_t (*get_time_ms)(void));
+```
+
+Test seam (rec 6; mirrors `erd_bridge_poll_set_time_fn`). `init()` installs `esphome::millis`
+unconditionally, so this MUST be called **after** `init()`. It lets a test drive the §8.6 window
+against a deterministic clock instead of the HAL double's frozen counter. A NULL argument restores
+the default.
+
 ### 3.3 Start
 
 ```c
@@ -164,6 +177,13 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self);
 ```
 
 Called from the main loop. See §5 for the full run loop behavior.
+
+Returns immediately, doing no work, when:
+
+- `state` is neither BUILDING nor DISCOVERING
+- `get_time_ms` is NULL — only after `cleanup()` zeroed the struct, whose `state` is then IDLE and
+  rejected by the check above
+- A publish-backoff window (§8.6) is still open
 
 On non-ESP-IDF: no-op.
 
@@ -364,6 +384,41 @@ If the ERD ID (or paired ERD ID) is not found in the sorted ERD array:
 ### 8.5 No Recovery
 
 Once the state transitions to FAILED, there is no automatic recovery. The caller would need to re-initialize and re-start the manager.
+
+### 8.6 Dropped Config Publish (Backoff)
+
+`mqtt_client_publish_raw()` returns `false` when the ESPHome MQTT backend's outbound queue is full
+(30 slots, `MQTT_QUEUE_LENGTH`) or the client is not connected. On a drop the manager:
+
+- Leaves `current_offset` unchanged, so the same entity is republished — a drop never loses an entity.
+- Arms `retry_backoff_until_ms` = the timestamp after the attempt + `HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS` (64 ms) — i.e. attempt time + measured publish elapsed + 64 ms.
+- Returns without any further work while that window is open.
+
+Retrying on every main-loop pass instead would hit a full queue at main-loop rate: each failed
+`publish()` bumps the backend's drop counter (`Dropped N messages (10s)`) and fires
+`status_momentary_warning("publish")`. This is the same storm removed from the cache publisher in
+#183 (`PUBLISH_RETRY_BACKOFF_MS` in `erd_cache_mqtt_publisher.cpp`). Any successful publish clears
+the window. `0` means no window is armed and is tested **before** the rollover-safe signed
+comparison, because that comparison reads `now - 0` as negative once `millis()` passes 2^31 and
+would otherwise stall every publish until the counter wraps.
+
+The wait costs convergence time only. `DiscoveryLifecycleManager` bounds the publish phase with
+`kPhaseTimeoutMs` (5 min), but that bound is an **idle timeout on successful publishes**, not a
+wall-clock limit on the run's duration: the phase machine snapshots
+`ha_discovery_manager_total_published()` each loop and only aborts after `kPhaseTimeoutMs` with no
+increase. A congested-but-progressing run is therefore never aborted, however long the backlog
+takes; a run that publishes nothing (broker down, or a stalled run) aborts on the same schedule as
+before.
+
+The 64 ms value — rather than the cache publisher's 250 ms — is then a plain storm-reduction /
+convergence trade. In a congested-broker regime every entity of the run drops at least once, and one
+entity costs `ceil(B/L)·L + L`, where `B` is this backoff and `L` the main-loop period (the run
+publishes one entity per iteration). At the fleet-typical `L ≈ 29 ms` the largest run — a range
+appliance, common + energy + range = 3605 entities — converges in about 3605 × 116 ms ≈ 7 min,
+against ≈ 17 min at 250 ms. A value below `L` buys nothing: the retry would fire on the next
+iteration anyway. An unreachable broker fails the run either way. `ha_discovery_cleanup` uses the same
+64 ms window for its removal publishes (§8.2 of `ha_discovery_cleanup.md`), so all three publish
+paths — cache values, discovery config, cleanup removals — now back off identically.
 
 ---
 

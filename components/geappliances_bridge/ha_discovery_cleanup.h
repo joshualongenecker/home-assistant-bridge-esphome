@@ -36,6 +36,15 @@ typedef enum {
 #define HA_CLEANUP_DRAIN_WAIT_MS 1000
 #define HA_CLEANUP_FLUSH_BATCH 1
 
+/* Wait after a dropped removal publish before trying again. Same storm this
+ * removed from the cache publisher (#183) and from the discovery publish path
+ * (HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS in ha_discovery_manager.cpp): the
+ * topic stays queued, so retrying at main-loop rate against a full outbound
+ * ring only churns the backend's drop counter. Sized like the discovery
+ * window -- the phase timeout that bounds it is an idle timeout on progress,
+ * so this trades attempt rate against convergence time only. */
+#define HA_CLEANUP_PUBLISH_RETRY_BACKOFF_MS 64
+
 /* Overridable for tests. */
 
 #ifdef HA_CLEANUP_TEST_BUF_SIZE
@@ -54,6 +63,10 @@ typedef struct {
   uint16_t queue_write_pos;
   uint16_t queue_count;
   uint16_t dropped_count;
+  /* Topics removed across the whole run, never reset by a pass, so a caller
+   * can tell a slow-but-progressing cleanup from a stalled one -- the
+   * lifecycle phase machine uses it as its cleanup-progress signal. */
+  uint32_t total_removed_count;
 
   uint32_t last_activity_ms;
   uint32_t subscribe_start_ms;
@@ -66,6 +79,10 @@ typedef struct {
   uint8_t pass_number;
 
   uint32_t drain_start_ms;
+  /* Timestamp until which a dropped removal publish suppresses further
+   * attempts; 0 = no window armed. Main-loop only, never touched by the MQTT
+   * callback, so mux does not guard it. */
+  uint32_t retry_backoff_until_ms;
 
   /* Critical section mux — per-instance, protects shared state between
    * the MQTT task callback and the main loop. */
@@ -86,6 +103,10 @@ void ha_discovery_cleanup_destroy(ha_discovery_cleanup_t* self);
 ha_cleanup_state_t ha_discovery_cleanup_get_state(ha_discovery_cleanup_t* self);
 
 bool ha_discovery_cleanup_is_done(ha_discovery_cleanup_t* self);
+
+/* Topics removed successfully so far. Survives the per-pass counters; only
+ * init()/destroy() zero it. */
+uint32_t ha_discovery_cleanup_total_removed(const ha_discovery_cleanup_t* self);
 
 #ifdef HA_DISCOVERY_CLEANUP_TEST_EXPORT
 void cleanup_topic_callback(const char* topic, const char* payload, size_t payload_len, void* arg);

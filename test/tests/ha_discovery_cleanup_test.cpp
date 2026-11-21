@@ -17,6 +17,8 @@
 
 #include "ha_discovery_cleanup.h"
 #include "ha_discovery_manager.h"
+#include "esphome_mqtt_client_adapter.h"
+#include "double/mqtt_test_double.hpp"
 
 /* ------------------------------------------------------------------ */
 /* Test helpers                                                       */
@@ -290,4 +292,164 @@ TEST(ha_discovery_cleanup, drain_state_initialized_to_zero)
     cleanup_start(&cl);
 
     CHECK_EQUAL(0, cl.drain_start_ms);
+}
+
+/* ------------------------------------------------------------------ */
+/* Dropped removal publish: backoff, same-topic retry, roll-over       */
+/* ------------------------------------------------------------------ */
+
+TEST_GROUP(ha_discovery_cleanup_publish_backoff)
+{
+    ha_discovery_cleanup_t cl;
+    esphome_mqtt_client_adapter_t adapter;
+    esphome::mqtt::MqttTestDouble mqtt_double;
+
+    static constexpr const char* kDeviceId = "Dishwasher_PDT715";
+
+    void setup()
+    {
+        test_time_ms = 1000;
+        ha_discovery_cleanup_init(&cl);
+        esphome_mqtt_client_adapter_init(&adapter, kDeviceId);
+        esphome::mqtt::global_mqtt_client = &mqtt_double;
+        mqtt_double.connected_ = true;
+        ha_discovery_cleanup_configure(&cl, kDeviceId, &adapter.interface,
+                                       test_get_time_ms);
+        cl.state = ha_cleanup_state_cleaning;
+    }
+
+    void teardown()
+    {
+        esphome_mqtt_client_adapter_destroy(&adapter);
+        esphome::mqtt::global_mqtt_client = nullptr;
+        /* The fake clock is a file-scope global; the roll-over test leaves it
+         * near 2^32, so return it to 0 for any test that never sets it. */
+        test_time_ms = 0;
+    }
+
+    void queue_topics(int count)
+    {
+        for (int i = 0; i < count; i++) {
+            char topic[128];
+            snprintf(topic, sizeof(topic),
+                "homeassistant/sensor/%s/field_%d/config", kDeviceId, i);
+            cleanup_topic_callback(topic, "{\"data\":1}", 10, &cl);
+        }
+    }
+};
+
+TEST(ha_discovery_cleanup_publish_backoff, dropped_removal_arms_window_and_retries_the_same_topic)
+{
+    queue_topics(2);
+    CHECK_EQUAL(2, cl.queue_count);
+
+    /* Backend queue full: the drop restores the queue and arms the window from
+     * the attempt (t=1000, zero-length publish, +64 ms). */
+    mqtt_double.publish_should_fail_ = true;
+    cleanup_flush_queue(&cl);
+    LONGS_EQUAL(1, mqtt_double.publish_calls_);
+    CHECK_EQUAL(2, cl.queue_count);
+    CHECK_EQUAL(0, (int) cl.total_removed_count);
+    UNSIGNED_LONGS_EQUAL(1064, cl.retry_backoff_until_ms);
+    const std::string dropped_topic = mqtt_double.last_published_topic_;
+    CHECK_TRUE(!dropped_topic.empty());
+
+    /* While the window is open a flush must not attempt at all: one attempt
+     * per main-loop pass against a full queue is the storm this removes. */
+    mqtt_double.publish_should_fail_ = false;
+    for (int i = 0; i < 100; i++) {
+        cleanup_flush_queue(&cl);
+    }
+    LONGS_EQUAL(1, mqtt_double.publish_calls_);
+    CHECK_EQUAL(2, cl.queue_count);
+
+    /* Past the window the SAME topic is removed. The topic pins it: a
+     * regression that discarded the topic instead of retrying it would leave a
+     * stale discovery config in Home Assistant, and no other assertion here
+     * would notice. */
+    test_time_ms = 1300;
+    cleanup_flush_queue(&cl);
+    LONGS_EQUAL(2, mqtt_double.publish_calls_);
+    STRCMP_EQUAL(dropped_topic.c_str(), mqtt_double.last_published_topic_.c_str());
+    CHECK_EQUAL(1, cl.queue_count);
+    CHECK_EQUAL(1, (int) cl.total_removed_count);
+    UNSIGNED_LONGS_EQUAL(0, cl.retry_backoff_until_ms);
+
+    /* A success clears the window, so the next topic needs no wait. */
+    cleanup_flush_queue(&cl);
+    LONGS_EQUAL(3, mqtt_double.publish_calls_);
+    CHECK_EQUAL(0, cl.queue_count);
+    CHECK_EQUAL(2, (int) cl.total_removed_count);
+}
+
+/* Same roll-over contract as the discovery publish backoff: the armed window
+ * must survive the ~49-day millis() wrap, and a cleared (0) window must never
+ * block -- the sentinel is tested before the rollover-safe signed diff, which
+ * reads now - 0 as negative past 2^31. */
+TEST(ha_discovery_cleanup_publish_backoff, armed_window_survives_the_millis_roll_over)
+{
+    queue_topics(1);
+
+    /* Arm the window 16 ms before the wrap. */
+    test_time_ms = 0xFFFFFFF0u;
+    mqtt_double.publish_should_fail_ = true;
+    cleanup_flush_queue(&cl);
+    LONGS_EQUAL(1, mqtt_double.publish_calls_);
+    /* 0xFFFFFFF0 + 64 wraps to 48. */
+    UNSIGNED_LONGS_EQUAL(48, cl.retry_backoff_until_ms);
+
+    /* 32 ms after the wrap only 32 of the 64 ms have passed: no attempt. */
+    mqtt_double.publish_should_fail_ = false;
+    test_time_ms = 0xFFFFFFF0u + 32u;
+    for (int i = 0; i < 100; i++) {
+        cleanup_flush_queue(&cl);
+    }
+    LONGS_EQUAL(1, mqtt_double.publish_calls_);
+
+    /* Past the window across the wrap, the topic goes through. */
+    test_time_ms = 0xFFFFFFF0u + 100u;
+    cleanup_flush_queue(&cl);
+    LONGS_EQUAL(2, mqtt_double.publish_calls_);
+    CHECK_EQUAL(0, cl.queue_count);
+    CHECK_EQUAL(1, (int) cl.total_removed_count);
+
+    /* A cleared window must not block at a large clock value either. */
+    queue_topics(1);
+    test_time_ms = 0x90000000u;
+    cleanup_flush_queue(&cl);
+    LONGS_EQUAL(3, mqtt_double.publish_calls_);
+    CHECK_EQUAL(0, cl.queue_count);
+}
+
+/* Two clean passes only prove no NEW topics arrived. Removals still sitting in
+ * the queue are outstanding work: reporting done there would let the caller
+ * save the discovery record while stale topics survive in Home Assistant. */
+TEST(ha_discovery_cleanup_publish_backoff, does_not_report_done_while_removals_are_queued)
+{
+    ha_discovery_cleanup_start(&cl);
+    queue_topics(2);
+    mqtt_double.publish_should_fail_ = true;
+
+    /* 100 ms per iteration, so every backoff window has elapsed by the next
+     * one and each pass really does attempt the removal. */
+    for (int i = 0; i < 400; i++) {
+        test_time_ms += 100;
+        ha_discovery_cleanup_run(&cl);
+        if (ha_discovery_cleanup_is_done(&cl)) break;
+    }
+
+    CHECK_EQUAL(ha_cleanup_state_cleaning, (int) cl.state);
+    CHECK_EQUAL(2, cl.queue_count);
+    CHECK_TRUE(cl.clean_passes >= 2);
+    CHECK_EQUAL(0, (int) cl.total_removed_count);
+
+    /* Broker recovers: the queued topics drain, then the run finishes. */
+    mqtt_double.publish_should_fail_ = false;
+    for (int i = 0; i < 400 && !ha_discovery_cleanup_is_done(&cl); i++) {
+        test_time_ms += 100;
+        ha_discovery_cleanup_run(&cl);
+    }
+    CHECK_TRUE(ha_discovery_cleanup_is_done(&cl));
+    CHECK_EQUAL(0, cl.queue_count);
+    CHECK_EQUAL(2, (int) cl.total_removed_count);
 }

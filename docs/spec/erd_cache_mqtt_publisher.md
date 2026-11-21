@@ -171,9 +171,11 @@ The single publish path: the background task calls it once per wake, and tests d
    - Hex buffer is 512 bytes (max 248 bytes of data = 496 hex chars + null)
 5. Publish via `mqtt_client_publish_raw(self->mqtt_client, topic, hex, data_len * 2, true)` — `retain=true`
 6. Measure per-publish elapsed time; log a warning if ≥ 1000 ms
-7. On success: call `erd_cache_mark_published(self->cache, entry)` to reload the publish cooldown. On drop: `erd_cache_mark_unpublished()` re-sets `update_required` so the entry is retried on the next wake.
+7. On success: call `erd_cache_mark_published(self->cache, entry)` to reload the publish cooldown and clear `retry_backoff_until_ms`. On drop: `erd_cache_mark_unpublished()` re-sets `update_required` so the entry is retried, and arms `retry_backoff_until_ms` = the timestamp after the attempt + `PUBLISH_RETRY_BACKOFF_MS` (250 ms) — i.e. attempt time + measured publish elapsed + 250 ms.
 8. Update stats: increment `total_published` and `publish_count_window`; set `first_round_done` when the scan found no entry. All under the state mutex when available.
 **One entry per call:** the background task publishes exactly one entry per wake. Wake cadence comes from the main loop's `signal_work()` calls, which `signal_work()` paces while the publish backlog exceeds `PUBLISH_PACE_BACKLOG_THRESHOLD` (see §2.5).
+
+**Retry backoff.** While `retry_backoff_until_ms` is in the future, `publish_one()` returns before it touches the cache. Retrying at main-loop rate against a full outbound queue only churns the backend's drop counter (`Dropped N messages (10s)`) and fires `status_momentary_warning("publish")`; because the cache coalesces, the delayed retry delivers the newest value once the queue drains. `0` means no window is armed and is tested **before** the rollover-safe signed comparison: that comparison reads `now - 0` as negative once `millis()` passes 2^31 (~24.9 days of uptime), which would otherwise block every publish until the counter wraps.
 
 ---
 
@@ -276,7 +278,7 @@ Override the time source (defaults to `esphome::millis`). Used for testing to co
 ## 10. Known Limitations
 
 1. **Broker restart with short disconnect:** If the MQTT broker restarts and the disconnect duration is <60 s, the publisher will not re-publish all cached ERDs. The 60 s threshold is a heuristic — broker restarts that complete within this window are treated as transient network blips.
-2. **Retry via re-marking:** If `mqtt_client_publish_raw()` fails (e.g., internal queue full), `erd_cache_mark_unpublished()` re-sets `update_required` so the entry is retried on the next wake — but the scan iterator has already advanced, so the retry happens on the next full cache pass.
+2. **Retry via re-marking:** If `mqtt_client_publish_raw()` fails (e.g., internal queue full), `erd_cache_mark_unpublished()` re-sets `update_required` so the entry is retried — but the scan iterator has already advanced, so the retry happens on the next full cache pass, and never before the §4 retry-backoff window (250 ms) has elapsed.
 3. **Single device ID:** The publisher is configured with one device ID at init time. Supporting multiple devices would require multiple publisher instances.
 4. **Hex encoding is CPU-intensive:** Converting binary data to hex via `snprintf` per byte is simple but not optimal for large payloads. A lookup table or bit-manipulation approach would be faster.
 5. **One publish per wake:** The ESP-IDF background task publishes exactly one entry per wake, then blocks on `work_semaphore` until it is signalled again. Cadence is set by `signal_work()`, which paces while a large backlog is queued (§2.5) — so a full-cache republish drains in roughly `count / 10` seconds rather than at main-loop rate.

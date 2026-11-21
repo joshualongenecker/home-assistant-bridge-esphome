@@ -319,9 +319,13 @@ bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self)
     return false;
   }
 
-  /* Backoff after a dropped publish (see PUBLISH_RETRY_BACKOFF_MS).  The
-   * signed diff is rollover-safe, and 0 (init or cleared) never blocks. */
-  if ((int32_t)(self->get_time_ms() - self->retry_backoff_until_ms) < 0) {
+  /* Backoff after a dropped publish (see PUBLISH_RETRY_BACKOFF_MS).  0 means no
+   * window is armed, and that is tested first: the rollover-safe signed diff
+   * reads now - 0 as negative once millis() passes 2^31, which would otherwise
+   * block every publish for the ~25 days until the counter wraps.  Within an
+   * armed window the signed diff handles the wrap correctly. */
+  if (self->retry_backoff_until_ms != 0 &&
+      (int32_t)(self->get_time_ms() - self->retry_backoff_until_ms) < 0) {
     return false;
   }
 

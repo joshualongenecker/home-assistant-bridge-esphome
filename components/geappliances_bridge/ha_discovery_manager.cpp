@@ -13,6 +13,7 @@
 #include <cstring>
 
 #include "esphome/core/log.h"
+#include "esphome/core/hal.h"
 
 #ifndef USE_ESP_IDF
 #error "This component requires ESPHome with framework: type: esp-idf"
@@ -32,6 +33,25 @@
 #endif
 
 GEA_TAG(TAG) = "ha_discovery";
+
+/* After a config publish is dropped (the ESPHome MQTT backend's 30-slot
+ * outbound queue is full), wait this long before the next attempt. Retrying at
+ * main-loop rate against a full queue churns the backend's drop counter and
+ * flaps the MQTT component's publish warning; the run's offset is not advanced
+ * on a drop, so the retry republishes the same entity once the queue has
+ * drained.
+ *
+ * This does NOT threaten the publish phase's abort path: that timeout is an
+ * idle timeout on successful publishes (DiscoveryLifecycleManager), so a
+ * congested-but-progressing run is never aborted however long it takes. The
+ * value is a plain storm-reduction / convergence trade. In the regime where
+ * every entity drops once, an entity costs ceil(B/L)*L + L with L the
+ * main-loop period (one publish per iteration), so the largest run (a range
+ * appliance: common + energy + range = 3605 entities) converges in about
+ * 3605 * 116 ms ~= 7 min at the fleet-typical L ~= 29 ms, versus ~17 min at
+ * the cache publisher's 250 ms -- which has no deadline and can afford it.
+ * B below L buys nothing: the retry would fire on the next iteration anyway. */
+static const uint32_t HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS = 64;
 
 /* Extract a JSON string value for the given key.
  * Returns a pointer to the first character of the value (after opening quote)
@@ -796,6 +816,25 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
         return;
     }
 
+    /* The backoff window below needs the time source installed by
+     * ha_discovery_manager_init(). It is NULL only after
+     * ha_discovery_manager_cleanup() zeroed the struct, whose state is then
+     * IDLE and rejected above, so this is a guard, not a behavior change. */
+    if (!self->get_time_ms) {
+        return;
+    }
+
+    /* Backoff after a dropped config publish (see
+     * HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS). 0 means no window is armed, and
+     * that is tested first: the rollover-safe signed diff reads now - 0 as
+     * negative once millis() passes 2^31, which would otherwise stall every
+     * publish for the remaining ~25 days before the wrap. Within an armed
+     * window the signed diff handles the wrap correctly. */
+    if (self->retry_backoff_until_ms != 0 &&
+        (int32_t)(self->get_time_ms() - self->retry_backoff_until_ms) < 0) {
+        return;
+    }
+
     while (self->state == ha_discovery_state_discovering) {
         while (self->current_category < discovery_category_count(self)) {
             ha_discovery_category_t cat = discovery_category_at(self, self->current_category);
@@ -865,12 +904,23 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
                         self->current_offset = (uint32_t)(line_end - decomp) + 1;
                         return;
                     }
-                    if (!mqtt_client_publish_raw(self->mqtt_client, self->topic_buf,
-                        self->payload_buf, strlen(self->payload_buf), true)) {
-                        /* Publish dropped (queue full) — don't advance offset
-                         * so the entity is retried on the next run() call. */
+                    const uint32_t t_publish = self->get_time_ms();
+                    const bool sent = mqtt_client_publish_raw(self->mqtt_client, self->topic_buf,
+                        self->payload_buf, strlen(self->payload_buf), true);
+                    if (!sent) {
+                        /* Publish dropped (the ESPHome MQTT backend's 30-slot
+                         * outbound queue is full) — don't advance the offset so
+                         * the entity is retried, and hold off further attempts.
+                         * Retrying at main-loop rate against a full queue only
+                         * churns the backend's drop counter and flaps the MQTT
+                         * component's publish warning; the entity is republished
+                         * from the same offset once the queue has drained. */
+                        self->retry_backoff_until_ms = t_publish
+                            + (self->get_time_ms() - t_publish)
+                            + HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS;
                         return;
                     }
+                    self->retry_backoff_until_ms = 0;
                     self->total_published++;
                     self->total_discovered++;
 
@@ -920,6 +970,14 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
     }
 }
 
+void ha_discovery_manager_set_time_fn(
+    ha_discovery_manager_t* self,
+    uint32_t (*get_time_ms)(void))
+{
+    /* NULL restores the init default (esphome::millis). */
+    self->get_time_ms = get_time_ms ? get_time_ms : esphome::millis;
+}
+
 void ha_discovery_manager_init(ha_discovery_manager_t* self)
 {
     /* Preserve custom data pointers; they are set by codegen and survive reinit. */
@@ -945,6 +1003,12 @@ void ha_discovery_manager_init(ha_discovery_manager_t* self)
     self->custom_num_chunks = custom_num_chunks;
     self->custom_max_decompressed_chunk = custom_max_chunk;
     self->custom_data_hash = custom_data_hash;
+
+    /* The publish backoff needs a time source, so install the HAL default
+     * unconditionally. Nothing is preserved across the memset above: the
+     * struct is a plain member that may hold garbage, so a preserve-if-non-NULL
+     * check would read garbage and skip the default install. */
+    self->get_time_ms = esphome::millis;
 
     self->state = ha_discovery_state_idle;
     ha_discovery_cleanup_init(&self->cleanup);
@@ -1107,4 +1171,9 @@ bool ha_discovery_manager_is_processing(ha_discovery_manager_t* self)
 ha_discovery_state_t ha_discovery_manager_get_state(ha_discovery_manager_t* self)
 {
     return self->state;
+}
+
+uint32_t ha_discovery_manager_total_published(const ha_discovery_manager_t* self)
+{
+    return self->total_published;
 }

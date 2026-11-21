@@ -57,6 +57,18 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
     if (self == NULL) return 0;
     if (self->mqtt_client == NULL) return self->queue_count;
 
+    /* A dropped removal publish holds off further attempts until the window
+     * passes. The topic stays queued, so waiting loses nothing, while retrying
+     * on every main-loop pass against a full outbound ring churns the backend's
+     * drop counter and flaps the MQTT component's publish warning. The 0
+     * sentinel is tested BEFORE the rollover-safe signed diff, which reads
+     * now - 0 as negative once millis() passes 2^31 and would otherwise stall
+     * every removal until the counter wraps. */
+    if (self->retry_backoff_until_ms != 0 &&
+        (int32_t)(self->get_time_ms() - self->retry_backoff_until_ms) < 0) {
+        return self->queue_count;
+    }
+
     /* Each topic is at most ~200 bytes
      * (homeassistant/{domain}/{device_id}/{entity_id}/config), so 256 is
      * safe; strncpy truncates. */
@@ -99,35 +111,52 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
         consumed = self->queue_write_pos;
     }
 
-    /* Save pre-compact state so we can undo if the publish fails. */
-    uint16_t saved_write_pos = self->queue_write_pos;
-    uint16_t saved_count = self->queue_count;
+    /* Publish BEFORE removing anything. The compaction below overwrites the
+     * front topic's bytes, and restoring the counters afterwards cannot undo
+     * that: the "undo" this replaces left the next topic at the front under the
+     * old counts, so a dropped removal silently skipped a topic and left its
+     * stale config in Home Assistant. The front of the buffer only ever moves
+     * here -- the MQTT callback only appends -- so the topic copied above is
+     * still at the front when the publish lands, even if callbacks appended
+     * while it was in flight. */
+    if (!mqtt_client_publish_raw(self->mqtt_client, topic, "", 0, true)) {
+        /* Post-attempt timestamp + backoff. queue_count is read unlocked on
+         * purpose: a single aligned uint16_t load, and the return value is an
+         * estimate for the caller's logging, not a decision. */
+        self->retry_backoff_until_ms = self->get_time_ms()
+            + HA_CLEANUP_PUBLISH_RETRY_BACKOFF_MS;
+        ESP_LOGW(TAG, "Cleanup publish dropped, will retry: %s", topic);
+        return self->queue_count;
+    }
+
+    self->retry_backoff_until_ms = 0;
+
+    taskENTER_CRITICAL(&self->mux);
+    /* Belt-and-braces against a future caller violating the single-threaded
+     * invariant: only this function (main loop) shrinks the queue, and
+     * ha_discovery_cleanup_destroy() is main-loop too, so the front this
+     * publish used cannot have moved. If that ever stops holding, bail here
+     * instead of letting queue_write_pos - consumed underflow and smear the
+     * heap; the topic stays queued and the next flush republishes it, which is
+     * harmless (an empty retained payload). */
+    if (self->queue_count == 0 || consumed > self->queue_write_pos) {
+        taskEXIT_CRITICAL(&self->mux);
+        ESP_LOGE(TAG, "Queue changed under the removal publish; skipping compaction");
+        return self->queue_count;
+    }
     memmove(self->topic_buf, self->topic_buf + consumed,
             self->queue_write_pos - consumed);
     self->queue_write_pos -= consumed;
     self->queue_count--;
     self->pass_removed_count++;
-    taskEXIT_CRITICAL(&self->mux);
-
-    if (!mqtt_client_publish_raw(self->mqtt_client, topic, "", 0, true)) {
-        /* Publish dropped (queue full) — undo the compact. The saved
-         * values were captured inside the critical section, so they are
-         * consistent even if the callback fires during the publish. */
-        taskENTER_CRITICAL(&self->mux);
-        self->queue_write_pos = saved_write_pos;
-        self->queue_count = saved_count;
-        self->pass_removed_count--;
-        remaining = self->queue_count;
-        taskEXIT_CRITICAL(&self->mux);
-        ESP_LOGW(TAG, "Cleanup publish dropped, will retry: %s", topic);
-        return remaining;
-    }
-
-    ESP_LOGD(TAG, "Removed old topic: %s", topic);
-
-    taskENTER_CRITICAL(&self->mux);
     remaining = self->queue_count;
     taskEXIT_CRITICAL(&self->mux);
+
+    /* Counted only after the compaction succeeded: the bail path above leaves
+     * the topic queued, and the retry that eventually removes it counts then. */
+    self->total_removed_count++;
+
+    ESP_LOGD(TAG, "Removed old topic: %s", topic);
 
     return remaining;
 }
@@ -206,6 +235,7 @@ CLEANUP_FN void cleanup_start(ha_discovery_cleanup_t* self)
     self->subscribe_start_ms = 0;
     self->pass_number = 1;
     self->drain_start_ms = 0;
+    self->retry_backoff_until_ms = 0;
 
     {
         size_t free_heap __attribute__((unused)) = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -342,6 +372,27 @@ void ha_discovery_cleanup_run(ha_discovery_cleanup_t* self)
             return;
         }
 
+        /* Two clean passes only prove no NEW topics arrived; topics still
+         * queued from a dropped removal publish are outstanding work, and
+         * declaring done there would leave stale discovery topics in Home
+         * Assistant while the caller records the cleanup as having run. Read
+         * the queue and declare done under the same lock the callback appends
+         * under: an unlocked read could see 0 while a callback is appending on
+         * the MQTT task. A topic a callback lands after this still sits queued
+         * until the next run rediscovers it -- the same residual loss the
+         * two-pass design already accepts, now with an accurate done report. */
+        taskENTER_CRITICAL(&self->mux);
+        const uint16_t queued = self->queue_count;
+        if (queued == 0) {
+            self->state = ha_cleanup_state_done;
+        }
+        taskEXIT_CRITICAL(&self->mux);
+        if (queued > 0) {
+            ESP_LOGW(TAG, "  Pass %u: %u topics still queued for removal, retrying",
+                self->pass_number, queued);
+            return;
+        }
+
         if (self->dropped_count > 0) {
             ESP_LOGW(TAG, "  Dropped %u topics due to buffer full during cleanup",
                 (unsigned)self->dropped_count);
@@ -406,5 +457,10 @@ bool ha_discovery_cleanup_is_done(ha_discovery_cleanup_t* self)
 {
     if (self == NULL) return true;
     return self->state == ha_cleanup_state_done;
+}
+
+uint32_t ha_discovery_cleanup_total_removed(const ha_discovery_cleanup_t* self)
+{
+    return self->total_removed_count;
 }
 

@@ -33,6 +33,7 @@ The HA Discovery Cleanup module discovers and removes stale Home Assistant MQTT 
 | `HA_CLEANUP_MIN_SUBSCRIBE_MS` | 1000 | Minimum time subscribed before considering a pass complete. Ensures we wait for the initial retained message burst even if `cleanup_run()` isn't called frequently. |
 | `HA_CLEANUP_DRAIN_WAIT_MS` | 1000 | Wait after unsubscribe for the inbound MQTT event queue to drain before re-subscribing. If no new topic callbacks fire during this window, the queue is empty and it's safe to re-subscribe. |
 | `HA_CLEANUP_FLUSH_BATCH` | 1 | Flush one topic per batch call. Each publish allocates a `std::string` on the heap; processing one at a time minimizes peak heap pressure. |
+| `HA_CLEANUP_PUBLISH_RETRY_BACKOFF_MS` | 64 | Wait after a dropped removal publish before attempting again. The topic stays queued, so waiting costs only convergence time, while retrying at main-loop rate against a full outbound ring churns the backend's drop counter. Matches `HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS`; the phase timeout that bounds it is an idle timeout on progress, so this value trades attempt rate against convergence only. |
 | `HA_CLEANUP_TOPIC_BUF_SIZE` | 6144 | Size of the internal topic buffer. Overridable via `HA_CLEANUP_TEST_BUF_SIZE` for tests. |
 
 ---
@@ -69,6 +70,7 @@ typedef struct {
   uint16_t queue_write_pos;
   uint16_t queue_count;
   uint16_t dropped_count;
+  uint32_t total_removed_count;
 
   /* Timing */
   uint32_t last_activity_ms;
@@ -96,6 +98,8 @@ typedef struct {
 | `queue_write_pos` | `uint16_t` | Current write position in `topic_buf`. |
 | `queue_count` | `uint16_t` | Number of topics currently queued in `topic_buf`. |
 | `dropped_count` | `uint16_t` | Cumulative count of topics dropped due to buffer full. |
+| `total_removed_count` | `uint32_t` | Cumulative count of topics successfully removed this run. Never reset by a pass, so `DiscoveryLifecycleManager` can tell a slow-but-progressing cleanup from a stalled one. |
+| `retry_backoff_until_ms` | `uint32_t` | Timestamp until which a dropped removal publish suppresses further attempts. `0` = no window armed. Main-loop only; not guarded by `mux`. |
 | `last_activity_ms` | `uint32_t` | Timestamp of the last topic callback or subscription. Used for idle timeout detection. |
 | `subscribe_start_ms` | `uint32_t` | Timestamp when the current subscription was established. Used for minimum subscription time enforcement. |
 | `subscribed` | `bool` | Whether the wildcard subscription is currently active. |
@@ -170,6 +174,7 @@ void ha_discovery_cleanup_start(ha_discovery_cleanup_t* self);
   - `pass_received_count = 0`, `pass_removed_count = 0`
   - `subscribe_start_ms = 0`, `pass_number = 1`
   - `drain_start_ms = 0`
+  - `retry_backoff_until_ms = 0`
 - Log heap fragmentation baseline (free heap, largest free block, fragmentation percentage)
 - Log info: "Starting HA discovery cleanup..."
 
@@ -259,7 +264,8 @@ If `now - last_activity_ms >= HA_CLEANUP_IDLE_TIMEOUT_MS`:
 - Log info: "Pass N: clean (M received, K removed)"
 - Increment `clean_passes` and `pass_number`
 - If `clean_passes < 2`: return (need one more verification pass)
-- If `clean_passes >= 2`:
+- If `clean_passes >= 2` but `queue_count > 0`: log "Pass N: K topics still queued for removal, retrying" and return. Two clean passes only prove no NEW topics arrived; removals still in the queue are outstanding work, and finishing there would let the caller record the cleanup as done while stale topics survive in Home Assistant.
+- If `clean_passes >= 2` **and `queue_count == 0`**:
   - Log warning if `dropped_count > 0`
   - Log heap fragmentation after cleanup
   - Set `state = ha_cleanup_state_done`
@@ -340,15 +346,21 @@ uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self);
    - Return `remaining` (publish is skipped for truncated topics)
 7. Calculate bytes consumed: `strlen(topic_buf) + 1`
 8. Safety clamp: if `consumed > queue_write_pos`, clamp to `queue_write_pos`
-9. Compact: `memmove` remaining data to front of `topic_buf`
-10. Decrement `queue_write_pos` by `consumed`, decrement `queue_count`, increment `pass_removed_count`
-11. Read `remaining = queue_count` while still in critical section
-12. Exit critical section
-13. Publish empty retained payload: `mqtt_client_publish_raw(mqtt_client, topic, "", 0, true)`
-14. Log debug: "Removed old topic: {topic}"
-15. Return `remaining` (number of topics still in queue)
+9. Publish empty retained payload: `mqtt_client_publish_raw(mqtt_client, topic, "", 0, true)` — **before** touching the queue
+10. If the publish was dropped: arm `retry_backoff_until_ms` (post-attempt timestamp + `HA_CLEANUP_PUBLISH_RETRY_BACKOFF_MS`), log "Cleanup publish dropped, will retry", and return `queue_count` with the queue **untouched**
+11. On success: clear `retry_backoff_until_ms`
+12. Enter critical section; **invariant check:** if `queue_count == 0` or `consumed > queue_write_pos`, log "Queue changed under the removal publish; skipping compaction", exit the critical section, and return `queue_count` — the topic stays queued and the next flush republishes it (an empty retained payload, harmless). Only `cleanup_flush_queue()` (main loop) shrinks the queue and `ha_discovery_cleanup_destroy()` is main-loop too, so this bail is unreachable today; it exists so a future caller that breaks the invariant cannot turn `queue_write_pos - consumed` into an underflowed `memmove` length.
+13. Compact: `memmove` remaining data to front of `topic_buf`; decrement `queue_write_pos` by `consumed`, decrement `queue_count`, increment `pass_removed_count`
+14. Read `remaining = queue_count` while still in critical section; exit critical section
+15. Increment `total_removed_count` — **after** the compaction, so the bail path above does not count a removal whose topic is still queued (the retry that eventually removes it counts then)
+16. Log debug: "Removed old topic: {topic}"
+17. Return `remaining` (number of topics still in queue)
 
 **No delay:** The function does not call `vTaskDelay()` — it flushes one topic per call to keep the main loop responsive.
+
+**Publish before remove:** the compaction `memmove`s the buffer, which overwrites the front topic's bytes; restoring `queue_count`/`queue_write_pos` afterwards cannot bring the topic back. An earlier revision compacted first and "undid" the compact on a drop, which silently skipped the dropped topic and left its stale config in Home Assistant. Only `cleanup_flush_queue()` removes from the front (the callback only appends), so the topic copied in step 5 is still at the front when the publish lands even if callbacks appended while it was in flight.
+
+**Backoff gate:** steps 3 onward are skipped entirely while `retry_backoff_until_ms` is armed, returning `queue_count`. The `!= 0` sentinel is tested before the rollover-safe signed diff `(int32_t)(now - retry_backoff_until_ms) < 0`, which reads `now - 0` as negative once `millis()` passes 2^31 and would otherwise stall every removal until the counter wraps.
 
 ### 8.3 Buffer Capacity
 
@@ -424,7 +436,7 @@ The cleanup module is independent of the discovery manager's own state and buffe
 
 1. **ESP-IDF only:** The entire module is guarded by `#ifdef USE_ESP_IDF`.
 2. **No discovery state knowledge:** The cleanup module has no awareness of the discovery manager's internal state, buffers, or entity list. It operates purely on what the broker returns via the wildcard subscription.
-3. **Two-pass verification:** Cleanup is not considered complete until two consecutive passes find no topics. This handles the race condition where topics discovered in one pass may not have been fully flushed before the next subscription fires.
+3. **Two-pass verification, empty queue required:** Cleanup is not considered complete until two consecutive passes find no topics AND `queue_count == 0`. The two passes handle the race where topics discovered in one pass are not fully flushed before the next subscription fires; the queue check handles removals that are still waiting on a backoff window.
 4. **Drain between passes:** After unsubscribing, the module waits for the inbound MQTT event queue to drain before re-subscribing. This prevents stale callbacks from a previous pass contaminating the next pass's results.
 5. **One topic per flush:** `cleanup_flush_queue()` processes exactly one topic per call, minimizing peak heap pressure from the `std::string` allocation inside `mqtt_client_publish_raw()`.
 6. **Critical section safety:** Shared state between the MQTT callback task and the main loop is protected by `taskENTER_CRITICAL(&self->mux)` / `taskEXIT_CRITICAL(&self->mux)` using a per-instance `portMUX_TYPE`.
@@ -432,6 +444,7 @@ The cleanup module is independent of the discovery manager's own state and buffe
 8. **Echo suppression:** Topics with empty payloads are skipped — they are the module's own echo from previous clear operations.
 9. **Optimistic drain detection:** The drain wait uses `last_activity_ms` to detect when the inbound queue is truly empty. If a late callback fires after drain started, the timer is reset from the new activity time.
 10. **Clean destroy:** `destroy()` unsubscribes if still subscribed, preventing dangling callbacks after the struct is zeroed.
+11. **Publish before remove:** a removal publish is attempted before the queue is compacted, so a dropped publish leaves the topic queued. The compaction overwrites the front topic's bytes and cannot be undone by restoring the counters. The publish's front is stable: the callback only appends (never shrinks `queue_write_pos` or moves the front) and `destroy()` runs on the main loop, the same task as the flush, so the topic copied in step 5 is still at the front when the compaction runs. The step-12 invariant check defends exactly this assumption: if a future caller breaks it, the flush bails instead of underflowing.
 
 ---
 
@@ -454,7 +467,7 @@ The cleanup module is independent of the discovery manager's own state and buffe
 2. **No per-domain granularity:** The wildcard subscription `homeassistant/+/{device_id}/#` catches all domains at once. There is no mechanism to clean up specific domains independently.
 3. **Relies on retained messages:** The cleanup process depends on the MQTT broker retaining discovery messages. If the broker loses its retained state (e.g., restart without persistence), the cleanup will find nothing to remove and complete immediately.
 4. **Single-device scope:** The module is configured with one device ID at a time. Cleaning up multiple devices would require sequential runs or multiple instances.
-5. **No publish failure handling:** If `mqtt_client_publish_raw()` fails (e.g., internal queue full), the topic remains queued and will be retried on the next flush call. There is no explicit retry limit or error escalation.
+5. **No retry limit on dropped removals:** a dropped publish leaves the topic queued and arms `HA_CLEANUP_PUBLISH_RETRY_BACKOFF_MS`; there is no attempt counter or error escalation. The topic is retried until it goes through or the caller aborts the phase (`DiscoveryLifecycleManager`'s idle timeout on `total_removed_count`).
 6. **Linear buffer, not ring buffer:** Topics are appended linearly and compacted on flush. This is simple but means the buffer capacity is limited by contiguous space. A ring buffer could improve utilization but adds complexity.
 7. **Heap allocation per publish:** Each call to `mqtt_client_publish_raw()` internally allocates a `std::string`. The one-topic-per-flush strategy minimizes peak pressure, but a burst of many topics still causes sequential allocations.
-8. **No timeout for overall cleanup:** The module has per-phase timeouts (idle, min subscribe, drain) but no overall timeout. If the broker is slow or unresponsive, cleanup could take a long time. The calling code (`GeappliancesBridge`) is responsible for any overall timeout policy.
+8. **No overall timeout inside the module:** the module has per-phase timeouts (idle, min subscribe, drain) but no overall bound. The caller owns that: `DiscoveryLifecycleManager` aborts `kPhaseCleaning` after `kPhaseTimeoutMs` with no topic removed. Because the bound is on progress rather than duration, a congested-but-draining cleanup is never aborted — and deliberately, no absolute cap exists either: an external publisher that re-announces stale topics faster than removals can defer done indefinitely (each pass still ends after its idle timeout, but the module loops passes forever, and the phase machine rejects new requests while Cleaning). The topics that arrive during a cleanup are the device's own retained configs, so this needs a rogue publisher; the pre-change wall-clock bound traded this wedge for aborting healthy congested cleanups. If that trade is ever revisited, it belongs in the caller, not here.
