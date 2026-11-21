@@ -47,6 +47,34 @@ extern "C" {
 #include "esphome_uart_adapter.h"
 #include "gea2_erd_client_adapter.h"
 
+// -----------------------------------------------------------------------------
+// Build-variant gates (architecture review rec 9)
+//
+// The ring buffers below are the largest static cost of the wire-level stack:
+// 5351 B for GEA3 (255 + 1000 + 4096) and 8447 B for GEA2 (255 + 4096 + 4096).
+// A device that configures only one UART cannot use the other protocol's
+// buffers at all, so __init__.py emits GEA_BRIDGE_HAS_GEA3 /
+// GEA_BRIDGE_HAS_GEA2 exactly when the matching UART is configured, and the
+// buffers for the unconfigured protocol are not declared.
+//
+// A build with NEITHER define compiles both stacks. That is the host test
+// build (Makefile), which runs no ESPHome codegen: the suite keeps exercising
+// both paths without carrying variant-specific defines.
+//
+// Load-bearing coupling: the defines are emitted under exactly the condition
+// that makes the UART pointer non-null at runtime — set_gea3_uart /
+// set_gea2_uart are only called for a configured UART — and init() nulls the
+// pointer when the matching define is absent, so has_gea2_uart() /
+// has_gea3_uart() can never report a protocol whose buffers are compiled out.
+// Only the buffers are gated: the interface, ERD client, adapter and tick
+// source members stay declared (a few hundred bytes) so the accessors and the
+// orchestration layer need no variant handling.
+// -----------------------------------------------------------------------------
+#if !defined(GEA_BRIDGE_HAS_GEA2) && !defined(GEA_BRIDGE_HAS_GEA3)
+#define GEA_BRIDGE_HAS_GEA2 1
+#define GEA_BRIDGE_HAS_GEA3 1
+#endif
+
 namespace esphome {
 namespace geappliances_bridge {
 
@@ -165,25 +193,29 @@ class ProtocolStack {
 
   esphome_uart_adapter_t gea3_uart_adapter_{};
   tiny_gea3_interface_t gea3_interface_{};
+  tiny_gea3_erd_client_t gea3_erd_client_{};
+#ifdef GEA_BRIDGE_HAS_GEA3
   // GEA3 receive buffer — one complete on-wire packet.
   // Max payload is tiny_gea_packet_max_payload_length (248) + 7 bytes overhead = 255.
   uint8_t receive_buffer_[255];
   // GEA3 send queue — holds up to ~4 pending outbound packets (255 bytes each).
   uint8_t send_queue_buffer_[1000];
 
-  tiny_gea3_erd_client_t gea3_erd_client_{};
   /* GEA3 client queue buffer — sized to hold enough read requests for the
    * custom-ERD polling bridge (up to ~31 reads × 6 bytes each ≈ 188 bytes)
    * plus in-flight subscription acknowledgments and write requests.
-   * Increased from 1024 to 2048 to prevent ring-buffer overflow when the
+   * Grown from 1024 to 4096 to prevent ring-buffer overflow when the
    * polling bridge and subscription bridge share the same ERD client;
    * overflow corrupts adjacent heap metadata causing
    * prvCheckTasksWaitingTermination crashes (see erd_bridge_poll.cpp). */
   uint8_t client_queue_buffer_[4096];
+#endif
 
   esphome_uart_adapter_t gea2_uart_adapter_{};
   tiny_gea2_interface_t gea2_interface_{};
 
+  tiny_gea2_erd_client_t gea2_erd_client_{};
+#ifdef GEA_BRIDGE_HAS_GEA2
   // GEA2 receive buffer — one complete on-wire packet.
   // Max payload is tiny_gea_packet_max_payload_length (248) + 7 bytes overhead = 255.
   uint8_t gea2_receive_buffer_[255];
@@ -191,8 +223,8 @@ class ProtocolStack {
   // where the slower bus means the tight loop processes fewer packets per call.
   uint8_t gea2_send_queue_buffer_[4096];
 
-  tiny_gea2_erd_client_t gea2_erd_client_{};
   uint8_t gea2_client_queue_buffer_[4096];
+#endif
 
   gea2_erd_client_adapter_t gea2_erd_client_adapter_{};
 

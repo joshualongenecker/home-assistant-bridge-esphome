@@ -64,6 +64,12 @@ class FeatureBitManager {
   /// Returns a pointer to the valid ERD array (NULL if none).
   const tiny_erd_t* get_valid_erds() const { return valid_erds_count_ > 0 ? valid_erds_ : nullptr; }
 
+  /// Mutable view of the valid-ERD array, handed to
+  /// ErdRegistry::set_valid_erds: the registry sorts it in place and borrows
+  /// the pointer instead of copying the 645-entry set (architecture review
+  /// rec 9). nullptr for an empty set, which keeps the filter disabled.
+  tiny_erd_t* get_valid_erds_for_filter() { return valid_erds_count_ > 0 ? valid_erds_ : nullptr; }
+
   FeatureBitState get_state() const { return state_; }
 
   /// True once init() has installed an ERD client; cleanup() resets it.

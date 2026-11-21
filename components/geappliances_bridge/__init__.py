@@ -246,6 +246,17 @@ async def to_code(config: dict[str, Any]) -> None:
             "The component now always publishes only on change."
 )
     await cg.register_component(var, config)
+    # Architecture review rec 9: a device that configures one UART cannot use
+    # the other protocol's ring buffers, so ProtocolStack compiles them out
+    # (8447 B of static storage for GEA2, 5351 B for GEA3).
+    # Load-bearing coupling: these defines are emitted under exactly the
+    # conditions that make the set_gea3_uart / set_gea2_uart calls below
+    # happen. protocol_stack.h documents why the two must agree.
+    if CONF_GEA3_UART_ID in config:
+        cg.add_define("GEA_BRIDGE_HAS_GEA3")
+    if CONF_GEA2_UART_ID in config:
+        cg.add_define("GEA_BRIDGE_HAS_GEA2")
+
     # Get optional GEA3 UART component reference
     if CONF_GEA3_UART_ID in config:
         gea3_uart_component = await cg.get_variable(config[CONF_GEA3_UART_ID])

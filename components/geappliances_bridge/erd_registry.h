@@ -10,8 +10,13 @@ extern "C" {
 namespace esphome {
 namespace geappliances_bridge {
 
-/* Maximum number of valid ERDs the registry can track. */
+/* Maximum number of ERDs the borrowed valid set can hold. Sized to
+ * FEATURE_BIT_MAX_ERDS: the feature-bit manager's array is the only base set. */
 #define ERD_REGISTRY_MAX_VALID 645
+
+/* Maximum number of ERDs the registry stores itself — the custom ERDs merged
+ * in by add_valid_erds(). Matches GeappliancesBridge::CUSTOM_ERDS_MAX. */
+#define ERD_REGISTRY_MAX_EXTRA 128
 
 class ErdRegistry {
  public:
@@ -19,12 +24,18 @@ class ErdRegistry {
   // Setup methods (called during bridge initialization)
   // -------------------------------------------------------------------------
 
-  /// Copy the valid-ERD set from FeatureBitManager and enable valid-ERD
-  /// filtering. An empty set is ignored so filtering stays disabled.
-  void set_valid_erds(const tiny_erd_t* erds, uint16_t count);
+  /// Enable valid-ERD filtering from the caller's array — no copy. The array
+  /// is sorted in place (the registry is the only consumer that needs the
+  /// order) and then borrowed, so the caller must keep it alive while the
+  /// filter is active: FeatureBitManager's array is a fixed member array, so
+  /// it outlives the registry. Architecture review rec 9 removed the
+  /// registry's own 645-entry copy of the same set.
+  /// An empty set is ignored so filtering stays disabled.
+  void set_valid_erds(tiny_erd_t* erds, uint16_t count);
 
-  /// Append additional ERDs to the valid set (e.g., custom ERDs).
-  /// Deduplicates against existing entries and re-sorts.
+  /// Deduplicates against the borrowed set and against earlier additions. At
+  /// most ERD_REGISTRY_MAX_EXTRA entries get their own storage, and the merged
+  /// set never exceeds ERD_REGISTRY_MAX_VALID; anything past that is dropped.
   /// If the valid set has not been initialized by set_valid_erds(), this
   /// call is a no-op (filtering stays disabled).
   void add_valid_erds(const tiny_erd_t* erds, uint16_t count);
@@ -38,6 +49,8 @@ class ErdRegistry {
   bool has_valid_erds_filter() const { return valid_erds_ready_; }
 
   /// Returns true if the ERD passes the valid-ERD filter (or no filter active).
+  /// Two binary searches — one over the borrowed set, one over the registry's
+  /// own additions — instead of the single search a merged copy would allow.
   bool is_valid(tiny_erd_t erd) const;
 
   // -------------------------------------------------------------------------
@@ -45,14 +58,23 @@ class ErdRegistry {
   // -------------------------------------------------------------------------
 
   /// Returns the number of valid ERDs (filter).
-  uint16_t valid_erd_count() const { return valid_erds_count_; }
+  uint16_t valid_erd_count() const { return base_count_ + extra_count_; }
 
-  /// Returns the valid ERD at the given index (0-based).
+  /// Returns the valid ERD at the given index (0-based) in the merged sorted
+  /// order of both sets. O(n) walk, diagnostics only.
   tiny_erd_t valid_erd(uint16_t idx) const;
 
  private:
-  tiny_erd_t valid_erds_[ERD_REGISTRY_MAX_VALID];
-  uint16_t valid_erds_count_{0};
+  // The base set, borrowed from FeatureBitManager and sorted by
+  // set_valid_erds(). Never owned here.
+  const tiny_erd_t* base_erds_{nullptr};
+  uint16_t base_count_{0};
+
+  // Entries the registry owns (custom ERDs), kept sorted and disjoint from the
+  // base set by add_valid_erds().
+  tiny_erd_t extra_erds_[ERD_REGISTRY_MAX_EXTRA];
+  uint16_t extra_count_{0};
+
   bool valid_erds_ready_{false};
 };
 

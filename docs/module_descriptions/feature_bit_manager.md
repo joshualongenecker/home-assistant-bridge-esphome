@@ -14,6 +14,8 @@ Reads and parses appliance API feature bit ERDs (0x0092 through 0x010D), buildin
 | `get_valid_erd_count()` | Returns the number of valid ERDs. |
 | `get_skipped_erd_count()` | Returns how many feature-list ERDs were skipped **while being read**. Covers unsupported features, failed reads (the failure reason is not inspected), and out-of-order or empty reads — reported as `skipped (unsupported or unreadable)`. Parse-phase drops (data shorter than expected, or all-zero type/version/bitmap after a successful read) are not counted. |
 | `get_valid_erd(idx)` | Returns the valid ERD at the given index (0-based). |
+| `get_valid_erds()` | Const pointer to the valid-ERD array (nullptr while empty), used to build the polling list. |
+| `get_valid_erds_for_filter()` | Mutable pointer to the same array for the `ErdRegistry::set_valid_erds()` handoff: the registry sorts it in place and borrows it instead of copying 645 entries. |
 | `get_state()` | Returns the current `FeatureBitState` |
 ## State Machine
 

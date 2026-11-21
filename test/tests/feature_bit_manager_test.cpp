@@ -18,6 +18,7 @@
 
 #include "feature_bit_manager.h"
 #include "geappliances_bridge_constants.h"
+#include "erd_registry.h"
 #include "appliance_api_feature_lists.h"
 #include "double/tiny_gea3_erd_client_double.hpp"
 #include "double/tiny_timer_group_double.hpp"
@@ -594,6 +595,7 @@ TEST(feature_bit_manager, get_valid_erds_returns_empty_before_complete)
   init_manager();
 
   CHECK_EQUAL(0u, manager.get_valid_erd_count());
+  CHECK_TRUE(manager.get_valid_erds_for_filter() == nullptr);
 }
 
 TEST(feature_bit_manager, get_valid_erds_returns_empty_during_parsing)
@@ -665,6 +667,79 @@ TEST(feature_bit_manager, get_valid_erds_contains_mandatory_erds_after_full_pars
   CHECK_TRUE(found_common);
   CHECK_TRUE(found_api0);
   CHECK_TRUE(found_api9);
+}
+
+TEST(feature_bit_manager, erd_registry_borrows_and_sorts_the_valid_erd_array)
+{
+  // Rec 9: initialize_erd_bridge_() hands ErdRegistry the manager's array
+  // instead of a copy. The registry sorts it in place and filters from it, so
+  // the manager's own view of the set becomes sorted and no second
+  // 645-entry array exists anywhere.
+  init_manager();
+
+  uint8_t common_data[8] = {0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00};
+  uint8_t appliance_data[8] = {0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01};
+
+  expect_successful_read(0xC0, ERD_COMMON_FEATURE_API);
+  manager.start();
+
+  expect_successful_read(0xC0, ERD_APPLIANCE_FEATURE_API_0);
+  trigger_read_completed(ERD_COMMON_FEATURE_API, common_data, 8);
+  expect_successful_read(0xC0, ERD_APPLIANCE_FEATURE_API_1);
+  trigger_read_completed(ERD_APPLIANCE_FEATURE_API_0, appliance_data, 8);
+  expect_successful_read(0xC0, ERD_APPLIANCE_FEATURE_API_2);
+  trigger_read_completed(ERD_APPLIANCE_FEATURE_API_1, appliance_data, 8);
+  expect_successful_read(0xC0, ERD_APPLIANCE_FEATURE_API_3);
+  trigger_read_completed(ERD_APPLIANCE_FEATURE_API_2, appliance_data, 8);
+  expect_successful_read(0xC0, ERD_APPLIANCE_FEATURE_API_4);
+  trigger_read_completed(ERD_APPLIANCE_FEATURE_API_3, appliance_data, 8);
+  expect_successful_read(0xC0, ERD_APPLIANCE_FEATURE_API_5);
+  trigger_read_completed(ERD_APPLIANCE_FEATURE_API_4, appliance_data, 8);
+  expect_successful_read(0xC0, ERD_APPLIANCE_FEATURE_API_6);
+  trigger_read_completed(ERD_APPLIANCE_FEATURE_API_5, appliance_data, 8);
+  expect_successful_read(0xC0, ERD_APPLIANCE_FEATURE_API_7);
+  trigger_read_completed(ERD_APPLIANCE_FEATURE_API_6, appliance_data, 8);
+  expect_successful_read(0xC0, ERD_APPLIANCE_FEATURE_API_8);
+  trigger_read_completed(ERD_APPLIANCE_FEATURE_API_7, appliance_data, 8);
+  expect_successful_read(0xC0, ERD_APPLIANCE_FEATURE_API_9);
+  trigger_read_completed(ERD_APPLIANCE_FEATURE_API_8, appliance_data, 8);
+  trigger_read_completed(ERD_APPLIANCE_FEATURE_API_9, appliance_data, 8);
+
+  tiny_timer_group_double_elapse_time(&timer_group, 100);
+  CHECK_EQUAL(FEATURE_BIT_STATE_COMPLETE, manager.get_state());
+
+  const uint16_t count = manager.get_valid_erd_count();
+  CHECK_TRUE(count >= 14);
+
+  ErdRegistry registry;
+  registry.set_valid_erds(manager.get_valid_erds_for_filter(), count);
+
+  CHECK_TRUE(registry.has_valid_erds_filter());
+  CHECK_EQUAL(count, registry.valid_erd_count());
+
+  // The filter reads the manager's storage: every ERD it produced passes, and
+  // that storage is sorted in place by the handoff.
+  for (uint16_t i = 0; i < count; i++) {
+    CHECK_TRUE(registry.is_valid(manager.get_valid_erd(i)));
+    if (i > 0) CHECK_TRUE(manager.get_valid_erd(i - 1) <= manager.get_valid_erd(i));
+  }
+
+  // An ERD the parse never produced is filtered out.
+  bool absent_before = true;
+  for (uint16_t i = 0; i < count; i++) {
+    if (manager.get_valid_erd(i) == 0x4242) absent_before = false;
+  }
+  CHECK_TRUE(absent_before);
+  CHECK_FALSE(registry.is_valid(0x4242));
+
+  // Custom ERDs get their own storage in the registry; the borrowed array and
+  // the manager's count are untouched by them.
+  const tiny_erd_t custom[] = { 0x4242 };
+  registry.add_valid_erds(custom, 1);
+  CHECK_TRUE(registry.is_valid(0x4242));
+  CHECK_EQUAL(count + 1, registry.valid_erd_count());
+  CHECK_EQUAL(count, manager.get_valid_erd_count());
+  CHECK_EQUAL(0x4242, registry.valid_erd(registry.valid_erd_count() - 1));
 }
 /* ------------------------------------------------------------------ */
 
