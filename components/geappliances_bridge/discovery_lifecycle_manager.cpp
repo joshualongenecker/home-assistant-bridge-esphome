@@ -268,8 +268,6 @@ void DiscoveryLifecycleManager::trigger_discovery_refresh() {
   if (!this->claim_request_(kPhaseQueuedCleanup, kTriggerDiscoveryRefresh, "Discovery refresh")) {
     return;
   }
-  // A deliberate republish ends any run of fingerprint-driven ones
-  this->next_valid_erds_republishes_ = 0;
   ESP_LOGI(TAG, "Discovery refresh queued, will execute when appliance is ready");
 }
 
@@ -447,6 +445,10 @@ void DiscoveryLifecycleManager::finish_publish_() {
   [[maybe_unused]] const char* trigger_kind = this->trigger_ == kTriggerInitial
       ? "Initial"
       : (this->trigger_ == kTriggerDiscoveryRefresh ? "Refresh" : "OTA");
+  // A Discovery Refresh run ends any run of fingerprint-driven republishes.
+  // Decided from trigger_ (published by the claim's release store), not by
+  // the refresh trigger writing the count: that may run on another task.
+  const bool refresh_run = this->trigger_ == kTriggerDiscoveryRefresh;
   this->trigger_ = kTriggerNone;
 
   DiscoveryRecord record{};
@@ -459,7 +461,7 @@ void DiscoveryLifecycleManager::finish_publish_() {
   record.appliance_api_parsing = this->appliance_api_parsing_;
   record.filter_config_topics = this->filter_config_topics_;
   record.valid_erds_fingerprint = this->valid_erds_fingerprint_;
-  record.valid_erds_republishes = this->next_valid_erds_republishes_;
+  record.valid_erds_republishes = refresh_run ? 0 : this->next_valid_erds_republishes_;
   record.valid_erds_stable_checks = 0;
   this->next_valid_erds_republishes_ = 0;
   this->hooks_.save_discovery_record(this->hooks_.context, record);
