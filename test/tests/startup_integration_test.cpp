@@ -2070,13 +2070,15 @@ TEST(startup_integration, repeated_restarts_are_safe)
 {
   configure_poll_mode();
   bridge->setup();
+  IBridgeServices* services = bridge;
   for (int i = 0; i < 5; i++) {
     bridge->loop();
     bridge->restart_appliance_connection();
     bridge->restart_appliance_connection();
     esphome_hal_double_set_millis((uint32_t)(i + 1) * 1000);
+    bridge->loop();
+    CHECK_FALSE(services->is_bridge_initialized());
   }
-  bridge->loop();
   CHECK(bridge->teardown());
 }
 
@@ -2133,4 +2135,117 @@ TEST(startup_integration, reconnect_appliance_button_restarts_the_startup)
 
   CHECK_FALSE(services->is_startup_delay_elapsed());
   CHECK(bridge->teardown());
+}
+
+/* Exposes the bridge's state that the restart tests check. */
+class RestartTestBridge : public GeappliancesBridge {
+ public:
+  using GeappliancesBridge::autodiscovery_manager_;
+  using GeappliancesBridge::erd_cache_;
+  using GeappliancesBridge::restart_requested_;
+};
+
+static size_t count_write_topic_subscriptions(esphome::mqtt::MqttTestDouble* mqtt)
+{
+  size_t n = 0;
+  for (const auto& t : mqtt->subscribed_topics_) {
+    if (t.size() >= 6 && t.compare(t.size() - 6, 6, "/write") == 0) n++;
+  }
+  return n;
+}
+
+/* Feed a GEA3 read response for the appliance type (ERD 0x0008) from a board
+ * to the bridge (0xE4), byte by byte, as the UART would deliver it. */
+static void feed_appliance_type_response(RestartTestBridge* b, uint8_t board, uint8_t appliance_type)
+{
+  const uint8_t payload[] = {
+    tiny_gea3_erd_api_command_read_response, 0 /* request id */,
+    tiny_gea3_erd_api_read_result_success,
+    (uint8_t)(ERD_APPLIANCE_TYPE >> 8), (uint8_t)(ERD_APPLIANCE_TYPE & 0xFF),
+    1 /* data size */, appliance_type};
+  uint8_t frame[3 + sizeof(payload)];
+  frame[0] = 0xE4;
+  frame[1] = (uint8_t)(tiny_gea_packet_transmission_overhead + sizeof(payload));
+  frame[2] = board;
+  std::memcpy(&frame[3], payload, sizeof(payload));
+  uint16_t crc = tiny_gea_crc_seed;
+  for (uint8_t byte : frame) crc = tiny_crc16_byte(crc, byte);
+
+  b->autodiscovery_manager_.feed_byte(tiny_gea_stx, true);
+  for (uint8_t byte : frame) b->autodiscovery_manager_.feed_byte(byte, true);
+  b->autodiscovery_manager_.feed_byte((uint8_t)(crc >> 8), true);
+  b->autodiscovery_manager_.feed_byte((uint8_t)(crc & 0xFF), true);
+  b->autodiscovery_manager_.feed_byte(tiny_gea_etx, true);
+}
+
+/* Run the startup from the stabilization delay through autodiscovery (0xC0
+ * answers), then bring up the data path through the bridge services. The
+ * startup HSM itself would next wait for the identity ERD reads, which nothing
+ * answers here. */
+static bool drive_startup_to_bridge_init(RestartTestBridge* b, uint32_t* now)
+{
+  IBridgeServices* services = b;
+  b->loop();  // enters (or is in) the stabilization delay
+  *now += AUTODISCOVERY_STARTUP_DELAY_MS + 100;
+  esphome_hal_double_set_millis(*now);
+  b->loop();  // autodiscovery: broadcast sent
+  feed_appliance_type_response(b, 0xC0, 35);
+  for (int i = 0; i < 20 && !services->is_autodiscovery_complete(); i++) {
+    *now += 250;
+    esphome_hal_double_set_millis(*now);
+    b->loop();
+  }
+  if (!services->is_autodiscovery_complete()) return false;
+  services->initialize_mqtt_client();
+  services->initialize_erd_bridge();
+  return services->is_bridge_initialized();
+}
+
+TEST(startup_integration, restart_clears_the_erd_cache)
+{
+  RestartTestBridge* b = new RestartTestBridge();
+  b->set_gea3_uart(mock_uart);
+  b->set_mode(BRIDGE_MODE_POLL);
+  b->set_appliance_api_parsing(false);
+  b->setup();
+  b->loop();
+  uint8_t data[] = {0x01};
+  CHECK_TRUE(erd_cache_update(&b->erd_cache_, 0x1234, 0xC0, data, sizeof(data)));
+  CHECK_EQUAL(1, erd_cache_get_count(&b->erd_cache_));
+
+  ReconnectApplianceButton button(b);
+  button.press_action();
+  CHECK_TRUE(b->restart_requested_);
+  CHECK_EQUAL(1, erd_cache_get_count(&b->erd_cache_));  // not until loop()
+  b->loop();
+
+  CHECK_FALSE(b->restart_requested_);
+  CHECK_EQUAL(0, erd_cache_get_count(&b->erd_cache_));
+  CHECK(b->teardown());
+  delete b;
+}
+
+TEST(startup_integration, restart_does_not_subscribe_the_write_topic_twice)
+{
+  RestartTestBridge* b = new RestartTestBridge();
+  b->set_gea3_uart(mock_uart);
+  b->set_mode(BRIDGE_MODE_AUTO);
+  b->set_appliance_api_parsing(false);
+  b->set_device_id("restart_test");
+  b->setup();
+  uint32_t now = 0;
+
+  CHECK_TRUE(drive_startup_to_bridge_init(b, &now));
+  CHECK_EQUAL(1, count_write_topic_subscriptions(mqtt_double));
+
+  b->restart_appliance_connection();
+  b->loop();
+  IBridgeServices* services = b;
+  CHECK_FALSE(services->is_bridge_initialized());
+
+  CHECK_TRUE(drive_startup_to_bridge_init(b, &now));
+  CHECK_EQUAL(1, count_write_topic_subscriptions(mqtt_double));
+
+  CHECK(b->teardown());
+  delete b;
 }

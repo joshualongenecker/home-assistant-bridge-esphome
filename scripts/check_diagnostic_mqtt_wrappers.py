@@ -32,7 +32,8 @@ EXPECTED_SENSORS = (
 )
 EXPECTED_BUTTONS = ("Discovery Refresh", "Reconnect Appliance")
 
-REGISTRATION_RE = re.compile(r"App\.register_(sensor|button)\((\w+), \"([^\"]+)\"")
+# ESPHome 2026.11 wraps the name in ESPHOME_PSTR(...); older releases passed a plain literal
+REGISTRATION_RE = re.compile(r"App\.register_(sensor|button)\((\w+), (?:ESPHOME_PSTR\()?\"([^\"]+)\"")
 WRAPPER_RE = re.compile(r"new\(\w+\) mqtt::MQTT(Sensor|Button)Component\((\w+)\)")
 
 

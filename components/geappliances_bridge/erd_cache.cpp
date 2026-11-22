@@ -77,6 +77,7 @@ void erd_cache_clear(erd_cache_t* self)
     e->erd = 0;
     e->board_address = 0;
     e->data_offset = 0;
+    e->data_size = 0;
     e->update_required = false;
     e->publish_cooldown = 0;
     e->valid = false;

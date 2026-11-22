@@ -98,10 +98,12 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   void add_custom_erds_with_addresses(const uint16_t* erds, const uint8_t* addresses, uint16_t count);
   void add_custom_erd(tiny_erd_t erd);
   void trigger_discovery_refresh();
-  // Drop the appliance-side data path (subscription, polling and write
-  // bridges) and run the appliance startup again from the stabilization
-  // delay: autodiscovery, feature bits, bridge init. MQTT, the device ID, the
-  // ERD cache and HA discovery are kept, and the device does not reboot. For
+  // Treat the appliance as lost: drop the appliance-side data path
+  // (subscription, polling and write bridges), clear the ERD cache contents,
+  // the valid-ERD filter and the feature bits, and run the appliance startup
+  // again from the stabilization delay: autodiscovery, feature bits, bridge
+  // init. The MQTT client, the device ID, the cache object and its publisher,
+  // and the HA discovery state are kept; the device does not reboot. For
   // when the appliance's boards were reprogrammed or reset behind the
   // bridge's back (the Reconnect Appliance button). Safe to call from any
   // main-loop context: the restart runs at the start of the next loop(), once
