@@ -82,23 +82,16 @@ bool load_discovery_record(void*, DiscoveryLifecycleManager::DiscoveryRecord* ou
       kDiscoveryNvsKey);
   DiscoveryLifecycleManager::DiscoveryRecord stored{};
   if (pref.load(&stored)) {
-    *out = stored;
-    return true;
+    return DiscoveryLifecycleManager::decode_record(
+        reinterpret_cast<const uint8_t*>(&stored), sizeof(stored), out);
   }
-  // A record written by firmware with the version 4 layout (no fingerprint):
-  // ESPHome won't load a blob of another size as the current struct, so read
-  // the old size. Its version field (4) makes the change check clean up and
-  // republish once.
-  struct RecordV4 {
-    uint8_t bytes[DiscoveryLifecycleManager::kRecordV4Size];
-  };
-  auto legacy = global_preferences->make_preference<RecordV4>(kDiscoveryNvsKey);
-  RecordV4 old{};
+  // A record written by firmware with the version 4 layout: ESPHome won't load
+  // a blob of another size as the current struct, so read the old size.
+  auto legacy = global_preferences->make_preference<DiscoveryLifecycleManager::DiscoveryRecordV4>(
+      kDiscoveryNvsKey);
+  DiscoveryLifecycleManager::DiscoveryRecordV4 old{};
   if (!legacy.load(&old)) return false;
-  DiscoveryLifecycleManager::DiscoveryRecord converted{};
-  memcpy(&converted, old.bytes, sizeof(old.bytes));
-  *out = converted;
-  return true;
+  return DiscoveryLifecycleManager::decode_record(old.bytes, sizeof(old.bytes), out);
 }
 
 void save_discovery_record(void*, const DiscoveryLifecycleManager::DiscoveryRecord& record) {
@@ -254,6 +247,16 @@ bool DiscoveryLifecycleManager::claim_request_(Phase target, Trigger trigger,
   return true;
 }
 
+bool DiscoveryLifecycleManager::decode_record(const uint8_t* blob, size_t size,
+                                              DiscoveryRecord* out) {
+  if (blob == nullptr || out == nullptr) return false;
+  if (size != sizeof(DiscoveryRecord) && size != kRecordV4Size) return false;
+  DiscoveryRecord record{};
+  memcpy(&record, blob, size);  // v4 is a prefix; the newer fields stay 0
+  *out = record;
+  return true;
+}
+
 void DiscoveryLifecycleManager::trigger_ota_cleanup() {
   if (!this->claim_request_(kPhaseQueuedCleanup, kTriggerOta, "Discovery cleanup")) {
     return;
@@ -265,6 +268,8 @@ void DiscoveryLifecycleManager::trigger_discovery_refresh() {
   if (!this->claim_request_(kPhaseQueuedCleanup, kTriggerDiscoveryRefresh, "Discovery refresh")) {
     return;
   }
+  // A deliberate republish ends any run of fingerprint-driven ones
+  this->next_valid_erds_republishes_ = 0;
   ESP_LOGI(TAG, "Discovery refresh queued, will execute when appliance is ready");
 }
 
@@ -288,6 +293,7 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
   if (!this->generate_device_config_) {
     return;
   }
+  this->next_valid_erds_republishes_ = 0;
 
   // Refresh the availability topic before hashing: the manager's buffers are
   // only guaranteed populated at publish time, and the hash must reflect the
@@ -320,8 +326,7 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
       (this->valid_erds_fingerprint_ != 0 &&
        stored.valid_erds_fingerprint != this->valid_erds_fingerprint_);
 
-  if (hash_changed || device_id_changed || api_parsing_changed || filter_topics_changed ||
-      valid_erds_changed) {
+  if (hash_changed || device_id_changed || api_parsing_changed || filter_topics_changed) {
     ESP_LOGI(TAG, "Discovery state changed (hash=%s, device_id=%s, api_parsing=%s, filter_topics=%s, valid_erds=%s), cleaning old topics",
              hash_changed ? "changed" : "same",
              device_id_changed ? "changed" : "same",
@@ -329,6 +334,38 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
              filter_topics_changed ? "changed" : "same",
              valid_erds_changed ? "changed" : "same");
     this->trigger_ota_cleanup();
+    return;
+  }
+
+  if (valid_erds_changed) {
+    // The only trigger read live from the appliance: bound it (see
+    // kMaxValidErdsRepublishes)
+    if (stored.valid_erds_republishes >= kMaxValidErdsRepublishes) {
+      ESP_LOGW(TAG, "Valid-ERD set changed again after %u republishes in a row; not republishing "
+                    "(the appliance's feature bits may be read inconsistently). Press Discovery "
+                    "Refresh to republish.",
+               (unsigned) stored.valid_erds_republishes);
+      if (stored.valid_erds_stable_checks != 0) {
+        stored.valid_erds_stable_checks = 0;  // the streak is broken
+        this->hooks_.save_discovery_record(this->hooks_.context, stored);
+      }
+      return;
+    }
+    this->next_valid_erds_republishes_ = static_cast<uint8_t>(stored.valid_erds_republishes + 1);
+    ESP_LOGI(TAG, "Discovery state changed (valid_erds=changed), cleaning old topics");
+    this->trigger_ota_cleanup();
+    return;
+  }
+
+  // Nothing changed. Enough checks in a row with the fingerprint unchanged
+  // end a run of fingerprint-driven republishes.
+  if (stored.valid_erds_republishes != 0 && this->valid_erds_fingerprint_ != 0) {
+    stored.valid_erds_stable_checks++;
+    if (stored.valid_erds_stable_checks >= kValidErdsStableChecksToReset) {
+      stored.valid_erds_republishes = 0;
+      stored.valid_erds_stable_checks = 0;
+    }
+    this->hooks_.save_discovery_record(this->hooks_.context, stored);
   }
 }
 
@@ -422,6 +459,9 @@ void DiscoveryLifecycleManager::finish_publish_() {
   record.appliance_api_parsing = this->appliance_api_parsing_;
   record.filter_config_topics = this->filter_config_topics_;
   record.valid_erds_fingerprint = this->valid_erds_fingerprint_;
+  record.valid_erds_republishes = this->next_valid_erds_republishes_;
+  record.valid_erds_stable_checks = 0;
+  this->next_valid_erds_republishes_ = 0;
   this->hooks_.save_discovery_record(this->hooks_.context, record);
 
   // The reboot below pays for whatever the run did to the heap, so the abort

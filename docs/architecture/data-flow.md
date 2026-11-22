@@ -96,7 +96,7 @@ graph LR
 ## Discovery Path (Discovery Changes / Discovery Refresh → Home Assistant)
 
 Home Assistant MQTT discovery topics are retained on the MQTT broker, so normal
-boots skip discovery entirely. Discovery runs in four scenarios:
+boots skip discovery entirely. Discovery runs in these scenarios:
 
 1. **Discovery Refresh button:** When pressed, the button queues a cleanup +
    republish + reboot cycle. If pressed before the bridge is ready (steady state,
@@ -108,16 +108,23 @@ boots skip discovery entirely. Discovery runs in four scenarios:
 3. **Device ID change:** If the device ID changes (e.g. appliance swap or
    configuration change), the bridge detects the mismatch at steady state, cleans
    old discovery topics, publishes fresh ones, and reboots.
-4. **Fresh install:** On first boot with no stored discovery state, the bridge queues an
+4. **Config flag change:** `appliance_api_parsing` or `filter_config_topics` changed
+   in the YAML: cleanup, publish, reboot.
+5. **Valid-ERD set change:** The host board, the boards with ERDs in the cache, or
+   the valid-ERD set from the feature bits changed (another board, new firmware with
+   other features, also after a Reconnect Appliance press): cleanup, publish, reboot.
+   Bounded so a set that reads differently on every boot cannot loop.
+6. **Fresh install:** On first boot with no stored discovery state, the bridge queues an
    initial publish (no cleanup phase), publishes discovery topics, and reboots.
 
 ### Discovery Change Detection
 
 At steady state, the bridge compares the current `HA_DISCOVERY_DATA_HASH` (computed
 by the build-time pipeline), the current device ID, and the current
-`appliance_api_parsing` and `filter_config_topics` flags against the stored
-`DiscoveryRecord {version, hash, device_id, appliance_api_parsing, filter_config_topics}` struct
-in NVS. If any field differs, it triggers cleanup → publish → reboot. The stored state is
+`appliance_api_parsing` and `filter_config_topics` flags, and the valid-ERD fingerprint,
+against the stored `DiscoveryRecord` in NVS. If any of them differs, it triggers
+cleanup → publish → reboot (the fingerprint only while it is known, and at most twice
+in a row; see the spec, section 11.3). The stored state is
 updated after each successful publish so subsequent boots detect no change.
 
 ```

@@ -2279,6 +2279,13 @@ TEST(startup_integration, valid_erds_fingerprint_follows_the_valid_erd_set)
   b->erd_registry_.set_valid_erds(set_a_shuffled, 4);
   CHECK_EQUAL(fp_a, b->valid_erds_fingerprint_());
 
+  // A secondary board showing up in the cache changes it too
+  uint8_t data[] = {0x01};
+  CHECK_TRUE(erd_cache_update(&b->erd_cache_, 0x7130, 0xC0, data, sizeof(data)));
+  const uint32_t fp_host_only = b->valid_erds_fingerprint_();
+  CHECK_TRUE(erd_cache_update(&b->erd_cache_, 0x7130, 0xC1, data, sizeof(data)));
+  CHECK(b->valid_erds_fingerprint_() != fp_host_only);
+
   CHECK(b->teardown());
   delete b;
 }

@@ -93,7 +93,7 @@ through well-defined C interfaces (`i_tiny_uart_t`, `i_tiny_gea3_erd_client_t`,
 
 **Embedded Discovery Data** (`ha_discovery_data.h`) is a build-time generated file
 containing compressed Home Assistant MQTT discovery entity definitions. Discovery
-payloads are published on discovery data changes (hash or device ID) or when the Discovery Refresh button is
+payloads are published on discovery changes (data hash, device ID, config flags, or the appliance's valid-ERD set) or when the Discovery Refresh button is
 pressed — normal boots skip discovery since topics are retained by the MQTT broker.
 
 ## Key Design Decisions
@@ -141,7 +141,7 @@ decompresses individual chunks into buffers that are heap-allocated only for the
 duration of a discovery run and freed afterwards, together with the ~8 KB `tinfl`
 decompressor state (peak ~52 KB: 8 KB payload + 18 KB decompress + 18 KB line
 buffer + 8 KB decompressor state). No network access or file I/O is needed
-at runtime. Discovery runs only on discovery data changes (hash or device ID) or
+at runtime. Discovery runs only on discovery changes (data hash, device ID, config flags, or the appliance's valid-ERD set) or
 when the Discovery Refresh button is pressed — normal boots skip it, as topics
 are retained by the MQTT broker.
 

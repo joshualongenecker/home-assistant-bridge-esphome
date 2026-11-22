@@ -238,6 +238,27 @@ TEST_GROUP(discovery_lifecycle_manager)
     manager_.state = outcome;
     lifecycle_.loop();
   }
+
+  /* One boot: the steady-state check with this fingerprint and, if it queued
+   * a republish, the whole cleanup -> publish run, after which the saved
+   * record becomes the stored one for the next boot. Returns whether it
+   * republished. */
+  bool boot_with_fingerprint(uint32_t fingerprint)
+  {
+    init_lifecycle();
+    lifecycle_.set_valid_erds_fingerprint(fingerprint);
+    lifecycle_.check_discovery_changes(identity_.get_device_id());
+    if (lifecycle_.phase() != DiscoveryLifecycleManager::kPhaseQueuedCleanup) {
+      if (hooks_.save_calls > 0) hooks_.stored = hooks_.saved;
+      return false;
+    }
+    lifecycle_.loop();  // begins the cleanup
+    manager_.cleanup.state = ha_cleanup_state_done;
+    lifecycle_.loop();  // on to publishing
+    end_publish_run(ha_discovery_state_complete);
+    hooks_.stored = hooks_.saved;
+    return true;
+  }
 };
 
 /* ------------------------------------------------------------------ */
@@ -1003,4 +1024,166 @@ TEST(discovery_lifecycle_manager, saved_record_carries_the_valid_erds_fingerprin
   CHECK_EQUAL(1, hooks_.save_calls);
   CHECK_EQUAL(DiscoveryLifecycleManager::kRecordVersion, hooks_.saved.version);
   CHECK_EQUAL(0x0BADF00Du, hooks_.saved.valid_erds_fingerprint);
+}
+
+/* ------------------------------------------------------------------ */
+/* valid-ERD fingerprint: bounded, and decoded from either record size */
+/* ------------------------------------------------------------------ */
+
+TEST(discovery_lifecycle_manager, fingerprint_republishes_stop_at_the_limit)
+{
+  hooks_.stored = matching_record();
+  hooks_.stored.valid_erds_fingerprint = 0x11111111u;
+  hooks_.stored.valid_erds_republishes = DiscoveryLifecycleManager::kMaxValidErdsRepublishes;
+  hooks_.has_stored = true;
+  lifecycle_.set_valid_erds_fingerprint(0x22222222u);
+
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+}
+
+TEST(discovery_lifecycle_manager, fingerprint_republish_counts_up_in_the_saved_record)
+{
+  hooks_.stored = matching_record();
+  hooks_.stored.valid_erds_fingerprint = 0x11111111u;
+  hooks_.stored.valid_erds_republishes = 1;
+  hooks_.has_stored = true;
+
+  CHECK_TRUE(boot_with_fingerprint(0x22222222u));
+
+  CHECK_EQUAL(0x22222222u, hooks_.saved.valid_erds_fingerprint);
+  CHECK_EQUAL(2, hooks_.saved.valid_erds_republishes);
+}
+
+TEST(discovery_lifecycle_manager, other_changes_reset_the_fingerprint_republish_count)
+{
+  hooks_.stored = matching_record();
+  hooks_.stored.hash += 1;
+  hooks_.stored.valid_erds_fingerprint = 0x11111111u;
+  hooks_.stored.valid_erds_republishes = DiscoveryLifecycleManager::kMaxValidErdsRepublishes;
+  hooks_.has_stored = true;
+
+  CHECK_TRUE(boot_with_fingerprint(0x22222222u));
+
+  CHECK_EQUAL(0, hooks_.saved.valid_erds_republishes);
+}
+
+TEST(discovery_lifecycle_manager, a_stable_fingerprint_clears_the_republish_count)
+{
+  hooks_.stored = matching_record();
+  hooks_.stored.valid_erds_fingerprint = 0x22222222u;
+  hooks_.stored.valid_erds_republishes = 1;
+  hooks_.has_stored = true;
+
+  for (uint8_t i = 1; i < DiscoveryLifecycleManager::kValidErdsStableChecksToReset; i++) {
+    CHECK_FALSE(boot_with_fingerprint(0x22222222u));
+    CHECK_EQUAL(1, hooks_.stored.valid_erds_republishes);
+    CHECK_EQUAL(i, hooks_.stored.valid_erds_stable_checks);
+  }
+  CHECK_FALSE(boot_with_fingerprint(0x22222222u));
+
+  CHECK_EQUAL(0, hooks_.stored.valid_erds_republishes);
+  CHECK_EQUAL(0, hooks_.stored.valid_erds_stable_checks);
+  CHECK_EQUAL(0x22222222u, hooks_.stored.valid_erds_fingerprint);
+}
+
+TEST(discovery_lifecycle_manager, discovery_refresh_resets_the_republish_count)
+{
+  hooks_.stored = matching_record();
+  hooks_.has_stored = true;
+  lifecycle_.set_valid_erds_fingerprint(0x22222222u);
+
+  lifecycle_.trigger_discovery_refresh();
+  lifecycle_.loop();
+  manager_.cleanup.state = ha_cleanup_state_done;
+  lifecycle_.loop();
+  end_publish_run(ha_discovery_state_complete);
+
+  CHECK_EQUAL(0, hooks_.saved.valid_erds_republishes);
+  CHECK_EQUAL(0x22222222u, hooks_.saved.valid_erds_fingerprint);
+}
+
+TEST(discovery_lifecycle_manager, a_flapping_fingerprint_stops_republishing)
+{
+  /* Partial feature-bit reads on every other boot: A, B, A, B, ... Without a
+   * bound each boot would republish and reboot forever. */
+  hooks_.stored = matching_record();
+  hooks_.stored.valid_erds_fingerprint = 0xAAAAAAAAu;
+  hooks_.has_stored = true;
+
+  int republishes = 0;
+  for (int boot = 0; boot < 20; boot++) {
+    if (boot_with_fingerprint(boot % 2 == 0 ? 0xBBBBBBBBu : 0xAAAAAAAAu)) republishes++;
+  }
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kMaxValidErdsRepublishes, republishes);
+}
+
+TEST(discovery_lifecycle_manager, a_real_change_republishes_once_and_settles)
+{
+  hooks_.stored = matching_record();
+  hooks_.stored.valid_erds_fingerprint = 0xAAAAAAAAu;
+  hooks_.has_stored = true;
+
+  CHECK_TRUE(boot_with_fingerprint(0xBBBBBBBBu));
+  for (uint8_t i = 0; i < DiscoveryLifecycleManager::kValidErdsStableChecksToReset; i++) {
+    CHECK_FALSE(boot_with_fingerprint(0xBBBBBBBBu));
+  }
+  CHECK_EQUAL(0, hooks_.stored.valid_erds_republishes);
+
+  /* A later genuine change still republishes */
+  CHECK_TRUE(boot_with_fingerprint(0xCCCCCCCCu));
+}
+
+TEST(discovery_lifecycle_manager, decode_record_reads_the_current_layout)
+{
+  Record record = matching_record();
+  record.valid_erds_fingerprint = 0x12345678u;
+  record.valid_erds_republishes = 1;
+
+  Record decoded{};
+  CHECK_TRUE(DiscoveryLifecycleManager::decode_record(
+      reinterpret_cast<const uint8_t*>(&record), sizeof(record), &decoded));
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kRecordVersion, decoded.version);
+  CHECK_EQUAL(0x12345678u, decoded.valid_erds_fingerprint);
+  CHECK_EQUAL(1, decoded.valid_erds_republishes);
+  CHECK(strcmp(record.device_id, decoded.device_id) == 0);
+}
+
+TEST(discovery_lifecycle_manager, decode_record_reads_a_version_4_blob_and_cleans_up_once)
+{
+  /* A record as version 4 firmware wrote it: the first 104 bytes, version 4 */
+  Record old_layout = matching_record();
+  old_layout.version = 4;
+  DiscoveryLifecycleManager::DiscoveryRecordV4 blob{};
+  memcpy(blob.bytes, &old_layout, sizeof(blob.bytes));
+
+  Record decoded{};
+  CHECK_TRUE(DiscoveryLifecycleManager::decode_record(blob.bytes, sizeof(blob.bytes), &decoded));
+  CHECK_EQUAL(4u, decoded.version);
+  CHECK_EQUAL(old_layout.hash, decoded.hash);
+  CHECK(strcmp(old_layout.device_id, decoded.device_id) == 0);
+  CHECK_TRUE(decoded.appliance_api_parsing);
+  CHECK_TRUE(decoded.filter_config_topics);
+  CHECK_EQUAL(0u, decoded.valid_erds_fingerprint);
+  CHECK_EQUAL(0, decoded.valid_erds_republishes);
+
+  /* The stale version takes the cleanup + republish path, not a fresh install */
+  hooks_.stored = decoded;
+  hooks_.has_stored = true;
+  lifecycle_.set_valid_erds_fingerprint(0x22222222u);
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedCleanup, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerOta, lifecycle_.trigger());
+}
+
+TEST(discovery_lifecycle_manager, decode_record_rejects_other_sizes)
+{
+  uint8_t blob[200] = {0};
+  Record decoded{};
+  CHECK_FALSE(DiscoveryLifecycleManager::decode_record(blob, 100, &decoded));
+  CHECK_FALSE(DiscoveryLifecycleManager::decode_record(blob, 112, &decoded));
+  CHECK_FALSE(DiscoveryLifecycleManager::decode_record(nullptr, sizeof(Record), &decoded));
 }
