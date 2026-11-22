@@ -285,3 +285,21 @@ TEST(erd_registry, valid_erd_merges_interleaved_extras)
   CHECK_EQUAL(0x0200, registry.valid_erd(1));
   CHECK_EQUAL(0x0300, registry.valid_erd(2));
 }
+
+TEST(erd_registry, add_valid_erds_deduplicates_across_batches)
+{
+  // A custom ERD that duplicates a base-set entry must not land in the
+  // registry's own storage: the sets stay disjoint, and the merged view
+  // reports the base entry once.
+  tiny_erd_t base[] = { 0x0100, 0x0300 };
+  registry.set_valid_erds(base, 2);
+
+  tiny_erd_t extra[] = { 0x0300, 0x0400 };
+  registry.add_valid_erds(extra, 2);
+
+  CHECK_EQUAL(3, registry.valid_erd_count());
+  CHECK_TRUE(registry.is_valid(0x0300));
+  CHECK_TRUE(registry.is_valid(0x0400));
+  CHECK_EQUAL(0x0300, registry.valid_erd(1));
+  CHECK_EQUAL(0x0400, registry.valid_erd(2));
+}

@@ -1,7 +1,8 @@
 
 #pragma once
-
 #include <cstdint>
+
+#include "feature_bit_manager.h"
 
 extern "C" {
 #include "tiny_erd.h"
@@ -14,8 +15,14 @@ namespace geappliances_bridge {
  * FEATURE_BIT_MAX_ERDS: the feature-bit manager's array is the only base set. */
 #define ERD_REGISTRY_MAX_VALID 645
 
+/* The base set is truncated at ERD_REGISTRY_MAX_VALID by set_valid_erds();
+ * entries past it would be silently suppressed by is_valid(). */
+static_assert(ERD_REGISTRY_MAX_VALID >= FEATURE_BIT_MAX_ERDS,
+              "ERD_REGISTRY_MAX_VALID must cover the whole FeatureBitManager array");
+
 /* Maximum number of ERDs the registry stores itself — the custom ERDs merged
- * in by add_valid_erds(). Matches GeappliancesBridge::CUSTOM_ERDS_MAX. */
+ * in by add_valid_erds(). Pinned to GeappliancesBridge::CUSTOM_ERDS_MAX by a
+ * static_assert in geappliances_bridge.h. */
 #define ERD_REGISTRY_MAX_EXTRA 128
 
 class ErdRegistry {
