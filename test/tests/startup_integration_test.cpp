@@ -2143,6 +2143,8 @@ class RestartTestBridge : public GeappliancesBridge {
   using GeappliancesBridge::autodiscovery_manager_;
   using GeappliancesBridge::erd_cache_;
   using GeappliancesBridge::restart_requested_;
+  using GeappliancesBridge::erd_registry_;
+  using GeappliancesBridge::valid_erds_fingerprint_;
 };
 
 static size_t count_write_topic_subscriptions(esphome::mqtt::MqttTestDouble* mqtt)
@@ -2245,6 +2247,37 @@ TEST(startup_integration, restart_does_not_subscribe_the_write_topic_twice)
 
   CHECK_TRUE(drive_startup_to_bridge_init(b, &now));
   CHECK_EQUAL(1, count_write_topic_subscriptions(mqtt_double));
+
+  CHECK(b->teardown());
+  delete b;
+}
+
+TEST(startup_integration, valid_erds_fingerprint_follows_the_valid_erd_set)
+{
+  RestartTestBridge* b = new RestartTestBridge();
+  b->set_gea3_uart(mock_uart);
+  b->setup();
+
+  // No filter yet (feature bits not read): unknown
+  CHECK_EQUAL(0u, b->valid_erds_fingerprint_());
+
+  const tiny_erd_t set_a[] = {0x0001, 0x0002, 0x0008, 0x7130};
+  const tiny_erd_t set_b[] = {0x0001, 0x0002, 0x0008, 0x7131};
+  b->erd_registry_.set_valid_erds(set_a, 4);
+  const uint32_t fp_a = b->valid_erds_fingerprint_();
+  CHECK(fp_a != 0u);
+
+  b->erd_registry_.clear_valid_erds();
+  b->erd_registry_.set_valid_erds(set_b, 4);
+  const uint32_t fp_b = b->valid_erds_fingerprint_();
+  CHECK(fp_b != 0u);
+  CHECK(fp_b != fp_a);
+
+  // Same set in another order: same fingerprint (the registry keeps it sorted)
+  const tiny_erd_t set_a_shuffled[] = {0x7130, 0x0008, 0x0001, 0x0002};
+  b->erd_registry_.clear_valid_erds();
+  b->erd_registry_.set_valid_erds(set_a_shuffled, 4);
+  CHECK_EQUAL(fp_a, b->valid_erds_fingerprint_());
 
   CHECK(b->teardown());
   delete b;

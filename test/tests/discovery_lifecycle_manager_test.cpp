@@ -368,6 +368,59 @@ TEST(discovery_lifecycle_manager, changed_config_flags_queue_cleanup)
   CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedCleanup, lifecycle_.phase());
 }
 
+TEST(discovery_lifecycle_manager, changed_valid_erds_fingerprint_queues_cleanup)
+{
+  hooks_.stored = matching_record();
+  hooks_.stored.valid_erds_fingerprint = 0x11111111u;
+  hooks_.has_stored = true;
+  lifecycle_.set_valid_erds_fingerprint(0x22222222u);
+
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedCleanup, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerOta, lifecycle_.trigger());
+}
+
+TEST(discovery_lifecycle_manager, same_valid_erds_fingerprint_queues_nothing)
+{
+  hooks_.stored = matching_record();
+  hooks_.stored.valid_erds_fingerprint = 0x22222222u;
+  hooks_.has_stored = true;
+  lifecycle_.set_valid_erds_fingerprint(0x22222222u);
+
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+}
+
+TEST(discovery_lifecycle_manager, unknown_valid_erds_fingerprint_never_queues_cleanup)
+{
+  /* Feature bits unreadable on this boot: no filter, fingerprint 0. Must not
+   * republish, or a transient failure would republish (and reboot) twice. */
+  hooks_.stored = matching_record();
+  hooks_.stored.valid_erds_fingerprint = 0x22222222u;
+  hooks_.has_stored = true;
+  lifecycle_.set_valid_erds_fingerprint(0);
+
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+}
+
+TEST(discovery_lifecycle_manager, unfiltered_publish_is_republished_once_the_filter_is_known)
+{
+  /* The last publish ran without a filter (stored 0); now the feature bits
+   * are known, so the entity list is narrowed to what the appliance has. */
+  hooks_.stored = matching_record();
+  hooks_.stored.valid_erds_fingerprint = 0;
+  hooks_.has_stored = true;
+  lifecycle_.set_valid_erds_fingerprint(0x22222222u);
+
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedCleanup, lifecycle_.phase());
+}
+
 TEST(discovery_lifecycle_manager, empty_stored_device_id_does_not_count_as_change)
 {
   hooks_.stored = matching_record();
@@ -595,6 +648,7 @@ TEST(discovery_lifecycle_manager, successful_publish_records_state_and_arms_rebo
   CHECK(strcmp(hooks_.saved.device_id, identity_.get_device_id()) == 0);
   CHECK_TRUE(hooks_.saved.appliance_api_parsing);
   CHECK_TRUE(hooks_.saved.filter_config_topics);
+  CHECK_EQUAL(0u, hooks_.saved.valid_erds_fingerprint);
   CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
   CHECK(lifecycle_.initial_publish_done());
   /* Nothing was aborted, so the abort budget must not be written at all --
@@ -938,4 +992,15 @@ TEST(discovery_lifecycle_manager, initial_path_skips_cleanup)
   enter_publishing();
 
   CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
+}
+
+TEST(discovery_lifecycle_manager, saved_record_carries_the_valid_erds_fingerprint)
+{
+  lifecycle_.set_valid_erds_fingerprint(0x0BADF00Du);
+  enter_publishing();
+  end_publish_run(ha_discovery_state_complete);
+
+  CHECK_EQUAL(1, hooks_.save_calls);
+  CHECK_EQUAL(DiscoveryLifecycleManager::kRecordVersion, hooks_.saved.version);
+  CHECK_EQUAL(0x0BADF00Du, hooks_.saved.valid_erds_fingerprint);
 }

@@ -81,8 +81,23 @@ bool load_discovery_record(void*, DiscoveryLifecycleManager::DiscoveryRecord* ou
   auto pref = global_preferences->make_preference<DiscoveryLifecycleManager::DiscoveryRecord>(
       kDiscoveryNvsKey);
   DiscoveryLifecycleManager::DiscoveryRecord stored{};
-  if (!pref.load(&stored)) return false;
-  *out = stored;
+  if (pref.load(&stored)) {
+    *out = stored;
+    return true;
+  }
+  // A record written by firmware with the version 4 layout (no fingerprint):
+  // ESPHome won't load a blob of another size as the current struct, so read
+  // the old size. Its version field (4) makes the change check clean up and
+  // republish once.
+  struct RecordV4 {
+    uint8_t bytes[DiscoveryLifecycleManager::kRecordV4Size];
+  };
+  auto legacy = global_preferences->make_preference<RecordV4>(kDiscoveryNvsKey);
+  RecordV4 old{};
+  if (!legacy.load(&old)) return false;
+  DiscoveryLifecycleManager::DiscoveryRecord converted{};
+  memcpy(&converted, old.bytes, sizeof(old.bytes));
+  *out = converted;
   return true;
 }
 
@@ -92,9 +107,10 @@ void save_discovery_record(void*, const DiscoveryLifecycleManager::DiscoveryReco
   pref.save(&record);
   global_preferences->sync();
   ESP_LOGD(TAG, "Stored discovery state hash=0x%08" PRIx32
-           " device_id=%s api_parsing=%d filter_topics=%d",
+           " device_id=%s api_parsing=%d filter_topics=%d valid_erds=0x%08" PRIx32,
            record.hash, record.device_id,
-           record.appliance_api_parsing, record.filter_config_topics);
+           record.appliance_api_parsing, record.filter_config_topics,
+           record.valid_erds_fingerprint);
 }
 
 void confirm_firmware(void*) {
@@ -299,13 +315,19 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
       (stored.appliance_api_parsing != this->appliance_api_parsing_);
   const bool filter_topics_changed =
       (stored.filter_config_topics != this->filter_config_topics_);
+  // Only a known fingerprint counts (see set_valid_erds_fingerprint())
+  const bool valid_erds_changed =
+      (this->valid_erds_fingerprint_ != 0 &&
+       stored.valid_erds_fingerprint != this->valid_erds_fingerprint_);
 
-  if (hash_changed || device_id_changed || api_parsing_changed || filter_topics_changed) {
-    ESP_LOGI(TAG, "Discovery state changed (hash=%s, device_id=%s, api_parsing=%s, filter_topics=%s), cleaning old topics",
+  if (hash_changed || device_id_changed || api_parsing_changed || filter_topics_changed ||
+      valid_erds_changed) {
+    ESP_LOGI(TAG, "Discovery state changed (hash=%s, device_id=%s, api_parsing=%s, filter_topics=%s, valid_erds=%s), cleaning old topics",
              hash_changed ? "changed" : "same",
              device_id_changed ? "changed" : "same",
              api_parsing_changed ? "changed" : "same",
-             filter_topics_changed ? "changed" : "same");
+             filter_topics_changed ? "changed" : "same",
+             valid_erds_changed ? "changed" : "same");
     this->trigger_ota_cleanup();
   }
 }
@@ -399,6 +421,7 @@ void DiscoveryLifecycleManager::finish_publish_() {
   record.device_id[sizeof(record.device_id) - 1] = '\0';
   record.appliance_api_parsing = this->appliance_api_parsing_;
   record.filter_config_topics = this->filter_config_topics_;
+  record.valid_erds_fingerprint = this->valid_erds_fingerprint_;
   this->hooks_.save_discovery_record(this->hooks_.context, record);
 
   // The reboot below pays for whatever the run did to the heap, so the abort

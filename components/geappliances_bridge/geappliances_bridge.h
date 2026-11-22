@@ -200,6 +200,7 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   void on_poll_discovery_complete_();
   bool should_route_to_feature_bits_(tiny_erd_t erd);
   void init_autodiscovery_manager_();
+  uint32_t valid_erds_fingerprint_() const;
   void destroy_data_plane_();
   void restart_appliance_connection_now_();
 
