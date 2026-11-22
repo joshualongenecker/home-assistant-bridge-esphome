@@ -111,8 +111,6 @@ geappliances_bridge:
   gea3_uart_id: gea3_uart
   discovery_refresh_button:
     name: "Discovery Refresh"
-  reconnect_appliance_button:
-    name: "Reconnect Appliance"
 ```
 
 Set to `false` to disable.
