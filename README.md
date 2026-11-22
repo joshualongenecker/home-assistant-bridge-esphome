@@ -187,6 +187,7 @@ MQTT discovery topics are published by the bridge and retained on the MQTT broke
 
 - **After OTA reboot:** The bridge detects an OTA reboot, cleans old discovery topics, publishes fresh ones, and reboots to defragment the heap.
 - **Discovery Refresh button:** Manually triggers cleanup of stale topics, republishes fresh discovery, and reboots.
+- **Reconnect Appliance button:** Treats the appliance as lost and starts over with it (autodiscovery, feature bits, a fresh ERD cache) without rebooting. Use it after the appliance's boards were reprogrammed.
 
 ### 6. View your GE Appliances device in Home Assistant
 

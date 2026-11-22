@@ -226,7 +226,10 @@ void GeappliancesBridge::initialize_erd_bridge_()
     this->autodiscovery_manager_.get_active_erd_client(),
     &this->mqtt_client_adapter_.interface,
     host_addr);
-  esphome_mqtt_client_adapter_subscribe_write_topic(&this->mqtt_client_adapter_);
+  if (!this->write_topic_subscribed_) {
+    esphome_mqtt_client_adapter_subscribe_write_topic(&this->mqtt_client_adapter_);
+    this->write_topic_subscribed_ = true;
+  }
 
 }
 

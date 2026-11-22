@@ -150,11 +150,13 @@ Diagnostic flow for common issues with the GE Appliances Bridge.
 
 - After a firmware update, entities briefly disappear from Home Assistant.
 - The Discovery Refresh button does not seem to do anything immediately.
+- After the appliance's boards changed (moved to another board, reflashed, swapped), Home Assistant shows an entity list that doesn't match the appliance, and the log shows "Valid-ERD set changed again after 2 republishes in a row; not republishing".
 
 ### Explanation
 
-- **After firmware update:** The bridge detects discovery data changes (hash or device ID) at steady state, cleans old discovery topics, publishes fresh ones, and reboots. During this cycle, entities may temporarily disappear. They will reappear after the bridge completes the cleanup → publish → reboot cycle.
+- **After firmware update:** The bridge detects discovery changes (data hash, device ID, config flags) at steady state, cleans old discovery topics, publishes fresh ones, and reboots. During this cycle, entities may temporarily disappear. They will reappear after the bridge completes the cleanup → publish → reboot cycle.
 - **Discovery Refresh button:** When pressed, the request is queued. If the bridge is not yet ready (steady state, MQTT connected, device ID complete), the request waits until those conditions are met. Check logs for "Discovery refresh queued, will execute when appliance is ready".
+- **Valid-ERD set changes:** The bridge also republishes when the appliance's valid-ERD set changes: another host board, a secondary board appearing or disappearing, or firmware with other feature bits. Because that set is read from the appliance at every startup, a set that reads differently from boot to boot could otherwise republish and reboot forever. So after 2 republishes in a row caused only by it, further changes are logged as "Valid-ERD set changed again after 2 republishes in a row; not republishing" and ignored, until the set has read the same at 3 startups in a row. This can also hold back a genuine change that follows soon after two others.
 
 ### Diagnostic Steps
 
@@ -162,6 +164,7 @@ Diagnostic flow for common issues with the GE Appliances Bridge.
 2. **Check logs for discovery refresh:** Look for "Discovery refresh queued, will execute when appliance is ready" followed by "HA discovery cleanup complete, publishing fresh discovery...".
 3. **Check logs for fresh install:** Look for "Starting initial HA discovery publish..." on first boot.
 4. **Wait for the cycle to complete:** The cleanup → publish → reboot cycle can take 1–2 minutes depending on the number of entities.
+5. **"Valid-ERD set changed again ... not republishing":** Press **Discovery Refresh** to republish the current entity list; it also resets the count. If the warning comes back on later boots without any change to the appliance, the feature-bit reads are inconsistent: check the "Feature bit parsing complete: N valid ERDs, M skipped" line at each startup (a varying N or M points at failed reads) and the appliance connection (see No Communication with Appliance).
 
 
 ## Write Commands Fail

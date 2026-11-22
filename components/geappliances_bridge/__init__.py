@@ -41,6 +41,7 @@ CONF_MQTT_DISCONNECT_DURATION_SENSOR = "mqtt_disconnect_duration_sensor"
 CONF_THROTTLE_RATE_SECONDS = "throttle_rate_seconds"
 CONF_FILTER_CONFIG_TOPICS = "filter_config_topics"
 CONF_DISCOVERY_REFRESH_BUTTON = "discovery_refresh_button"
+CONF_RECONNECT_APPLIANCE_BUTTON = "reconnect_appliance_button"
 CONF_CUSTOM_HA_DISCOVERY_FILE = "custom_ha_discovery_file"
 CONF_BOARD_ADDRESS = "board_address"
 
@@ -66,6 +67,11 @@ DiscoveryRefreshButton = geappliances_bridge_ns.class_(
     "DiscoveryRefreshButton", button.Button
 )
 
+# Treats the appliance as lost and connects to it again, without rebooting
+ReconnectApplianceButton = geappliances_bridge_ns.class_(
+    "ReconnectApplianceButton", button.Button
+)
+
 
 # Diagnostic entities are created unless their option is set to `false`. Their defaults live
 # in CONFIG_SCHEMA so config validation materializes the entity `id` and, because this
@@ -80,6 +86,7 @@ DIAGNOSTIC_ENTITY_KEYS = (
     CONF_MQTT_DISCONNECT_COUNT_SENSOR,
     CONF_MQTT_DISCONNECT_DURATION_SENSOR,
     CONF_DISCOVERY_REFRESH_BUTTON,
+    CONF_RECONNECT_APPLIANCE_BUTTON,
 )
 
 
@@ -204,6 +211,16 @@ CONFIG_SCHEMA = cv.Schema(
             cv.boolean_false,
             button.button_schema(DiscoveryRefreshButton).extend(cv.Schema({
                 cv.Optional("name", default="Discovery Refresh"): cv.string,
+            })),
+        ),
+        # Drops the appliance-side data path, the ERD cache and the feature
+        # bits, and runs autodiscovery and the appliance startup again; MQTT
+        # and the device stay up. For after the appliance's boards were
+        # reprogrammed or reset (press it from YAML with button.press).
+        cv.Optional(CONF_RECONNECT_APPLIANCE_BUTTON, default={}): cv.Any(
+            cv.boolean_false,
+            button.button_schema(ReconnectApplianceButton, icon="mdi:lan-connect").extend(cv.Schema({
+                cv.Optional("name", default="Reconnect Appliance"): cv.string,
             })),
         ),
         cv.Optional(CONF_CUSTOM_HA_DISCOVERY_FILE): cv.file_,
@@ -343,7 +360,12 @@ async def to_code(config: dict[str, Any]) -> None:
         btn = cg.new_Pvariable(val[CONF_ID], var)
         await button.register_button(btn, val)
 
+    # Create reconnect appliance button (auto-created by default, set to false to disable)
+    val = config.get(CONF_RECONNECT_APPLIANCE_BUTTON)
+    if val is not None and val is not False:
+        btn = cg.new_Pvariable(val[CONF_ID], var)
+        await button.register_button(btn, val)
+
     # Register any user-configured custom ERDs
     for erd in config[CONF_CUSTOM_ERDS]:
         cg.add(var.add_custom_erd(erd))
-    

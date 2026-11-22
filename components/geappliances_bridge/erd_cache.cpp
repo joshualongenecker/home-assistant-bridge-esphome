@@ -68,6 +68,29 @@ static void erd_cache_reset(erd_cache_t* self)
   self->max_cooldown = 0;
 }
 
+void erd_cache_clear(erd_cache_t* self)
+{
+  if (!self->initialized) return;
+  erd_cache_lock(self);
+  for (uint16_t i = 0; i < ERD_CACHE_CAPACITY; i++) {
+    erd_cache_entry_t* e = &self->entries[i];
+    e->erd = 0;
+    e->board_address = 0;
+    e->data_offset = 0;
+    e->data_size = 0;
+    e->update_required = false;
+    e->publish_cooldown = 0;
+    e->valid = false;
+  }
+  self->arena_offset = 0;
+  memset(self->arena, 0, sizeof(self->arena));
+  self->dirty_count = 0;
+  erd_cache_unlock(self);
+  s_slot_overflow_warned = false;
+  s_arena_overflow_warned = false;
+  s_size_rejected_warned = false;
+}
+
 void erd_cache_init(erd_cache_t* self)
 {
   erd_cache_reset(self);
@@ -336,7 +359,8 @@ void erd_cache_mark_published(erd_cache_t* self, erd_cache_entry_t* entry)
 {
   if (entry == NULL) return;
   erd_cache_lock(self);
-  if (self->max_cooldown > 0) {
+  /* erd_cache_clear() may have run between the snapshot and this call */
+  if (entry->valid && self->max_cooldown > 0) {
     entry->publish_cooldown = self->max_cooldown;
   }
   erd_cache_unlock(self);
@@ -349,6 +373,12 @@ void erd_cache_mark_unpublished(erd_cache_t* self, erd_cache_entry_t* entry)
 {
   if (entry == NULL) return;
   erd_cache_lock(self);
+  /* erd_cache_clear() may have run between the snapshot and this call: a
+   * cleared entry must not come back dirty (it would skew dirty_count) */
+  if (!entry->valid) {
+    erd_cache_unlock(self);
+    return;
+  }
   if (!entry->update_required) {
     self->dirty_count++;
   }

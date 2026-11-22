@@ -81,6 +81,14 @@ void erd_cache_destroy(erd_cache_t* self);
  */
 bool erd_cache_update(erd_cache_t* self, tiny_erd_t erd, uint8_t board_address, const uint8_t* data, uint8_t data_size);
 
+/* Forget every entry (the appliance was lost or reprogrammed: its ERD set and
+ * sizes may differ now). Keeps the lock, the throttle rate and the statistics
+ * counters. Takes the cache lock; the publisher task only copies data out
+ * under the lock, and marks entries by pointer only while they stay valid
+ * (see erd_cache_mark_published/unpublished), so it is safe to call while the
+ * publisher runs. */
+void erd_cache_clear(erd_cache_t* self);
+
 /* Set the minimum interval (in seconds) between publishes for any ERD.
  * 0 = disabled (publish on every update). Range: 0-255. */
 void erd_cache_set_throttle_rate_seconds(erd_cache_t* self, uint8_t rate);

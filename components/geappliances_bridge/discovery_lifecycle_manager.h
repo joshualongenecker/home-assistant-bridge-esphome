@@ -56,6 +56,15 @@ class DiscoveryLifecycleManager {
     char device_id[92];
     bool appliance_api_parsing;
     bool filter_config_topics;
+    // Fill what was padding in v4 (see kMaxValidErdsRepublishes):
+    // consecutive republishes that only a valid-ERD fingerprint change caused,
+    // and consecutive change checks since then that saw the fingerprint
+    // unchanged
+    uint8_t valid_erds_republishes;
+    uint8_t valid_erds_stable_checks;
+    // Fingerprint of the host board and the valid-ERD set discovery was
+    // filtered by (see set_valid_erds_fingerprint()); 0 = no filter / unknown
+    uint32_t valid_erds_fingerprint;
   };
 
   // The on-NVS layout is an OTA-compatibility contract: records written by a
@@ -63,7 +72,7 @@ class DiscoveryLifecycleManager {
   // pinned here. A static_assert failure means either the record changed
   // intentionally (bump kRecordVersion so old records are republished once)
   // or accidentally (fix the field).
-  static_assert(sizeof(DiscoveryRecord) == 104, "DiscoveryRecord on-NVS size changed");
+  static_assert(sizeof(DiscoveryRecord) == 108, "DiscoveryRecord on-NVS size changed");
   static_assert(offsetof(DiscoveryRecord, version) == 0, "DiscoveryRecord::version moved");
   static_assert(offsetof(DiscoveryRecord, hash) == 4, "DiscoveryRecord::hash moved");
   static_assert(offsetof(DiscoveryRecord, device_id) == 8, "DiscoveryRecord::device_id moved");
@@ -71,10 +80,45 @@ class DiscoveryLifecycleManager {
                 "DiscoveryRecord::appliance_api_parsing moved");
   static_assert(offsetof(DiscoveryRecord, filter_config_topics) == 101,
                 "DiscoveryRecord::filter_config_topics moved");
+  static_assert(offsetof(DiscoveryRecord, valid_erds_republishes) == 102,
+                "DiscoveryRecord::valid_erds_republishes moved");
+  static_assert(offsetof(DiscoveryRecord, valid_erds_stable_checks) == 103,
+                "DiscoveryRecord::valid_erds_stable_checks moved");
+  static_assert(offsetof(DiscoveryRecord, valid_erds_fingerprint) == 104,
+                "DiscoveryRecord::valid_erds_fingerprint moved");
+
+  // A version 4 record: the layout above up to filter_config_topics, padded to
+  // 104 bytes. Version 5 only appends to it, so it is a prefix of
+  // DiscoveryRecord. The loader decodes one when the current layout doesn't
+  // fit, so an upgraded device sees a stale version (cleanup + republish)
+  // instead of no record at all (publish without cleanup).
+  static constexpr size_t kRecordV4Size = 104;
+  struct DiscoveryRecordV4 {
+    uint8_t bytes[kRecordV4Size];
+  };
+  static_assert(sizeof(DiscoveryRecordV4) == kRecordV4Size, "v4 record size");
+  static_assert(offsetof(DiscoveryRecord, valid_erds_republishes) == kRecordV4Size - 2,
+                "v4 must be a prefix of v5: new fields start in v4's padding");
+
+  // Decode a stored record blob of either layout: sizeof(DiscoveryRecord)
+  // (current) or kRecordV4Size (its version field stays 4, so the change
+  // check cleans up and republishes once). Any other size is no record.
+  static bool decode_record(const uint8_t* blob, size_t size, DiscoveryRecord* out);
+
+  // A valid-ERD set that changes on every boot (partial feature-bit reads)
+  // must not republish and reboot forever: after this many republishes in a
+  // row caused only by the fingerprint, further fingerprint changes are
+  // logged and ignored until the fingerprint has been seen unchanged at
+  // kValidErdsStableChecksToReset change checks in a row (a flapping set
+  // never gets there: every mismatch restarts the streak), or until Discovery
+  // Refresh or another discovery change republishes.
+  static constexpr uint8_t kMaxValidErdsRepublishes = 2;
+  static constexpr uint8_t kValidErdsStableChecksToReset = 3;
 
   // Version 3 adds persisted discovery-affecting config flags. Version 4 adds
-  // the availability topic to every payload.
-  static constexpr uint32_t kRecordVersion = 4;
+  // the availability topic to every payload. Version 5 adds the valid-ERD
+  // fingerprint.
+  static constexpr uint32_t kRecordVersion = 5;
 
   // Grace period between a successful publish and the reboot, so the last
   // discovery packets leave through MQTT before the reset.
@@ -208,6 +252,18 @@ class DiscoveryLifecycleManager {
   // changed.
   void check_discovery_changes(const char* current_device_id);
 
+  // Fingerprint of what discovery is filtered by right now: the host board
+  // and the valid-ERD set from the appliance's feature bits. The bridge sets
+  // it before check_discovery_changes(); it is stored with each publish, and a
+  // different value at a later check means the published entity list no
+  // longer matches the appliance (another board, new firmware with other
+  // features), so discovery is cleaned up and republished. 0 means there is
+  // no filter or it is unknown (feature bits unreadable, appliance API
+  // parsing off): such a check never triggers a republish, so a transient
+  // feature-bit failure at boot cannot cause a republish loop.
+  void set_valid_erds_fingerprint(uint32_t fingerprint) { this->valid_erds_fingerprint_ = fingerprint; }
+  uint32_t valid_erds_fingerprint() const { return this->valid_erds_fingerprint_; }
+
   // Bridge readiness plus a completed device identity.
   bool is_ready() const;
 
@@ -251,6 +307,9 @@ class DiscoveryLifecycleManager {
   bool generate_device_config_{false};
   bool appliance_api_parsing_{false};
   bool filter_config_topics_{false};
+  uint32_t valid_erds_fingerprint_{0};
+  // valid_erds_republishes for the record the next publish saves
+  uint8_t next_valid_erds_republishes_{0};
 
   bool (*is_ready_)(void* context) = nullptr;
   void* is_ready_context_{nullptr};
