@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include "esphome/core/defines.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
@@ -116,13 +117,48 @@ class ProtocolStack {
   bool has_gea3_uart() const { return this->gea3_uart_ != nullptr; }
   bool has_gea2_uart() const { return this->gea2_uart_ != nullptr; }
 
-  i_tiny_gea3_erd_client_t* get_gea3_client() { return &this->gea3_erd_client_.interface; }
-  i_tiny_gea2_erd_client_t* get_gea2_client() { return &this->gea2_erd_client_.interface; }
+  // The protocol-specific accessors return nullptr when the matching define
+  // is absent, so a future caller that skips the has_gea*_uart() guard fails
+  // loudly (nullptr deref) instead of silently operating on a zeroed client
+  // or adapter that no code path ever initialized. The host test build
+  // defines both, so the suite keeps the unguarded-shape coverage.
+  i_tiny_gea3_erd_client_t* get_gea3_client() {
+#ifdef GEA_BRIDGE_HAS_GEA3
+    return &this->gea3_erd_client_.interface;
+#else
+    return nullptr;
+#endif
+  }
+  i_tiny_gea2_erd_client_t* get_gea2_client() {
+#ifdef GEA_BRIDGE_HAS_GEA2
+    return &this->gea2_erd_client_.interface;
+#else
+    return nullptr;
+#endif
+  }
   // The GEA2 ERD client adapter re-publishes GEA2 activity as GEA3-typed
   // events, so subscription-style consumers treat both protocols alike.
-  i_tiny_gea3_erd_client_t* get_gea2_adapter_client() { return &this->gea2_erd_client_adapter_.interface; }
-  esphome_uart_adapter_t* get_gea3_uart_adapter() { return &this->gea3_uart_adapter_; }
-  esphome_uart_adapter_t* get_gea2_uart_adapter() { return &this->gea2_uart_adapter_; }
+  i_tiny_gea3_erd_client_t* get_gea2_adapter_client() {
+#ifdef GEA_BRIDGE_HAS_GEA2
+    return &this->gea2_erd_client_adapter_.interface;
+#else
+    return nullptr;
+#endif
+  }
+  esphome_uart_adapter_t* get_gea3_uart_adapter() {
+#ifdef GEA_BRIDGE_HAS_GEA3
+    return &this->gea3_uart_adapter_;
+#else
+    return nullptr;
+#endif
+  }
+  esphome_uart_adapter_t* get_gea2_uart_adapter() {
+#ifdef GEA_BRIDGE_HAS_GEA2
+    return &this->gea2_uart_adapter_;
+#else
+    return nullptr;
+#endif
+  }
 
   // The shared timer group every data-path component (bridges, managers)
   // registers timers on; the stack's iterations run it.

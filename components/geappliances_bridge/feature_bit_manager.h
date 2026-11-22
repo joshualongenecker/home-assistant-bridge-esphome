@@ -68,6 +68,17 @@ class FeatureBitManager {
   /// ErdRegistry::set_valid_erds: the registry sorts it in place and borrows
   /// the pointer instead of copying the 645-entry set (architecture review
   /// rec 9). nullptr for an empty set, which keeps the filter disabled.
+  ///
+  /// Contract of the borrow (rec 9 review, PR #197):
+  /// - ORDER: from this handoff on, the array is in sorted-ERD order, not
+  ///   parse order. Consumers of get_valid_erds()/get_valid_erd() must not
+  ///   depend on parse order. Verified safe: the only other consumer,
+  ///   erd_poll_list_builder, copies the array into its own result and
+  ///   qsorts it; get_valid_erd(i) is diagnostics/tests only.
+  /// - LIFETIME: the registry points at this array until the bridge is
+  ///   destroyed. Both are members of GeappliancesBridge, so the array
+  ///   outlives the registry; nothing may free or reallocate it in between
+  ///   (it is a fixed member array, never resized).
   tiny_erd_t* get_valid_erds_for_filter() { return valid_erds_count_ > 0 ? valid_erds_ : nullptr; }
 
   FeatureBitState get_state() const { return state_; }

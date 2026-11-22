@@ -215,6 +215,10 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   uint8_t throttle_rate_seconds_{1};
   uint32_t last_cooldown_tick_{0};
   static constexpr uint16_t CUSTOM_ERDS_MAX = 128;
+  // ErdRegistry stores customs in its own ERD_REGISTRY_MAX_EXTRA side array;
+  // a smaller side array would silently drop customs past the cap.
+  static_assert(ERD_REGISTRY_MAX_EXTRA >= CUSTOM_ERDS_MAX,
+                "ERD_REGISTRY_MAX_EXTRA must cover CUSTOM_ERDS_MAX");
   struct custom_erd_entry_t {
     tiny_erd_t erd;
     uint8_t board_address;

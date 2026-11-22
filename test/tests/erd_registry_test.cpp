@@ -231,3 +231,57 @@ TEST(erd_registry, add_valid_erds_respects_capacity)
   // New entries not added.
   CHECK_FALSE(registry.is_valid(0xFFFF));
 }
+
+
+/* ------------------------------------------------------------------ */
+/* rec 9 borrow semantics                                              */
+/* ------------------------------------------------------------------ */
+
+TEST(erd_registry, set_valid_erds_sorts_the_callers_array_in_place)
+{
+  // The rec 9 discriminator: the registry no longer keeps its own copy, so
+  // the caller's array itself must come out sorted. Under the pre-rec 9
+  // copy implementation the caller's array keeps its original (scrambled)
+  // order and this test fails.
+  tiny_erd_t erds[] = { 0x0200, 0x0050, 0x0100, 0x0010 };
+  registry.set_valid_erds(erds, 4);
+
+  CHECK_EQUAL(0x0010, erds[0]);
+  CHECK_EQUAL(0x0050, erds[1]);
+  CHECK_EQUAL(0x0100, erds[2]);
+  CHECK_EQUAL(0x0200, erds[3]);
+}
+
+TEST(erd_registry, re_set_valid_erds_drops_previous_extras)
+{
+  tiny_erd_t base[] = { 0x0001, 0x0002 };
+  registry.set_valid_erds(base, 2);
+
+  tiny_erd_t extra[] = { 0x0F00 };
+  registry.add_valid_erds(extra, 1);
+  CHECK_EQUAL(3, registry.valid_erd_count());
+  CHECK_TRUE(registry.is_valid(0x0F00));
+
+  // Re-pointing the base set starts a fresh merged set: the extras from the
+  // previous base set are gone.
+  tiny_erd_t base2[] = { 0x0008, 0x0009 };
+  registry.set_valid_erds(base2, 2);
+  CHECK_EQUAL(2, registry.valid_erd_count());
+  CHECK_FALSE(registry.is_valid(0x0F00));
+}
+
+TEST(erd_registry, valid_erd_merges_interleaved_extras)
+{
+  // A custom ERD smaller than some base ERDs must land in the merged sorted
+  // view, not appended past the end.
+  tiny_erd_t base[] = { 0x0100, 0x0300 };
+  registry.set_valid_erds(base, 2);
+
+  tiny_erd_t extra[] = { 0x0200 };
+  registry.add_valid_erds(extra, 1);
+
+  CHECK_EQUAL(3, registry.valid_erd_count());
+  CHECK_EQUAL(0x0100, registry.valid_erd(0));
+  CHECK_EQUAL(0x0200, registry.valid_erd(1));
+  CHECK_EQUAL(0x0300, registry.valid_erd(2));
+}

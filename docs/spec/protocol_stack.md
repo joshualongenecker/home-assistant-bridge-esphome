@@ -56,8 +56,8 @@ ESPHome applies configuration after the component is constructed, so the UART po
 | `teardown()` | Reset per-run state (GEA2 tick tracking, the GEA2-active latch) so a re-init starts fresh |
 | `run(gea2_pending)` | Drive one iteration: GEA2 tight loop / GEA3 iteration / timer-only |
 | `set_gea2_active(active)` | Sticky "GEA2 is the active protocol" latch (manual `device_id` configs with only a GEA2 UART) |
-| `get_gea3_client()` / `get_gea2_client()` | The GEA3 / GEA2 ERD client interfaces |
-| `get_gea2_adapter_client()` | The GEA2→GEA3 adapter client, which re-publishes GEA2 activity as GEA3-typed events |
+| `get_gea3_client()` / `get_gea2_client()` | The GEA3 / GEA2 ERD client interfaces; `nullptr` when the matching define is absent (requirement 3.5.2) |
+| `get_gea2_adapter_client()` | The GEA2→GEA3 adapter client, which re-publishes GEA2 activity as GEA3-typed events; `nullptr` without `GEA_BRIDGE_HAS_GEA2` |
 | `timer_group()` | The shared timer group every data-path component registers timers on |
 
 ---
@@ -140,9 +140,9 @@ The GEA2 tight loop MUST run for `kGea2LoopDurationMs` (100 ms — the full TX�
 
 **Rationale:** the buffers are the largest static cost of the stack — 5351 B for GEA3 (255 + 1000 + 4096) and 8447 B for GEA2 (255 + 4096 + 4096) — and a single-UART device can never touch the other protocol's. Measured on `docs/test-compile-gea3-only.yaml` (esp32c3, ESP-IDF): 156 990 B → 148 542 B RAM and 1 476 284 B → 1 472 036 B flash. A build with neither define is the host test build, which runs no codegen; keeping it "both stacks" means the suite still covers both paths.
 
-**Implementation:** the normalization block at the top of `protocol_stack.h`, the `#ifdef` around the buffer members, and the `#ifdef` around the two `init()` blocks in `protocol_stack.cpp`. Only the buffers are gated: the interface, ERD client, adapter and tick-source members stay declared (a few hundred bytes) so the accessors and the orchestration layer need no variant handling.
+**Implementation:** the normalization block at the top of `protocol_stack.h`, the `#ifdef` around the buffer members, and the `#ifdef` around the two `init()` blocks in `protocol_stack.cpp`. Only the buffers and the five protocol-specific accessors carry variant handling; the interface, ERD client, adapter and tick-source members stay declared (a few hundred bytes) so the orchestration layer needs none.
 
-**Verification:** `make check-protocol-variants` compiles every component source with `-DGEA_BRIDGE_HAS_GEA3` and with `-DGEA_BRIDGE_HAS_GEA2` alone (run by `test.yml`); removing the guard around a buffer reference fails it. `scripts/check_protocol_buffer_defines.py` asserts the defines track the configured UARTs in the generated build of both `docs/test-compile.yaml` and `docs/test-compile-gea3-only.yaml`.
+**Verification:** `make check-protocol-variants` compiles every component source with `-DGEA_BRIDGE_HAS_GEA3` and with `-DGEA_BRIDGE_HAS_GEA2` alone (run by `test.yml`); removing the guard around a buffer reference fails it. `scripts/check_protocol_buffer_defines.py` asserts the defines track the configured UARTs in the generated builds of `docs/test-compile.yaml`, `docs/test-compile-gea3-only.yaml` and `docs/test-compile-gea2-only.yaml` (run by `esphome-compile.yml`). `protocol_stack.h` includes `esphome/core/defines.h` directly, so the on-device define does not depend on an indirect include chain.
 
 #### Requirement 3.5.2: The Runtime Gate Follows the Compile-Time Gate
 
@@ -151,6 +151,8 @@ When `GEA_BRIDGE_HAS_GEA3` is absent, `init()` MUST set `gea3_uart_` to null reg
 **Rationale:** the coupling between "define emitted" and "UART configured" lives in codegen, not in this file. Pinning the pointer locally turns a divergence into a disabled protocol instead of a GEA2 write into a non-existent 4096-byte ring.
 
 **Implementation:** the `#ifdef`/`#else` around the two pointer assignments at the top of `init()`.
+
+**Accessor contract (rec 9 review):** the protocol-specific accessors (`get_gea3_client()`, `get_gea2_client()`, `get_gea2_adapter_client()`, `get_gea3_uart_adapter()`, `get_gea2_uart_adapter()`) return `nullptr` when the matching define is absent. A caller that skips the `has_gea*_uart()` guard then fails loudly (null deref) instead of silently operating on a zeroed client or adapter that no code path initialized. The host test build defines both, so the suite keeps the unguarded-shape coverage.
 
 ---
 

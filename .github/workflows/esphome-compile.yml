@@ -77,11 +77,16 @@ jobs:
         run: |
           esphome compile --only-generate docs/test-compile-gea3-only.yaml
 
+      - name: Generate GEA2-only configuration
+        run: |
+          esphome compile --only-generate docs/test-compile-gea2-only.yaml
+
       - name: Verify protocol buffer defines track the configured UARTs
         run: |
           python3 scripts/check_protocol_buffer_defines.py \
             docs/.esphome/build/gea-esphome-test \
-            docs/.esphome/build/gea-test-gea3-only
+            docs/.esphome/build/gea-test-gea3-only \
+            docs/.esphome/build/gea-test-gea2-only
 
       - name: Clean up secrets
         if: always()

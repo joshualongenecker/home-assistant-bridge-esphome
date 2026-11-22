@@ -152,7 +152,9 @@ void GeappliancesBridge::initialize_erd_bridge_()
       this->feature_bit_manager_.get_valid_erd_count() > 0) {
     this->erd_registry_.set_valid_erds(this->feature_bit_manager_.get_valid_erds_for_filter(),
                                        this->feature_bit_manager_.get_valid_erd_count());
-    // Merge custom ERDs so they always pass the filter.
+    // Merge custom ERDs so they pass the filter — up to the merged cap
+    // (ERD_REGISTRY_MAX_VALID); past it add_valid_erds() drops them, same as
+    // the pre-rec-9 copy kept the total at 645.
     if (this->custom_erds_count_ > 0) {
       std::vector<tiny_erd_t> erd_ids(this->custom_erds_count_);
       for (uint16_t i = 0; i < this->custom_erds_count_; i++) {

@@ -132,7 +132,7 @@ class ErdRegistry {
 | `extra_count_` | `uint16_t` | Number of owned entries. |
 | `valid_erds_ready_` | `bool` | Gate: when `true`, the valid-ERD filter is active. |
 
-The borrowed set is capped at `ERD_REGISTRY_MAX_VALID = 645` and the owned additions at `ERD_REGISTRY_MAX_EXTRA = 128`. Both are written at bridge initialization (`set_valid_erds()` then `add_valid_erds()`) and read-only afterwards. Borrowing instead of copying is what keeps the 645-entry set living in exactly one place; the cost is a second binary search in `is_valid()` and an `O(n)` merged walk in `valid_erd()`.
+The borrowed set is capped at `ERD_REGISTRY_MAX_VALID = 645` and the owned additions at `ERD_REGISTRY_MAX_EXTRA = 128`. Both are written at bridge initialization (`set_valid_erds()` then `add_valid_erds()`) and read-only afterwards. Borrowing instead of copying is what keeps the 645-entry set living in exactly one place; the cost is a second binary search in `is_valid()` and an `O(n)` merged walk in `valid_erd()`. Two static_asserts pin the constants to their sources (`FEATURE_BIT_MAX_ERDS`, `GeappliancesBridge::CUSTOM_ERDS_MAX`), so a silent cap drift — which would suppress publications — cannot compile.
 
 ---
 

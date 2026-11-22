@@ -49,6 +49,8 @@ def check(build_dir: Path) -> list[str]:
 
     defines = defines_path.read_text(encoding="utf-8", errors="replace")
     main = main_path.read_text(encoding="utf-8", errors="replace")
+    # A commented-out setter call must not count as a configured UART.
+    main = re.sub(r"//[^\n]*", "", main)
     problems: list[str] = []
     emitted = set()
 
