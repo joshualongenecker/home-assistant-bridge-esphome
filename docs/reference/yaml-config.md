@@ -115,6 +115,31 @@ geappliances_bridge:
 
 Set to `false` to disable.
 
+## Reconnect Appliance Button
+
+| Parameter | Type | Default |
+|---|---|---|
+| `reconnect_appliance_button` | `button` or `bool` | Auto-created |
+
+Exposes an ESPHome button entity that treats the appliance as lost and connects to it again, without rebooting the device. Pressing it drops the subscription, polling and write bridges, clears the ERD cache, the valid-ERD filter and the feature bits, and runs the appliance startup again from the stabilization delay: autodiscovery, feature bits, bridge init. The MQTT connection, the device ID (so the MQTT topics and the Home Assistant device stay the same) and the HA discovery state are kept.
+
+Use it after the appliance's boards were reprogrammed or reset behind the bridge's back: new firmware can change which ERDs exist, their sizes and the feature bits. It does not republish HA discovery; press Discovery Refresh as well if the appliance's feature set changed.
+
+From YAML, press it with ESPHome's `button.press` action, for example from another component's trigger:
+
+```yaml
+geappliances_bridge:
+  gea3_uart_id: gea3_uart
+  reconnect_appliance_button:
+    id: reconnect_appliance
+    name: "Reconnect Appliance"
+
+# elsewhere
+    - button.press: reconnect_appliance
+```
+
+Set to `false` to disable.
+
 ## Complete Example
 
 ```yaml
@@ -134,4 +159,6 @@ geappliances_bridge:
   mqtt_publish_rate_sensor: true
   discovery_refresh_button:
     name: "Discovery Refresh"
+  reconnect_appliance_button:
+    name: "Reconnect Appliance"
 ```

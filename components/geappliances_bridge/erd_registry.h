@@ -29,6 +29,10 @@ class ErdRegistry {
   /// call is a no-op (filtering stays disabled).
   void add_valid_erds(const tiny_erd_t* erds, uint16_t count);
 
+  /// Forget the valid-ERD set and disable filtering until set_valid_erds()
+  /// is called again (the appliance was lost or reprogrammed).
+  void clear_valid_erds() { valid_erds_count_ = 0; valid_erds_ready_ = false; }
+
   // -------------------------------------------------------------------------
   // Runtime methods (called by the subscription bridge during operation)
   // -------------------------------------------------------------------------
