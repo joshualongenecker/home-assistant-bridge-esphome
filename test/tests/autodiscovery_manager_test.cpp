@@ -632,3 +632,74 @@ TEST(autodiscovery_manager, targeted_probe_rejects_wrong_source_address)
   // Discovery should NOT have completed — wrong source address was ignored.
   CHECK(manager.get_state() != AUTODISCOVERY_COMPLETE);
 }
+
+/* ------------------------------------------------------------------ */
+/* The Wi-Fi module (0xBE / 0xBF) is not an appliance board             */
+/* ------------------------------------------------------------------ */
+
+TEST(autodiscovery_manager, wifi_module_answer_at_0xBF_is_ignored)
+{
+  init_both_uart();
+  expect_gea3_broadcast_read();
+  manager.start();
+
+  // The Wi-Fi module answers first; the control board after it
+  simulate_broadcast_response(0xBF, 35, true);
+  simulate_broadcast_response(0xC0, 35, true);
+  esphome_hal_double_set_millis(AUTODISCOVERY_BROADCAST_WINDOW_MS + 100);
+  advance_timers();
+
+  CHECK_EQUAL(AUTODISCOVERY_COMPLETE, manager.get_state());
+  CHECK_EQUAL(0xC0, manager.get_host_address());
+}
+
+TEST(autodiscovery_manager, wifi_module_answer_at_0xBE_is_ignored)
+{
+  init_both_uart();
+  expect_gea3_broadcast_read();
+  manager.start();
+
+  simulate_broadcast_response(0xBE, 35, true);
+  simulate_broadcast_response(0xC1, 35, true);
+  esphome_hal_double_set_millis(AUTODISCOVERY_BROADCAST_WINDOW_MS + 100);
+  advance_timers();
+
+  CHECK_EQUAL(AUTODISCOVERY_COMPLETE, manager.get_state());
+  CHECK_EQUAL(0xC1, manager.get_host_address());
+}
+
+TEST(autodiscovery_manager, only_the_wifi_module_answering_keeps_discovering)
+{
+  init_gea3_only();
+  expect_gea3_broadcast_read();
+  manager.start();
+
+  simulate_broadcast_response(0xBF, 35, true);
+
+  expect_gea3_broadcast_read();  // no appliance board answered: retry
+  esphome_hal_double_set_millis(AUTODISCOVERY_BROADCAST_WINDOW_MS + 100);
+  advance_timers();
+
+  CHECK(manager.get_state() == AUTODISCOVERY_GEA3_BROADCAST_WAITING);
+  CHECK(manager.get_active_erd_client() == nullptr);
+}
+
+TEST(autodiscovery_manager, configured_board_address_0xBF_is_still_honored)
+{
+  init_both_uart();
+  manager.set_target_address(0xBF);
+  mock().expectOneCall("read")
+    .onObject(&gea3_client.interface)
+    .withParameter("address", 0xBF)
+    .withParameter("erd", ERD_APPLIANCE_TYPE)
+    .ignoreOtherParameters()
+    .andReturnValue(true);
+  manager.start();
+
+  simulate_broadcast_response(0xBF, 35, true);
+  esphome_hal_double_set_millis(AUTODISCOVERY_BROADCAST_WINDOW_MS + 100);
+  advance_timers();
+
+  CHECK_EQUAL(AUTODISCOVERY_COMPLETE, manager.get_state());
+  CHECK_EQUAL(0xBF, manager.get_host_address());
+}

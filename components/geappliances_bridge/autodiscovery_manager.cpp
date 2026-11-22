@@ -320,6 +320,13 @@ void AutodiscoveryManager::on_broadcast_response(uint8_t address, uint8_t applia
     return;
   }
 
+  if (!this->target_address_set_ &&
+      (address == AUTODISCOVERY_WIFI_MODULE_ADDRESS_1 ||
+       address == AUTODISCOVERY_WIFI_MODULE_ADDRESS_2)) {
+    ESP_LOGD(TAG, "Ignoring response from 0x%02X (Wi-Fi module)", address);
+    return;
+  }
+
   bool in_gea3_waiting = (this->state_ == AUTODISCOVERY_GEA3_BROADCAST_WAITING);
   bool in_gea2_waiting = (this->state_ == AUTODISCOVERY_GEA2_BROADCAST_WAITING);
 

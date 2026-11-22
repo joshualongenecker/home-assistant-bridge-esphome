@@ -38,6 +38,13 @@ namespace geappliances_bridge {
 
 static constexpr uint32_t AUTODISCOVERY_BROADCAST_WINDOW_MS = 1000;
 
+// The Wi-Fi module's addresses. It answers the appliance-type broadcast too
+// (relaying the appliance's identity), often before the control board, but it
+// is not an appliance board the bridge can work with, so broadcast answers
+// from these addresses are ignored. A configured board_address still wins.
+static constexpr uint8_t AUTODISCOVERY_WIFI_MODULE_ADDRESS_1 = 0xBE;
+static constexpr uint8_t AUTODISCOVERY_WIFI_MODULE_ADDRESS_2 = 0xBF;
+
 enum AutodiscoveryState {
   AUTODISCOVERY_IDLE,
   AUTODISCOVERY_GEA3_BROADCAST_PENDING,
