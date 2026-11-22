@@ -710,6 +710,7 @@ bool GeappliancesBridge::check_steady_state()
     }
 
     if (this->generate_device_config_) {
+      this->discovery_lifecycle_manager_.set_valid_erds_fingerprint(this->valid_erds_fingerprint_());
       this->discovery_lifecycle_manager_.check_discovery_changes(
           this->device_identity_manager_.get_device_id());
     }
@@ -717,6 +718,46 @@ bool GeappliancesBridge::check_steady_state()
 
   return steady;
 }
+
+// FNV-1a over what HA discovery is filtered by: the host address, the boards
+// that have ERDs in the cache (secondary boards reach it through the poll
+// list, not the registry), and the sorted valid-ERD set. 0 when there is no
+// filter (feature bits unreadable, appliance API parsing off), which the
+// change check ignores.
+uint32_t GeappliancesBridge::valid_erds_fingerprint_()
+{
+  if (!this->erd_registry_.has_valid_erds_filter()) {
+    return 0;
+  }
+  uint32_t hash = 2166136261u;
+  auto mix = [&hash](uint8_t byte) {
+    hash ^= byte;
+    hash *= 16777619u;
+  };
+  mix(this->autodiscovery_manager_.get_host_address());
+
+  // Distinct board addresses in the cache, in ascending order
+  bool board_present[256] = {false};
+  uint16_t iterator = 0;
+  const erd_cache_entry_t* entry;
+  while ((entry = erd_cache_get_next_entry(&this->erd_cache_, &iterator)) != nullptr) {
+    board_present[entry->board_address] = true;
+  }
+  for (uint16_t address = 0; address < 256; address++) {
+    if (board_present[address]) {
+      mix(static_cast<uint8_t>(address));
+    }
+  }
+  mix(0xFF);  // separator before the ERD list
+
+  for (uint16_t i = 0; i < this->erd_registry_.valid_erd_count(); i++) {
+    tiny_erd_t erd = this->erd_registry_.valid_erd(i);
+    mix(static_cast<uint8_t>(erd >> 8));
+    mix(static_cast<uint8_t>(erd & 0xFF));
+  }
+  return hash != 0 ? hash : 1;
+}
+
 bool GeappliancesBridge::is_erd_cache_publisher_initialized() const
 {
   return erd_cache_publisher_.cache != nullptr;

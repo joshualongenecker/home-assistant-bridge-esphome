@@ -81,9 +81,17 @@ bool load_discovery_record(void*, DiscoveryLifecycleManager::DiscoveryRecord* ou
   auto pref = global_preferences->make_preference<DiscoveryLifecycleManager::DiscoveryRecord>(
       kDiscoveryNvsKey);
   DiscoveryLifecycleManager::DiscoveryRecord stored{};
-  if (!pref.load(&stored)) return false;
-  *out = stored;
-  return true;
+  if (pref.load(&stored)) {
+    return DiscoveryLifecycleManager::decode_record(
+        reinterpret_cast<const uint8_t*>(&stored), sizeof(stored), out);
+  }
+  // A record written by firmware with the version 4 layout: ESPHome won't load
+  // a blob of another size as the current struct, so read the old size.
+  auto legacy = global_preferences->make_preference<DiscoveryLifecycleManager::DiscoveryRecordV4>(
+      kDiscoveryNvsKey);
+  DiscoveryLifecycleManager::DiscoveryRecordV4 old{};
+  if (!legacy.load(&old)) return false;
+  return DiscoveryLifecycleManager::decode_record(old.bytes, sizeof(old.bytes), out);
 }
 
 void save_discovery_record(void*, const DiscoveryLifecycleManager::DiscoveryRecord& record) {
@@ -92,9 +100,10 @@ void save_discovery_record(void*, const DiscoveryLifecycleManager::DiscoveryReco
   pref.save(&record);
   global_preferences->sync();
   ESP_LOGD(TAG, "Stored discovery state hash=0x%08" PRIx32
-           " device_id=%s api_parsing=%d filter_topics=%d",
+           " device_id=%s api_parsing=%d filter_topics=%d valid_erds=0x%08" PRIx32,
            record.hash, record.device_id,
-           record.appliance_api_parsing, record.filter_config_topics);
+           record.appliance_api_parsing, record.filter_config_topics,
+           record.valid_erds_fingerprint);
 }
 
 void confirm_firmware(void*) {
@@ -238,6 +247,16 @@ bool DiscoveryLifecycleManager::claim_request_(Phase target, Trigger trigger,
   return true;
 }
 
+bool DiscoveryLifecycleManager::decode_record(const uint8_t* blob, size_t size,
+                                              DiscoveryRecord* out) {
+  if (blob == nullptr || out == nullptr) return false;
+  if (size != sizeof(DiscoveryRecord) && size != kRecordV4Size) return false;
+  DiscoveryRecord record{};
+  memcpy(&record, blob, size);  // v4 is a prefix; the newer fields stay 0
+  *out = record;
+  return true;
+}
+
 void DiscoveryLifecycleManager::trigger_ota_cleanup() {
   if (!this->claim_request_(kPhaseQueuedCleanup, kTriggerOta, "Discovery cleanup")) {
     return;
@@ -272,6 +291,7 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
   if (!this->generate_device_config_) {
     return;
   }
+  this->next_valid_erds_republishes_ = 0;
 
   // Refresh the availability topic before hashing: the manager's buffers are
   // only guaranteed populated at publish time, and the hash must reflect the
@@ -299,14 +319,51 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
       (stored.appliance_api_parsing != this->appliance_api_parsing_);
   const bool filter_topics_changed =
       (stored.filter_config_topics != this->filter_config_topics_);
+  // Only a known fingerprint counts (see set_valid_erds_fingerprint())
+  const bool valid_erds_changed =
+      (this->valid_erds_fingerprint_ != 0 &&
+       stored.valid_erds_fingerprint != this->valid_erds_fingerprint_);
 
   if (hash_changed || device_id_changed || api_parsing_changed || filter_topics_changed) {
-    ESP_LOGI(TAG, "Discovery state changed (hash=%s, device_id=%s, api_parsing=%s, filter_topics=%s), cleaning old topics",
+    ESP_LOGI(TAG, "Discovery state changed (hash=%s, device_id=%s, api_parsing=%s, filter_topics=%s, valid_erds=%s), cleaning old topics",
              hash_changed ? "changed" : "same",
              device_id_changed ? "changed" : "same",
              api_parsing_changed ? "changed" : "same",
-             filter_topics_changed ? "changed" : "same");
+             filter_topics_changed ? "changed" : "same",
+             valid_erds_changed ? "changed" : "same");
     this->trigger_ota_cleanup();
+    return;
+  }
+
+  if (valid_erds_changed) {
+    // The only trigger read live from the appliance: bound it (see
+    // kMaxValidErdsRepublishes)
+    if (stored.valid_erds_republishes >= kMaxValidErdsRepublishes) {
+      ESP_LOGW(TAG, "Valid-ERD set changed again after %u republishes in a row; not republishing "
+                    "(the appliance's feature bits may be read inconsistently). Press Discovery "
+                    "Refresh to republish.",
+               (unsigned) stored.valid_erds_republishes);
+      if (stored.valid_erds_stable_checks != 0) {
+        stored.valid_erds_stable_checks = 0;  // the streak is broken
+        this->hooks_.save_discovery_record(this->hooks_.context, stored);
+      }
+      return;
+    }
+    this->next_valid_erds_republishes_ = static_cast<uint8_t>(stored.valid_erds_republishes + 1);
+    ESP_LOGI(TAG, "Discovery state changed (valid_erds=changed), cleaning old topics");
+    this->trigger_ota_cleanup();
+    return;
+  }
+
+  // Nothing changed. Enough checks in a row with the fingerprint unchanged
+  // end a run of fingerprint-driven republishes.
+  if (stored.valid_erds_republishes != 0 && this->valid_erds_fingerprint_ != 0) {
+    stored.valid_erds_stable_checks++;
+    if (stored.valid_erds_stable_checks >= kValidErdsStableChecksToReset) {
+      stored.valid_erds_republishes = 0;
+      stored.valid_erds_stable_checks = 0;
+    }
+    this->hooks_.save_discovery_record(this->hooks_.context, stored);
   }
 }
 
@@ -388,6 +445,10 @@ void DiscoveryLifecycleManager::finish_publish_() {
   [[maybe_unused]] const char* trigger_kind = this->trigger_ == kTriggerInitial
       ? "Initial"
       : (this->trigger_ == kTriggerDiscoveryRefresh ? "Refresh" : "OTA");
+  // A Discovery Refresh run ends any run of fingerprint-driven republishes.
+  // Decided from trigger_ (published by the claim's release store), not by
+  // the refresh trigger writing the count: that may run on another task.
+  const bool refresh_run = this->trigger_ == kTriggerDiscoveryRefresh;
   this->trigger_ = kTriggerNone;
 
   DiscoveryRecord record{};
@@ -399,6 +460,10 @@ void DiscoveryLifecycleManager::finish_publish_() {
   record.device_id[sizeof(record.device_id) - 1] = '\0';
   record.appliance_api_parsing = this->appliance_api_parsing_;
   record.filter_config_topics = this->filter_config_topics_;
+  record.valid_erds_fingerprint = this->valid_erds_fingerprint_;
+  record.valid_erds_republishes = refresh_run ? 0 : this->next_valid_erds_republishes_;
+  record.valid_erds_stable_checks = 0;
+  this->next_valid_erds_republishes_ = 0;
   this->hooks_.save_discovery_record(this->hooks_.context, record);
 
   // The reboot below pays for whatever the run did to the heap, so the abort
