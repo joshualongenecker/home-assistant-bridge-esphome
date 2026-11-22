@@ -13,6 +13,11 @@ on:
       - 'components/geappliances_bridge/**'
       - 'scripts/check_diagnostic_mqtt_wrappers.py'
       - '.github/workflows/esphome-compile.yml'
+  # Weekly (Mondays), so a new ESPHome or Python release is built against even when
+  # nothing in the repo changed
+  schedule:
+    - cron: '17 7 * * 1'
+  workflow_dispatch:
 
 jobs:
   compile-test:
@@ -31,7 +36,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          # Always the newest Python release: ESPHome drops old Pythons, and
+          # pip would otherwise quietly install an older ESPHome
+          python-version: '3.x'
+          check-latest: true
 
       - name: Cache pip packages
         uses: actions/cache@v4
@@ -53,7 +61,18 @@ jobs:
       - name: Install ESPHome
         run: |
           pip install --upgrade pip
-          pip install esphome
+          pip install --upgrade esphome
+
+      - name: Check this is the latest ESPHome
+        run: |
+          python --version
+          installed=$(python -c "import importlib.metadata as m; print(m.version('esphome'))")
+          latest=$(curl -fsSL https://pypi.org/pypi/esphome/json | python -c "import json,sys; print(json.load(sys.stdin)['info']['version'])")
+          echo "ESPHome installed: $installed, latest on PyPI: $latest"
+          if [ "$installed" != "$latest" ]; then
+            echo "::error::Installed ESPHome $installed, not the latest $latest (does it need a newer Python?)"
+            exit 1
+          fi
 
       - name: Copy test secrets
         run: |
