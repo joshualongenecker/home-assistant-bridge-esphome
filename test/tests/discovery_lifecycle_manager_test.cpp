@@ -1090,9 +1090,24 @@ TEST(discovery_lifecycle_manager, a_stable_fingerprint_clears_the_republish_coun
 
 TEST(discovery_lifecycle_manager, discovery_refresh_resets_the_republish_count)
 {
+  /* A fingerprint-driven run that fails with the abort-reboot budget spent
+   * stays up and leaves the next count pending (1) with nothing saved; a
+   * Discovery Refresh pressed afterwards is a user's republish and must not
+   * be counted against the budget. */
+  hooks_.abort_count = DiscoveryLifecycleManager::kMaxAbortReboots;
   hooks_.stored = matching_record();
+  hooks_.stored.valid_erds_fingerprint = 0x11111111u;
   hooks_.has_stored = true;
   lifecycle_.set_valid_erds_fingerprint(0x22222222u);
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedCleanup, lifecycle_.phase());
+
+  lifecycle_.loop();  // begins the cleanup
+  manager_.cleanup.state = ha_cleanup_state_done;
+  lifecycle_.loop();  // on to publishing
+  end_publish_run(ha_discovery_state_failed);
+  CHECK_EQUAL(0, hooks_.save_calls);
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
 
   lifecycle_.trigger_discovery_refresh();
   lifecycle_.loop();
@@ -1100,6 +1115,7 @@ TEST(discovery_lifecycle_manager, discovery_refresh_resets_the_republish_count)
   lifecycle_.loop();
   end_publish_run(ha_discovery_state_complete);
 
+  CHECK_EQUAL(1, hooks_.save_calls);
   CHECK_EQUAL(0, hooks_.saved.valid_erds_republishes);
   CHECK_EQUAL(0x22222222u, hooks_.saved.valid_erds_fingerprint);
 }
