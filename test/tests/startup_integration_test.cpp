@@ -2002,3 +2002,135 @@ TEST(startup_integration, steady_state_window_leaks_no_heap)
 
   CHECK(bridge->teardown());
 }
+/* ================================================================== */
+/* restart_appliance_connection: the appliance is treated as lost       */
+/* ================================================================== */
+
+TEST(startup_integration, restart_before_setup_is_safe)
+{
+  configure_poll_mode();
+  bridge->restart_appliance_connection();
+  bridge->setup();
+  bridge->loop();
+  CHECK(bridge->teardown());
+}
+
+TEST(startup_integration, restart_before_first_loop_is_safe)
+{
+  configure_poll_mode();
+  bridge->setup();
+  bridge->restart_appliance_connection();
+  bridge->loop();
+  bridge->loop();
+  CHECK(bridge->teardown());
+}
+
+TEST(startup_integration, restart_runs_the_startup_again_from_the_stabilization_delay)
+{
+  configure_poll_mode();
+  bridge->setup();
+  bridge->loop();  // enters the stabilization delay at t=0
+
+  const uint32_t later = AUTODISCOVERY_STARTUP_DELAY_MS + 100;
+  esphome_hal_double_set_millis(later);
+  bridge->loop();  // delay elapsed: on to autodiscovery
+  IBridgeServices* services = bridge;
+  CHECK(services->is_startup_delay_elapsed());
+
+  bridge->restart_appliance_connection();
+  bridge->loop();  // the restart runs, and the delay starts again now
+
+  CHECK_FALSE(services->is_startup_delay_elapsed());
+  CHECK_FALSE(services->is_autodiscovery_complete());
+  CHECK_FALSE(services->is_bridge_initialized());
+
+  esphome_hal_double_set_millis(later + AUTODISCOVERY_STARTUP_DELAY_MS + 100);
+  CHECK(services->is_startup_delay_elapsed());
+  bridge->loop();
+  CHECK(bridge->teardown());
+}
+
+TEST(startup_integration, restart_keeps_the_mqtt_client)
+{
+  configure_poll_mode();
+  bridge->setup();
+  bridge->loop();
+  IBridgeServices* services = bridge;
+  services->initialize_mqtt_client();
+  CHECK(services->is_mqtt_client_initialized());
+
+  bridge->restart_appliance_connection();
+  bridge->loop();
+
+  CHECK(services->is_mqtt_client_initialized());
+  CHECK(bridge->teardown());
+}
+
+TEST(startup_integration, repeated_restarts_are_safe)
+{
+  configure_poll_mode();
+  bridge->setup();
+  for (int i = 0; i < 5; i++) {
+    bridge->loop();
+    bridge->restart_appliance_connection();
+    bridge->restart_appliance_connection();
+    esphome_hal_double_set_millis((uint32_t)(i + 1) * 1000);
+  }
+  bridge->loop();
+  CHECK(bridge->teardown());
+}
+
+TEST(startup_integration, teardown_drops_a_pending_restart)
+{
+  configure_poll_mode();
+  bridge->setup();
+  bridge->loop();
+  bridge->restart_appliance_connection();
+  CHECK(bridge->teardown());
+
+  bridge->setup();
+  bridge->loop();
+  IBridgeServices* services = bridge;
+  CHECK_FALSE(services->is_bridge_initialized());
+  CHECK(bridge->teardown());
+}
+
+TEST(startup_integration, restart_in_every_mode_and_uart_combination_is_safe)
+{
+  const uint8_t modes[] = {BRIDGE_MODE_POLL, BRIDGE_MODE_SUBSCRIBE, BRIDGE_MODE_AUTO};
+  for (uint8_t mode : modes) {
+    for (int uarts = 0; uarts < 4; uarts++) {
+      GeappliancesBridge* b = new GeappliancesBridge();
+      if (uarts & 1) b->set_gea3_uart(mock_uart);
+      if (uarts & 2) b->set_gea2_uart(mock_uart);
+      b->set_mode(mode);
+      b->setup();
+      b->loop();
+      b->restart_appliance_connection();
+      b->loop();
+      b->loop();
+      CHECK(b->teardown());
+      delete b;
+    }
+  }
+}
+
+TEST(startup_integration, reconnect_appliance_button_restarts_the_startup)
+{
+  configure_poll_mode();
+  bridge->setup();
+  bridge->loop();
+  const uint32_t later = AUTODISCOVERY_STARTUP_DELAY_MS + 100;
+  esphome_hal_double_set_millis(later);
+  bridge->loop();
+  IBridgeServices* services = bridge;
+  CHECK(services->is_startup_delay_elapsed());
+
+  ReconnectApplianceButton button(bridge);
+  button.press_action();
+  CHECK(services->is_startup_delay_elapsed());  // nothing happens until loop()
+  bridge->loop();
+
+  CHECK_FALSE(services->is_startup_delay_elapsed());
+  CHECK(bridge->teardown());
+}

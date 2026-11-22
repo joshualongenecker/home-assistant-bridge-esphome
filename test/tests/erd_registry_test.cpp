@@ -231,3 +231,28 @@ TEST(erd_registry, add_valid_erds_respects_capacity)
   // New entries not added.
   CHECK_FALSE(registry.is_valid(0xFFFF));
 }
+
+TEST(erd_registry, clear_valid_erds_disables_the_filter)
+{
+  tiny_erd_t erds[] = {0x0001, 0x0002};
+  registry.set_valid_erds(erds, 2);
+
+  registry.clear_valid_erds();
+
+  CHECK_FALSE(registry.has_valid_erds_filter());
+  CHECK_EQUAL(0, registry.valid_erd_count());
+  CHECK_TRUE(registry.is_valid(0x1234));
+}
+
+TEST(erd_registry, set_valid_erds_after_clear_installs_the_new_set)
+{
+  tiny_erd_t old_erds[] = {0x0001};
+  tiny_erd_t new_erds[] = {0x0002, 0x0003};
+  registry.set_valid_erds(old_erds, 1);
+  registry.clear_valid_erds();
+
+  registry.set_valid_erds(new_erds, 2);
+
+  CHECK_FALSE(registry.is_valid(0x0001));
+  CHECK_TRUE(registry.is_valid(0x0002));
+}

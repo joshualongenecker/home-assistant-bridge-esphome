@@ -922,3 +922,90 @@ TEST(erd_cache, mark_all_updated_sets_dirty_count_to_entry_count)
   erd_cache_mark_all_updated(&cache);
   CHECK_EQUAL(5, erd_cache_get_dirty_count(&cache));
 }
+
+// ---------------------------------------------------------------------------
+// erd_cache_clear: the appliance was lost or reprogrammed
+// ---------------------------------------------------------------------------
+
+TEST(erd_cache, clear_forgets_every_entry)
+{
+  uint8_t a[] = {0x01};
+  uint8_t b[] = {0x02, 0x03};
+  erd_cache_update(&cache, 0x1234, 0xC0, a, sizeof(a));
+  erd_cache_update(&cache, 0x5678, 0xC1, b, sizeof(b));
+  CHECK_EQUAL(2, erd_cache_get_count(&cache));
+
+  erd_cache_clear(&cache);
+
+  CHECK_EQUAL(0, erd_cache_get_count(&cache));
+  CHECK_EQUAL(0, erd_cache_get_dirty_count(&cache));
+  CHECK_EQUAL(0, erd_cache_get_arena_usage(&cache));
+  POINTERS_EQUAL(NULL, find_entry(&cache, 0x1234, 0xC0));
+}
+
+TEST(erd_cache, clear_accepts_a_new_size_for_the_same_erd)
+{
+  // New firmware may change an ERD's size; before the clear that reads as
+  // "appliance lost" and the update is refused
+  uint8_t one[] = {0x01};
+  uint8_t two[] = {0x01, 0x02};
+  erd_cache_update(&cache, 0x1234, 0xC0, one, sizeof(one));
+
+  erd_cache_clear(&cache);
+
+  CHECK_TRUE(erd_cache_update(&cache, 0x1234, 0xC0, two, sizeof(two)));
+  erd_cache_entry_t* e = find_entry(&cache, 0x1234, 0xC0);
+  CHECK(e != NULL);
+  CHECK_EQUAL(2, e->data_size);
+}
+
+TEST(erd_cache, clear_keeps_the_throttle_rate)
+{
+  erd_cache_set_throttle_rate_seconds(&cache, 5);
+  erd_cache_clear(&cache);
+  CHECK_EQUAL(5, cache.max_cooldown);
+}
+
+TEST(erd_cache, clear_keeps_the_lock)
+{
+  erd_cache_clear(&cache);
+  CHECK(cache.lock != NULL);
+  CHECK_TRUE(cache.initialized);
+}
+
+TEST(erd_cache, mark_unpublished_ignores_an_entry_cleared_since_the_snapshot)
+{
+  uint8_t a[] = {0x01};
+  erd_cache_update(&cache, 0x1234, 0xC0, a, sizeof(a));
+  uint16_t iter = 0;
+  erd_cache_entry_t* entry = next_updated(&cache, &iter);
+  CHECK(entry != NULL);
+
+  erd_cache_clear(&cache);
+  erd_cache_mark_unpublished(&cache, entry);
+
+  CHECK_EQUAL(0, erd_cache_get_dirty_count(&cache));
+  CHECK_FALSE(entry->update_required);
+}
+
+TEST(erd_cache, mark_published_ignores_an_entry_cleared_since_the_snapshot)
+{
+  erd_cache_set_throttle_rate_seconds(&cache, 5);
+  uint8_t a[] = {0x01};
+  erd_cache_update(&cache, 0x1234, 0xC0, a, sizeof(a));
+  uint16_t iter = 0;
+  erd_cache_entry_t* entry = next_updated(&cache, &iter);
+  CHECK(entry != NULL);
+
+  erd_cache_clear(&cache);
+  erd_cache_mark_published(&cache, entry);
+
+  CHECK_EQUAL(0, entry->publish_cooldown);
+}
+
+TEST(erd_cache, clear_before_init_is_safe)
+{
+  erd_cache_t fresh{};
+  erd_cache_clear(&fresh);
+  CHECK_FALSE(fresh.initialized);
+}

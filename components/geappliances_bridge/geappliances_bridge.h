@@ -98,6 +98,15 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   void add_custom_erds_with_addresses(const uint16_t* erds, const uint8_t* addresses, uint16_t count);
   void add_custom_erd(tiny_erd_t erd);
   void trigger_discovery_refresh();
+  // Drop the appliance-side data path (subscription, polling and write
+  // bridges) and run the appliance startup again from the stabilization
+  // delay: autodiscovery, feature bits, bridge init. MQTT, the device ID, the
+  // ERD cache and HA discovery are kept, and the device does not reboot. For
+  // when the appliance's boards were reprogrammed or reset behind the
+  // bridge's back (the Reconnect Appliance button). Safe to call from any
+  // main-loop context: the restart runs at the start of the next loop(), once
+  // no HA discovery run is in progress.
+  void restart_appliance_connection();
 
  protected:
   // ── IBridgeServices implementation (called exclusively by the startup HSM) ──
@@ -188,6 +197,16 @@ class GeappliancesBridge : public Component, public IBridgeServices {
                             uint16_t custom_erds_count = 0);
   void on_poll_discovery_complete_();
   bool should_route_to_feature_bits_(tiny_erd_t erd);
+  void init_autodiscovery_manager_();
+  void destroy_data_plane_();
+  void restart_appliance_connection_now_();
+
+  // Set by restart_appliance_connection(); loop() acts on it
+  bool restart_requested_{false};
+  // The MQTT write-topic subscription outlives the write bridge: it routes
+  // through the MQTT adapter, which every write bridge re-subscribes to, so a
+  // restart must not subscribe the topic a second time.
+  bool write_topic_subscribed_{false};
 
   startup_hsm_wrapper_t startup_hsm_wrapper_;
   // ── Data-plane phase machine state ──
@@ -298,6 +317,20 @@ class DiscoveryRefreshButton : public button::Button {
   void press_action() override {
     if (bridge_ != nullptr) {
       bridge_->trigger_discovery_refresh();
+    }
+  }
+
+ private:
+  GeappliancesBridge* bridge_;
+};
+
+class ReconnectApplianceButton : public button::Button {
+ public:
+  ReconnectApplianceButton(GeappliancesBridge* bridge) : bridge_(bridge) {}
+
+  void press_action() override {
+    if (bridge_ != nullptr) {
+      bridge_->restart_appliance_connection();
     }
   }
 

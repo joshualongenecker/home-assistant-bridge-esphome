@@ -21,7 +21,7 @@ from pathlib import Path
 DEFAULT_MAIN_CPP = Path("docs/.esphome/build/gea-esphome-test/src/main.cpp")
 
 # Display names of entities the component creates itself. Mirrors the *_sensor /
-# discovery_refresh_button options in components/geappliances_bridge/__init__.py.
+# discovery_refresh_button / reconnect_appliance_button options in components/geappliances_bridge/__init__.py.
 EXPECTED_SENSORS = (
     "ERD Publish Rate",
     "ERD Cache Entries",
@@ -30,7 +30,7 @@ EXPECTED_SENSORS = (
     "MQTT Disconnect Count",
     "MQTT Last Disconnect Duration",
 )
-EXPECTED_BUTTONS = ("Discovery Refresh",)
+EXPECTED_BUTTONS = ("Discovery Refresh", "Reconnect Appliance")
 
 REGISTRATION_RE = re.compile(r"App\.register_(sensor|button)\((\w+), \"([^\"]+)\"")
 WRAPPER_RE = re.compile(r"new\(\w+\) mqtt::MQTT(Sensor|Button)Component\((\w+)\)")
