@@ -375,7 +375,8 @@ TEST_GROUP(ha_discovery_cleanup_publish_backoff)
     void setup()
     {
         test_time_ms = 1000;
-        ha_discovery_cleanup_init(&cl);
+        ha_discovery_cleanup_init(&cl);  /* also portMUX_INITIALIZEs cl.mux: the
+                                         * spinlock paths under test are valid on hardware */
         esphome_mqtt_client_adapter_init(&adapter, kDeviceId);
         esphome::mqtt::global_mqtt_client = &mqtt_double;
         mqtt_double.connected_ = true;
@@ -555,6 +556,8 @@ TEST_GROUP(ha_discovery_cleanup_critical_section)
         LONGS_EQUAL(0, esp_test_critical_depth_get_());
         esp_test_critical_depth_reset_();
         ha_discovery_cleanup_init(&cl);
+        /* init() below also portMUX_INITIALIZEs cl.mux, so the spinlock paths
+         * under test carry a valid mux on hardware (the host stub ignores it). */
         esphome_mqtt_client_adapter_init(&adapter, kDeviceId);
         esphome::mqtt::global_mqtt_client = &mqtt_double;
         mqtt_double.connected_ = true;

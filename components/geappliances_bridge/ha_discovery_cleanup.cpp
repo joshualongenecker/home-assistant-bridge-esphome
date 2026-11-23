@@ -325,7 +325,10 @@ bool ha_discovery_cleanup_start(ha_discovery_cleanup_t* self)
     ha_discovery_cleanup_release_queue(self);
 
     /* Fall back to the default when the struct was built without init() (the
-     * test fixtures memset a struct and set only the fields they use). */
+     * test fixtures memset a struct and set only the fields they use). Such a
+     * struct must still carry a valid mux: the store below enters the
+     * spinlock, and a zeroed mux is owner=0 on hardware. make_cleanup() in the
+     * test suite initializes it for exactly that reason. */
     void *(*alloc)(size_t) = self->alloc_fn != NULL ? self->alloc_fn : cleanup_default_alloc;
     char *buf = (char *) alloc(HA_CLEANUP_TOPIC_BUF_SIZE);
     if (buf == NULL) {
