@@ -9,6 +9,8 @@
 // Responsibilities:
 //   - Hold exactly one DiscoveryPhase for all discovery work
 //   - Decide from the persisted discovery record whether a republish is due
+//   - Remember across a reset when a cleanup removed the broker's configs and
+//     the republish never completed, and retry it on the next boot (issue #203)
 //   - Drive ha_discovery_manager_t and ha_discovery_cleanup_t to completion
 //
 // NOT responsible for:
@@ -163,6 +165,7 @@ class DiscoveryLifecycleManager {
     kTriggerOta,                // stale topics from a previous layout must go
     kTriggerDiscoveryRefresh,   // user pressed the Discovery Refresh button
     kTriggerInitial,            // fresh install: publish, no cleanup
+    kTriggerPendingRepublish,   // a teardown in an earlier boot never got its republish
   };
 
   // The single lifecycle state. Replaces the seven independent booleans this
@@ -213,6 +216,24 @@ class DiscoveryLifecycleManager {
     // path stay up instead of rebooting -- an unbounded retry is a reboot loop
     // with no way to stop it.
     bool (*write_abort_reboot_count)(void* context, uint8_t count);
+    // Reads whether a cleanup tore down the broker's retained discovery configs
+    // and the republish that should have followed never completed (issue #203).
+    // Set when a cleanup starts and cleared when a publish run records its
+    // result, so a boot that finds it republishes even though the stored record
+    // still matches -- which is exactly the state a torn-down refresh leaves
+    // behind: the record from the last successful publish is unchanged, while
+    // Home Assistant has no configs left to publish against.
+    bool (*read_publish_pending)(void* context);
+    // Persists that marker; false when the write failed. A cleanup that cannot
+    // record its intent refuses to remove anything: without the marker a failed
+    // republish is not recoverable on the next boot, so tearing the topics down
+    // would be an unrecoverable action.
+    bool (*write_publish_pending)(void* context, bool pending);
+    // Largest contiguous free heap block in bytes. Freeing a run's ~52 KB does
+    // not give the heap back to the next allocation (see abort_publish_run_()),
+    // so begin_publish_() refuses to start a run whose buffers cannot fit and
+    // lets the bounded abort reboot recover the heap instead.
+    uint32_t (*read_largest_free_block)(void* context);
     // Feeds the task watchdog while waiting out the reboot delay.
     void (*feed_watchdog)(void* context);
     // Restarts the device.
@@ -282,6 +303,10 @@ class DiscoveryLifecycleManager {
   // Atomically claims the machine from Idle: on success trigger_ is set and
   // the phase is published as target; on failure logs why and returns false.
   bool claim_request_(Phase target, Trigger trigger, const char* request);
+  // Queues the cleanup + republish that recovers a teardown left un-republished
+  // by an earlier boot (see read_publish_pending). Main-loop-only, like the
+  // public triggers: it is reached only from check_discovery_changes().
+  void trigger_pending_republish_();
   void set_phase_(Phase phase);
   // Configures and starts the topic cleanup; stays QueuedCleanup if not ready.
   void begin_cleanup_();

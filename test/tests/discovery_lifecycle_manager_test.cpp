@@ -49,6 +49,10 @@ using Trigger = DiscoveryLifecycleManager::Trigger;
 bool bridge_ready = true;
 bool stub_is_ready(void*) { return bridge_ready; }
 
+/* The cleanup module the fixture drives, so hook_pending_write can record
+ * where in the teardown the marker was armed. */
+ha_discovery_cleanup_t* g_cleanup_under_test = nullptr;
+
 /* Records every host-environment effect the phase machine asks for. */
 struct HookRecorder {
   Record stored{};
@@ -68,6 +72,29 @@ struct HookRecorder {
   int abort_read_calls{0};
   int abort_write_calls{0};
 
+  /* The persisted "a cleanup is waiting for its republish" marker, plus the
+   * way NVS can refuse that write, and the largest free block the publish gate
+   * is told about (0xFFFFFFFF = the heap always fits, i.e. a fresh boot). */
+  bool publish_pending{false};
+  bool pending_write_fails{false};
+  int pending_read_calls{0};
+  int pending_write_calls{0};
+  uint32_t largest_block{0xFFFFFFFFu};
+  int largest_block_calls{0};
+
+  /* Order of the two effects that have to stay in a specific order: the record
+   * save and the pending-marker clear. Each records the sequence number of the
+   * effect call that performed it. */
+  int effect_seq{0};
+  int save_seq{0};
+  int pending_clear_seq{0};
+  int pending_arm_seq{0};
+  /* Which state the cleanup module was in when the marker was armed: idle
+   * means the arm happened before ha_discovery_cleanup_start() flipped it to
+   * cleaning, which is the safety property (the marker must precede the
+   * teardown). */
+  ha_cleanup_state_t cleanup_state_at_arm{ha_cleanup_state_idle};
+
   void reset() { *this = HookRecorder{}; }
 };
 
@@ -83,6 +110,7 @@ void hook_save(void* context, const Record& record) {
   auto* recorder = static_cast<HookRecorder*>(context);
   recorder->save_calls++;
   recorder->saved = record;
+  recorder->save_seq = ++recorder->effect_seq;
 }
 
 void hook_confirm(void* context) {
@@ -109,6 +137,34 @@ bool hook_abort_write(void* context, uint8_t count) {
   if (recorder->abort_write_fails) return false;
   recorder->abort_count = count;
   return true;
+}
+
+bool hook_pending_read(void* context) {
+  auto* recorder = static_cast<HookRecorder*>(context);
+  recorder->pending_read_calls++;
+  return recorder->publish_pending;
+}
+
+bool hook_pending_write(void* context, bool pending) {
+  auto* recorder = static_cast<HookRecorder*>(context);
+  recorder->pending_write_calls++;
+  if (recorder->pending_write_fails) return false;
+  recorder->publish_pending = pending;
+  if (pending) {
+    recorder->pending_arm_seq = ++recorder->effect_seq;
+    recorder->cleanup_state_at_arm = g_cleanup_under_test != nullptr
+        ? g_cleanup_under_test->state
+        : ha_cleanup_state_idle;
+  } else if (recorder->pending_clear_seq == 0) {
+    recorder->pending_clear_seq = ++recorder->effect_seq;
+  }
+  return true;
+}
+
+uint32_t hook_largest_block(void* context) {
+  auto* recorder = static_cast<HookRecorder*>(context);
+  recorder->largest_block_calls++;
+  return recorder->largest_block;
 }
 
 void hook_availability(void* context, ha_discovery_manager_t*) {
@@ -144,11 +200,13 @@ TEST_GROUP(discovery_lifecycle_manager)
     tiny_gea3_erd_client_double_init(&erd_client_);
     complete_device_identity();
     init_lifecycle();
+    g_cleanup_under_test = &manager_.cleanup;
   }
 
   void teardown()
   {
     ha_discovery_manager_cleanup(&manager_);
+    g_cleanup_under_test = nullptr;
     erd_cache_destroy(&cache_);
     esphome_mqtt_client_adapter_destroy(&adapter_);
     esphome::mqtt::global_mqtt_client = nullptr;
@@ -198,6 +256,9 @@ TEST_GROUP(discovery_lifecycle_manager)
     hooks.confirm_firmware = &hook_confirm;
     hooks.read_abort_reboot_count = &hook_abort_read;
     hooks.write_abort_reboot_count = &hook_abort_write;
+    hooks.read_publish_pending = &hook_pending_read;
+    hooks.write_publish_pending = &hook_pending_write;
+    hooks.read_largest_free_block = &hook_largest_block;
     hooks.feed_watchdog = &hook_watchdog;
     hooks.reboot = &hook_reboot;
     hooks.context = &hooks_;
@@ -1202,4 +1263,264 @@ TEST(discovery_lifecycle_manager, decode_record_rejects_other_sizes)
   CHECK_FALSE(DiscoveryLifecycleManager::decode_record(blob, 100, &decoded));
   CHECK_FALSE(DiscoveryLifecycleManager::decode_record(blob, 112, &decoded));
   CHECK_FALSE(DiscoveryLifecycleManager::decode_record(nullptr, sizeof(Record), &decoded));
+}
+
+/* ---------------------------------------------------------------------------
+ * Issue #203: a cleanup that removed Home Assistant's retained configs must
+ * always be followed by a republish -- on this boot or on the next one, never
+ * "not until somebody presses Discovery Refresh again".
+ * ------------------------------------------------------------------------- */
+
+TEST(discovery_lifecycle_manager, starting_a_cleanup_arms_the_pending_publish_marker)
+{
+  enter_cleaning();
+
+  CHECK_TRUE(hooks_.publish_pending);
+  CHECK_EQUAL(1, hooks_.pending_write_calls);
+  /* Armed before the teardown started: the marker write happens before
+   * ha_discovery_cleanup_start() flips the module to cleaning. A crash in the
+   * window the other way round would leave a teardown with no record of it. */
+  CHECK_EQUAL(ha_cleanup_state_idle, hooks_.cleanup_state_at_arm);
+  CHECK_TRUE(hooks_.pending_arm_seq > 0);
+}
+
+TEST(discovery_lifecycle_manager, a_completed_republish_clears_the_pending_marker)
+{
+  hooks_.abort_count = 2;
+  enter_cleaning();
+  CHECK_TRUE(hooks_.publish_pending);
+
+  manager_.cleanup.state = ha_cleanup_state_done;
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhasePublishing, lifecycle_.phase());
+
+  end_publish_run(ha_discovery_state_complete);
+
+  CHECK_EQUAL(1, hooks_.save_calls);
+  CHECK_FALSE(hooks_.publish_pending);
+  /* Cleared after the record was saved, so a reset between the two costs one
+   * extra republish on the next boot rather than a lost one. */
+  CHECK_EQUAL(2, hooks_.pending_write_calls);
+  CHECK_TRUE(hooks_.pending_clear_seq > hooks_.save_seq);
+  /* ...and a successful publish clears the abort budget at the same time, so
+   * the hold lifts exactly when the recovery it was waiting for happened. */
+  CHECK_EQUAL(0, (int) hooks_.abort_count);
+  CHECK_EQUAL(1, hooks_.abort_write_calls);
+}
+
+TEST(discovery_lifecycle_manager, a_failed_republish_leaves_the_marker_set)
+{
+  enter_cleaning();
+  manager_.cleanup.state = ha_cleanup_state_done;
+  lifecycle_.loop();
+
+  end_publish_run(ha_discovery_state_failed);
+
+  CHECK_EQUAL(0, hooks_.save_calls);
+  CHECK_TRUE(hooks_.publish_pending);
+}
+
+TEST(discovery_lifecycle_manager, a_pending_marker_republishes_despite_a_matching_record)
+{
+  /* The #203 state: the record written by the last successful publish still
+   * matches every input, but the configs it describes are gone from the
+   * broker. Without the marker every comparison says "nothing changed". */
+  hooks_.stored = matching_record();
+  hooks_.stored.valid_erds_republishes = 1;
+  hooks_.stored.valid_erds_fingerprint = 0x22222222u;
+  hooks_.has_stored = true;
+  hooks_.publish_pending = true;
+  lifecycle_.set_valid_erds_fingerprint(0x22222222u);
+
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedCleanup, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerPendingRepublish, lifecycle_.trigger());
+  CHECK_EQUAL(1, hooks_.pending_read_calls);
+  /* The marker branch returns: the fingerprint bookkeeping below it must not
+   * run during a claimed phase (a stored republishes count of 1 plus a changed
+   * fingerprint would otherwise save a record right here). */
+  CHECK_EQUAL(0, hooks_.save_calls);
+}
+
+TEST(discovery_lifecycle_manager, a_torn_down_refresh_republishes_on_the_next_boot)
+{
+  /* End to end: a Discovery Refresh with nothing else changed removes every
+   * retained config, its publish run then dies, the abort reboots, and the
+   * next boot has to republish by itself. */
+  hooks_.stored = matching_record();
+  hooks_.has_stored = true;
+
+  lifecycle_.trigger_discovery_refresh();
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
+  CHECK_TRUE(hooks_.publish_pending);
+
+  manager_.cleanup.state = ha_cleanup_state_done;
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhasePublishing, lifecycle_.phase());
+
+  end_publish_run(ha_discovery_state_failed);
+  esphome_hal_double_set_millis(DiscoveryLifecycleManager::kRebootDelayMs);
+  lifecycle_.loop();
+  CHECK_EQUAL(1, hooks_.reboot_calls);
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_TRUE(hooks_.publish_pending);
+
+  /* Next boot: the same stored record, the marker still set. */
+  init_lifecycle();
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedCleanup, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerPendingRepublish, lifecycle_.trigger());
+}
+
+TEST(discovery_lifecycle_manager, cleanup_is_refused_when_the_marker_cannot_be_stored)
+{
+  /* Without the marker a failed republish is not recoverable, so an unwritable
+   * preference has to stop the teardown instead of risking it. */
+  hooks_.pending_write_fails = true;
+
+  lifecycle_.trigger_ota_cleanup();
+  lifecycle_.loop();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+  CHECK_EQUAL(1, hooks_.pending_write_calls);
+  CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
+  CHECK_EQUAL(0, (int) ha_discovery_cleanup_total_removed(&manager_.cleanup));
+}
+
+TEST(discovery_lifecycle_manager, a_publish_run_too_big_for_the_heap_is_refused)
+{
+  /* The refer failure: the heap left after a cleanup could not hold the run's
+   * buffers, so the run died with every config already removed. Refusing it
+   * instead arms the bounded reboot that gets a clean heap back. */
+  hooks_.largest_block = ha_discovery_manager_run_allocation_size() - 1;
+
+  lifecycle_.trigger_ota_cleanup();
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
+
+  manager_.cleanup.state = ha_cleanup_state_done;
+  lifecycle_.loop();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
+  CHECK_EQUAL(1, (int) hooks_.abort_count);
+  /* The run never started: nothing published, nothing recorded. */
+  CHECK_EQUAL(ha_discovery_state_idle, manager_.state);
+  CHECK_EQUAL(0, hooks_.save_calls);
+  /* Same contract as the other abort paths: the firmware is still confirmed. */
+  CHECK_EQUAL(1, hooks_.confirm_calls);
+}
+
+TEST(discovery_lifecycle_manager, a_publish_run_that_fits_is_not_refused)
+{
+  /* Exactly enough room proceeds: the gate refuses only what cannot fit, and
+   * this is what pins the comparison direction. */
+  hooks_.largest_block = ha_discovery_manager_run_allocation_size();
+
+  enter_publishing();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhasePublishing, lifecycle_.phase());
+  CHECK_EQUAL(0, (int) hooks_.abort_count);
+  CHECK_EQUAL(1, hooks_.largest_block_calls);
+}
+
+TEST(discovery_lifecycle_manager, a_spent_budget_holds_the_automatic_republish)
+{
+  /* The retrigger must not defeat the abort budget's terminal state: with the
+   * marker set, a spent budget would otherwise turn every boot into another
+   * cleanup + refused-run cycle (an NVS write and a broker pass each) forever.
+   * Holding is the contract the abort log states. */
+  hooks_.stored = matching_record();
+  hooks_.has_stored = true;
+  hooks_.publish_pending = true;
+  hooks_.abort_count = (int) DiscoveryLifecycleManager::kMaxAbortReboots;
+
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+  CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
+  CHECK_EQUAL(0, (int) ha_discovery_cleanup_total_removed(&manager_.cleanup));
+  /* Held, not forgotten: the marker stays set so a later boot with budget
+   * left -- or a manual refresh -- still recovers. */
+  CHECK_TRUE(hooks_.publish_pending);
+  CHECK_EQUAL(0, hooks_.pending_write_calls);
+}
+
+TEST(discovery_lifecycle_manager, a_manual_refresh_is_not_budget_gated)
+{
+  /* The operator's own press is the recovery path the hold message points at,
+   * so it must work while the automatic retrigger is held. */
+  hooks_.abort_count = (int) DiscoveryLifecycleManager::kMaxAbortReboots;
+
+  lifecycle_.trigger_discovery_refresh();
+  lifecycle_.loop();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
+  CHECK_TRUE(hooks_.publish_pending);
+}
+
+TEST(discovery_lifecycle_manager, the_marker_is_not_rewritten_when_already_set)
+{
+  /* A held or looping state must not write NVS on every pass: the arm skips
+   * the write when the marker is already set. */
+  hooks_.publish_pending = true;
+
+  lifecycle_.trigger_ota_cleanup();
+  lifecycle_.loop();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
+  CHECK_EQUAL(0, hooks_.pending_write_calls);
+  CHECK_TRUE(hooks_.publish_pending);
+}
+
+TEST(discovery_lifecycle_manager, three_refused_runs_end_in_a_hold)
+{
+  /* Chains the transition the seeding test skips: each refused run persists
+   * its abort, and the boot after the third holds instead of retrying. */
+  hooks_.stored = matching_record();
+  hooks_.has_stored = true;
+  hooks_.largest_block = ha_discovery_manager_run_allocation_size() - 1;
+  hooks_.publish_pending = true;  // the #203 state: a teardown already happened
+
+  for (int attempt = 1;
+       attempt <= (int) DiscoveryLifecycleManager::kMaxAbortReboots; ++attempt) {
+    lifecycle_.check_discovery_changes(identity_.get_device_id());
+    CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedCleanup, lifecycle_.phase());
+    lifecycle_.loop();
+    manager_.cleanup.state = ha_cleanup_state_done;
+    lifecycle_.loop();
+    CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
+    esphome_hal_double_set_millis(attempt * (int) DiscoveryLifecycleManager::kRebootDelayMs);
+    lifecycle_.loop();
+    CHECK_EQUAL(attempt, hooks_.reboot_calls);
+    CHECK_EQUAL(attempt, (int) hooks_.abort_count);
+  }
+
+  /* The boot after the third refusal: held, quiet, nothing removed. The marker
+   * the refusals left behind is what the hold reads. */
+  init_lifecycle();
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+  CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
+}
+
+TEST(discovery_lifecycle_manager, a_config_disabled_device_never_claims_the_pending_republish)
+{
+  /* The generate_device_config_ guard sits above the marker branch on purpose:
+   * with discovery generation off, the automatic republish would tear the
+   * topics down and publish nothing. */
+  hooks_.stored = matching_record();
+  hooks_.has_stored = true;
+  hooks_.publish_pending = true;
+
+  init_lifecycle(false);
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+  CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
 }

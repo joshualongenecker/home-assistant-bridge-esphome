@@ -1107,6 +1107,12 @@ uint32_t ha_discovery_manager_data_hash(const ha_discovery_manager_t* self)
     return h;
 }
 
+uint32_t ha_discovery_manager_run_allocation_size(void)
+{
+    return (uint32_t)(HA_DISCOVERY_DECOMP_BUF_SIZE + HA_DISCOVERY_LINE_BUF_SIZE +
+                      HA_DISCOVERY_PAYLOAD_BUF_SIZE + sizeof(tinfl_decompressor));
+}
+
 void ha_discovery_manager_start(ha_discovery_manager_t* self)
 {
     if (self->state != ha_discovery_state_idle) return;
@@ -1119,8 +1125,7 @@ void ha_discovery_manager_start(ha_discovery_manager_t* self)
     size_t free_heap __attribute__((unused)) = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t largest_free __attribute__((unused)) = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
     ESP_LOGI(TAG, "Discovery: allocating %u bytes (decomp+line+payload+tinfl); free heap=%u, largest block=%u",
-             (unsigned)(HA_DISCOVERY_DECOMP_BUF_SIZE + HA_DISCOVERY_LINE_BUF_SIZE + HA_DISCOVERY_PAYLOAD_BUF_SIZE +
-                        sizeof(tinfl_decompressor)),
+             (unsigned) ha_discovery_manager_run_allocation_size(),
              (unsigned)free_heap, (unsigned)largest_free);
     self->decomp_buf = (uint8_t*)malloc(HA_DISCOVERY_DECOMP_BUF_SIZE);
     self->line_buf = (char*)malloc(HA_DISCOVERY_LINE_BUF_SIZE);
