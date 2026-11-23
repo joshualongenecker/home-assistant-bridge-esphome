@@ -1524,3 +1524,60 @@ TEST(discovery_lifecycle_manager, a_config_disabled_device_never_claims_the_pend
   CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
   CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
 }
+
+TEST(discovery_lifecycle_manager, a_spent_budget_holds_the_initial_publish)
+{
+  /* Issue #205: the absent-record path must respect the abort budget's
+   * terminal state like the marker path does. With the budget spent and no
+   * record, an ungated initial trigger turns every boot into another run that
+   * is refused (or dies) and another reboot, forever. */
+  hooks_.has_stored = false;
+  hooks_.abort_count = (int) DiscoveryLifecycleManager::kMaxAbortReboots;
+
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+  /* Held, not retried: no run started, so the publish gate was never consulted
+   * and nothing was written to NVS or rebooted. */
+  CHECK_EQUAL(0, hooks_.largest_block_calls);
+  CHECK_EQUAL(0, hooks_.abort_write_calls);
+  CHECK_EQUAL(0, hooks_.pending_write_calls);
+  CHECK_EQUAL(0, hooks_.reboot_calls);
+  CHECK_EQUAL(0, hooks_.save_calls);
+  CHECK_EQUAL((int) DiscoveryLifecycleManager::kMaxAbortReboots, (int) hooks_.abort_count);
+  CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
+}
+
+TEST(discovery_lifecycle_manager, three_refused_initial_runs_end_in_a_hold)
+{
+  /* The chain the seeding test above skips, for the no-record boot: a device
+   * whose heap cannot fit a run spends its budget on refusals without ever
+   * storing a record (the initial path never arms the pending marker either),
+   * so the absent record keeps re-triggering until the gate holds. */
+  hooks_.has_stored = false;
+  hooks_.largest_block = ha_discovery_manager_run_allocation_size() - 1;
+
+  for (int attempt = 1;
+       attempt <= (int) DiscoveryLifecycleManager::kMaxAbortReboots; ++attempt) {
+    lifecycle_.check_discovery_changes(identity_.get_device_id());
+    CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedInitial, lifecycle_.phase());
+    lifecycle_.loop();
+    CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
+    esphome_hal_double_set_millis(attempt * (int) DiscoveryLifecycleManager::kRebootDelayMs);
+    lifecycle_.loop();
+    CHECK_EQUAL(attempt, hooks_.reboot_calls);
+    CHECK_EQUAL(attempt, (int) hooks_.abort_count);
+  }
+
+  /* Nothing was ever stored or armed, which is why the next boot would re-run
+   * the whole cycle: the fourth boot holds instead. */
+  CHECK_EQUAL(0, hooks_.save_calls);
+  CHECK_EQUAL(0, hooks_.pending_write_calls);
+
+  init_lifecycle();
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+  CHECK_EQUAL(3, hooks_.reboot_calls);
+}
