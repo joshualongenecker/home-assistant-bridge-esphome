@@ -360,6 +360,29 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
 
   DiscoveryRecord stored{};
   if (!this->hooks_.load_discovery_record(this->hooks_.context, &stored)) {
+    // No record means this device has never completed a publish run, so the
+    // initial trigger must respect the abort budget's terminal state (issue
+    // #205): a device refused by begin_publish_()'s heap gate spends the budget
+    // without ever storing a record, and because the initial path goes
+    // straight to begin_publish_() it never arms the pending marker either. The
+    // ungated trigger therefore reboot-looped forever -- one full 75-210 s
+    // publish attempt with the appliance wedged, one reboot, on every boot --
+    // exactly the way the marker retrigger did before it was gated below.
+    // Fresh installs are unaffected: read_abort_reboot_count() reports 0 when
+    // the pref is unset, so the gate only fires after three spent attempts.
+    //
+    // Holding is unavoidable here, not merely convenient. With no stored record
+    // there is nothing to compare against, so a later version, hash, device-id
+    // or valid-ERD change is undetectable too: an OTA that regenerates the
+    // discovery data will not republish while the hold stands. Discovery
+    // Refresh is the only recovery -- a power cycle does not lift it, because
+    // the budget lives in NVS and only a successful publish clears it.
+    if (this->hooks_.read_abort_reboot_count(this->hooks_.context) >= kMaxAbortReboots) {
+      ESP_LOGW(TAG, "No stored discovery record, but the discovery-abort reboot budget (%u) "
+                    "is spent; holding the initial publish. Press Discovery Refresh to retry.",
+               (unsigned) kMaxAbortReboots);
+      return;
+    }
     this->trigger_initial_discovery();
     return;
   }

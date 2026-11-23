@@ -284,9 +284,9 @@ RebootPending --5 s elapsed--> Idle
 
 When steady state is first reached, `check_steady_state()` calls `discovery_lifecycle_manager_.check_discovery_changes()` with the current device ID. The method loads a `DiscoveryRecord {version, hash, device_id, appliance_api_parsing, filter_config_topics, valid_erds_republishes, valid_erds_stable_checks, valid_erds_fingerprint}` struct through the injected `load_discovery_record` hook (NVS preferences key `0x64697363u` / "disc" on the device).
 
-Three outcomes are possible:
+The outcomes are:
 
-- **No stored state (fresh install):** `trigger_initial_discovery()` is called. The bridge will publish discovery topics without cleanup, then reboot.
+- **No stored state (fresh install):** `trigger_initial_discovery()` is called. The bridge will publish discovery topics without cleanup, then reboot. This trigger is gated on the discovery-abort reboot budget (section 11.6): with `kMaxAbortReboots` (3) attempts already spent and no record stored, the boot logs "No stored discovery record, but the discovery-abort reboot budget (3) is spent; holding the initial publish" and stays idle. The initial path never arms the pending-publish marker, so an ungated trigger would re-run a doomed attempt on every boot forever. Only a Discovery Refresh press retries — a power cycle does not, because the count is in NVS and only a successful publish clears it.
 - **Record version differs:** `trigger_ota_cleanup()`; the layout or payload format changed. A version 4 record (104 bytes, no fingerprint) is still read: the loader falls back to that size, so an upgraded device cleans up and republishes once instead of taking the fresh-install path.
 - **Hash, device ID, appliance_api_parsing, or filter_config_topics changed:** `trigger_ota_cleanup()` is called. The bridge will clean old topics, publish fresh discovery, and reboot.
 - **Valid-ERD fingerprint changed:** `trigger_ota_cleanup()` as above, within a bound (below).
@@ -326,7 +326,7 @@ After a successful discovery run, `DiscoveryLifecycleManager::finish_publish_()`
 1. **Confirm the firmware** (`confirm_firmware`): writes `0` to the ESPHome preferences key matching `SAFE_MODE_RTC_KEY` (233825507UL), syncs immediately, and calls `esp_ota_mark_app_valid_cancel_rollback()`. This prevents the device from entering safe mode due to rapid reboots during the cleanup → publish → reboot cycle, and marks the current OTA partition valid so the bootloader does not roll back. It runs for a failed run too, so a good OTA is never rolled back because discovery failed.
 2. **Store the discovery record** (`save_discovery_record`): saves `DiscoveryRecord {version, hash, device_id, appliance_api_parsing, filter_config_topics, valid_erds_republishes, valid_erds_stable_checks, valid_erds_fingerprint}` to NVS preferences (key `0x64697363u` / "disc"). The `hash` field is `ha_discovery_manager_data_hash()`, `device_id` comes from `DeviceIdentityManager`, both config flags from the current YAML configuration, and `valid_erds_fingerprint` from the bridge (section 11.3), with the fingerprint-republish count and a zeroed stable-check streak. This stored state is compared against on the next boot to detect changes requiring cleanup. `version` is `kRecordVersion`, bumped whenever the record layout changes.
 
-A **failed** run skips the record and the reboot and returns to `kPhaseIdle`: leaving the stored record stale or absent is what makes the next boot retry.
+A **failed** run (or one refused by the largest-free-block gate in `begin_publish_()`) skips the record and goes through `abort_publish_run_()` instead: the run's allocations are released, `kMaxAbortReboots` (3) reboots in NVS (key `0x64726162u` / "drab") bound the recovery, and each reboot gives the clean heap a failed run cannot restore. Leaving the stored record stale or absent is what makes the next boot retry — which is why both automatic retriggers (the pending-publish marker and the absent-record initial publish) check the spent budget before starting, and why a spent budget ends in a logged hold rather than another attempt.
 
 ### 11.7 Integration with ha_discovery_manager
 
