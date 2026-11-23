@@ -553,8 +553,11 @@ TEST(ha_discovery_cleanup_critical_section, truncated_topic_logs_at_depth_zero)
     cleanup_flush_queue(&cl);
 
     LONGS_EQUAL(0, mqtt_double.publish_calls_);
-    LONGS_EQUAL(1, esp_test_log_count_("ha_cleanup"));
-    CHECK_EQUAL(0, esp_test_log_depth_("ha_cleanup"));
+    /* Per-depth counts, not a bare count or last-depth: a benign extra log on
+     * this path must not false-fail the test, and a log added after the warning
+     * must not overwrite what the depth assertion observes. */
+    LONGS_EQUAL(1, esp_test_log_count_at_depth_("ha_cleanup", 0));
+    LONGS_EQUAL(0, esp_test_log_count_at_depth_("ha_cleanup", 1));
     CHECK_EQUAL(0, esp_test_critical_depth_);
     CHECK_EQUAL(0, cl.queue_count);
     CHECK_EQUAL(0, (int) cl.total_removed_count);

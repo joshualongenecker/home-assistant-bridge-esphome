@@ -32,7 +32,10 @@ typedef struct {
   const char* tag;
   int count;
   int last_depth;
+  int per_depth[8];  /* calls at depth 0..7; deeper depths are not binned */
 } esp_test_log_slot_;
+
+#define ESP_TEST_LOG_DEPTH_BINS 8
 
 static esp_test_log_slot_ s_log_slots_[24];
 static int s_log_slots_used_ = 0;
@@ -43,6 +46,9 @@ void esp_test_log_record_(const char* tag, int depth)
     if (std::strcmp(s_log_slots_[i].tag, tag) == 0) {
       s_log_slots_[i].count++;
       s_log_slots_[i].last_depth = depth;
+      if (depth >= 0 && depth < ESP_TEST_LOG_DEPTH_BINS) {
+        s_log_slots_[i].per_depth[depth]++;
+      }
       return;
     }
   }
@@ -50,8 +56,14 @@ void esp_test_log_record_(const char* tag, int depth)
     s_log_slots_[s_log_slots_used_].tag = tag;
     s_log_slots_[s_log_slots_used_].count = 1;
     s_log_slots_[s_log_slots_used_].last_depth = depth;
+    if (depth >= 0 && depth < ESP_TEST_LOG_DEPTH_BINS) {
+      s_log_slots_[s_log_slots_used_].per_depth[depth] = 1;
+    }
     s_log_slots_used_++;
   }
+  /* Slots are exhausted: the next count lookup for a new tag returns 0, which
+   * makes a count assertion fail (spurious red, never a false pass). Raise the
+   * cap if a suite legitimately logs more than 24 distinct tags. */
 }
 
 void esp_test_log_reset_(void)
@@ -69,10 +81,10 @@ static const esp_test_log_slot_* esp_test_log_find_(const char* tag)
   return nullptr;
 }
 
-int esp_test_log_count_(const char* tag)
+int esp_test_log_count_at_depth_(const char* tag, int depth)
 {
   const esp_test_log_slot_* slot = esp_test_log_find_(tag);
-  return slot ? slot->count : 0;
+  return (slot && depth >= 0 && depth < ESP_TEST_LOG_DEPTH_BINS) ? slot->per_depth[depth] : 0;
 }
 
 int esp_test_log_depth_(const char* tag)

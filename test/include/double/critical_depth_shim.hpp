@@ -27,10 +27,15 @@ extern int esp_test_critical_depth_;
  * esp_test_log_record_() with the tag and the critical-section depth at the call
  * site, so a test can assert a warning was emitted at depth 0: the dishwasher
  * crash of issue #198 was a log taken inside a critical section, which is not
- * observable from the publish-side depth alone. Tags are matched by string. */
+ * observable from the publish-side depth alone. Tags are matched by string, so
+ * a TAG must be a static string literal (every component file's `TAG` is); a
+ * runtime-formatted TAG would dangle. Include discipline: when a TU also
+ * includes test/include/esp-idf/esp_log.h, whichever header defines ESP_LOGx
+ * last wins for that TU -- keep esphome_hal_double.hpp last so logs record. */
 void esp_test_log_record_(const char* tag, int depth);
 void esp_test_log_reset_(void);
 int esp_test_log_count_(const char* tag);   /* calls recorded for tag; 0 if none */
+int esp_test_log_count_at_depth_(const char* tag, int depth);  /* calls for tag at that depth */
 int esp_test_log_depth_(const char* tag);   /* depth of the last call for tag; -1 if none */
 
 #ifdef __cplusplus
