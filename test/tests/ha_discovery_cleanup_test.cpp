@@ -699,8 +699,9 @@ TEST(ha_discovery_cleanup, callback_and_flush_tolerate_an_unallocated_queue)
 
     ha_discovery_cleanup_t cl = make_cleanup("Dishwasher_PDT715");
     cl.mqtt_client = &client;
-    release_live_queues();      /* the queue is gone; the struct keeps the pointer */
-    cl.topic_buf = NULL;
+    cl.topic_buf = NULL;       /* the pointer goes first, so the free below never
+                                * follows a dangling read */
+    release_live_queues();
 
     cleanup_topic_callback(
         "homeassistant/binary_sensor/Dishwasher_PDT715/3218_washzones/config",

@@ -67,13 +67,23 @@ static void cleanup_default_free(void *buffer)
  * ha_discovery_manager_init() zeroes the whole manager struct, and a re-init
  * (Discovery Refresh, an aborted run) landing while a cleanup still holds its
  * queue would otherwise orphan it. Safe on a zero-initialized struct — the same
- * contract the manager's four run-buffer frees already rely on. */
+ * contract the manager's four run-buffer frees already rely on.
+ *
+ * The pointer is nulled under the same mux the callback's NULL check and
+ * memcpy run in, so a callback that arrives after the NULL store bails, and
+ * one already in its critical section finishes its memcpy before the free
+ * (it holds the lock). The free itself happens after the lock is released:
+ * the callback never sees a freed-but-non-NULL pointer, and no caller of this
+ * function runs inside a critical section. */
 void ha_discovery_cleanup_release_queue(ha_discovery_cleanup_t* self)
 {
     if (self->topic_buf == NULL) return;
-    if (self->free_fn != NULL) self->free_fn(self->topic_buf);
-    else free(self->topic_buf);
+    void *buf = self->topic_buf;
+    taskENTER_CRITICAL(&self->mux);
     self->topic_buf = NULL;
+    taskEXIT_CRITICAL(&self->mux);
+    if (self->free_fn != NULL) self->free_fn(buf);
+    else free(buf);
 }
 
 /* Publishes empty retained payloads to remove topics. Called from
