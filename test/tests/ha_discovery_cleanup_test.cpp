@@ -20,6 +20,8 @@
 #include "esphome_mqtt_client_adapter.h"
 #include "double/mqtt_test_double.hpp"
 
+#include <cstdlib>
+
 /* ------------------------------------------------------------------ */
 /* Test helpers                                                       */
 /* ------------------------------------------------------------------ */
@@ -27,10 +29,71 @@
 static uint32_t test_time_ms = 0;
 static uint32_t test_get_time_ms(void) { return test_time_ms; }
 
+/* The topic queue is a per-run heap allocation (rec 10 leftover), so a fixture
+ * that builds a struct by hand has to own one. The tracker sees both sides of
+ * the allocation seam, which is what lets the lifetime test assert the balance
+ * rather than just a pointer change; the group teardown releases whatever a
+ * test leaves running so the suite stays leak-clean. Fixed-size on purpose: a
+ * std::vector here would allocate its own buffer with new and CppUTest would
+ * charge that allocation to whichever test triggered the growth. */
+static void *g_live_queues[16];
+static size_t g_live_queue_count = 0;
+
+static void *tracking_alloc(size_t size)
+{
+    void *p = malloc(size);
+    if (p != NULL && g_live_queue_count < sizeof(g_live_queues) / sizeof(g_live_queues[0])) {
+        g_live_queues[g_live_queue_count++] = p;
+    }
+    return p;
+}
+
+static void tracking_free(void *p)
+{
+    for (size_t i = 0; i < g_live_queue_count; ++i) {
+        if (g_live_queues[i] == p) {
+            g_live_queues[i] = g_live_queues[--g_live_queue_count];
+            break;
+        }
+    }
+    free(p);
+}
+
+static void release_live_queues()
+{
+    for (size_t i = 0; i < g_live_queue_count; ++i) free(g_live_queues[i]);
+    g_live_queue_count = 0;
+}
+
+/* Minimal i_mqtt_client_t for the flush guard: cleanup_flush_queue() reaches
+ * only publish_raw, and the guard has to stop before it gets there. */
+static int g_stub_publish_calls = 0;
+
+static bool stub_publish_raw(i_mqtt_client_t*, const char*, const char*, size_t, bool)
+{
+    g_stub_publish_calls++;
+    return true;
+}
+
+static const i_mqtt_client_api_t g_stub_api = {
+    nullptr, nullptr, nullptr, nullptr, stub_publish_raw, nullptr, nullptr
+};
+
+static i_mqtt_client_t make_stub_client()
+{
+    i_mqtt_client_t client;
+    client.api = &g_stub_api;
+    return client;
+}
+
 static ha_discovery_cleanup_t make_cleanup(const char* device_id)
 {
     ha_discovery_cleanup_t cl;
     memset(&cl, 0, sizeof(cl));
+    /* start()/destroy()/release_queue() really execute the spinlock on
+     * hardware; a zeroed mux is owner=0, an invalid state. The host stub
+     * ignores the mux, so initialize it the way init() would. */
+    portMUX_INITIALIZE(&cl.mux);
     cl.device_id = device_id;
     cl.get_time_ms = test_get_time_ms;
     cl.state = ha_cleanup_state_cleaning;
@@ -39,13 +102,16 @@ static ha_discovery_cleanup_t make_cleanup(const char* device_id)
     cl.dropped_count = 0;
     cl.pass_found_topics = false;
     cl.last_activity_ms = 0;
+    cl.alloc_fn = tracking_alloc;
+    cl.free_fn = tracking_free;
+    cl.topic_buf = (char *) tracking_alloc(HA_CLEANUP_TOPIC_BUF_SIZE);
     return cl;
 }
 
 TEST_GROUP(ha_discovery_cleanup)
 {
     void setup() {}
-    void teardown() {}
+    void teardown() { release_live_queues(); }
 };
 
 /* Pack via callback                                                    */
@@ -309,17 +375,24 @@ TEST_GROUP(ha_discovery_cleanup_publish_backoff)
     void setup()
     {
         test_time_ms = 1000;
-        ha_discovery_cleanup_init(&cl);
+        ha_discovery_cleanup_init(&cl);  /* also portMUX_INITIALIZEs cl.mux: the
+                                         * spinlock paths under test are valid on hardware */
         esphome_mqtt_client_adapter_init(&adapter, kDeviceId);
         esphome::mqtt::global_mqtt_client = &mqtt_double;
         mqtt_double.connected_ = true;
         ha_discovery_cleanup_configure(&cl, kDeviceId, &adapter.interface,
                                        test_get_time_ms);
-        cl.state = ha_cleanup_state_cleaning;
+        /* The topic queue is allocated by start(); these tests drive the
+         * module directly, so the run has to be started here. destroy() in the
+         * teardown releases it. */
+        CHECK_TRUE(ha_discovery_cleanup_start(&cl));
     }
 
     void teardown()
     {
+        /* Releases the per-run topic queue a test may have started, so a run
+         * that never reached destroy() cannot leak it into the leak check. */
+        ha_discovery_cleanup_destroy(&cl);
         esphome_mqtt_client_adapter_destroy(&adapter);
         esphome::mqtt::global_mqtt_client = nullptr;
         /* The fake clock is a file-scope global; the roll-over test leaves it
@@ -483,17 +556,20 @@ TEST_GROUP(ha_discovery_cleanup_critical_section)
         LONGS_EQUAL(0, esp_test_critical_depth_get_());
         esp_test_critical_depth_reset_();
         ha_discovery_cleanup_init(&cl);
+        /* init() below also portMUX_INITIALIZEs cl.mux, so the spinlock paths
+         * under test carry a valid mux on hardware (the host stub ignores it). */
         esphome_mqtt_client_adapter_init(&adapter, kDeviceId);
         esphome::mqtt::global_mqtt_client = &mqtt_double;
         mqtt_double.connected_ = true;
         ha_discovery_cleanup_configure(&cl, kDeviceId, &adapter.interface,
                                        test_get_time_ms);
-        cl.state = ha_cleanup_state_cleaning;
+        CHECK_TRUE(ha_discovery_cleanup_start(&cl));
         esp_test_log_reset_();  /* ignore any init/configure logging */
     }
 
     void teardown()
     {
+        ha_discovery_cleanup_destroy(&cl);
         esphome_mqtt_client_adapter_destroy(&adapter);
         esphome::mqtt::global_mqtt_client = nullptr;
         test_time_ms = 0;
@@ -598,4 +674,52 @@ TEST(ha_discovery_cleanup_critical_section, append_during_the_release_window_kee
     STRCMP_EQUAL(kLate, mqtt_double.last_published_topic_.c_str());
     CHECK_EQUAL(0, cl.queue_count);
     CHECK_EQUAL(2, (int) cl.total_removed_count);
+}
+
+/* Rec 10 leftover: the queue is allocated for the run and released by
+ * destroy(), so the permanent object never carries it. Asserted through the
+ * allocation seam: the live set must go to zero on destroy, which is what a
+ * leaked or embedded buffer would break. */
+TEST(ha_discovery_cleanup, topic_queue_is_allocated_for_the_run_and_freed_by_destroy)
+{
+    ha_discovery_cleanup_t cl = make_cleanup("Dishwasher_PDT715");
+    CHECK_EQUAL(1u, (unsigned) g_live_queue_count);
+
+    CHECK_TRUE(ha_discovery_cleanup_start(&cl));
+    CHECK_TRUE(cl.topic_buf != NULL);
+    /* start() released the queue the fixture installed and owns one of its
+     * own: one live allocation, not two. */
+    CHECK_EQUAL(1u, (unsigned) g_live_queue_count);
+
+    ha_discovery_cleanup_destroy(&cl);
+    CHECK_EQUAL(0u, (unsigned) g_live_queue_count);
+    CHECK_TRUE(cl.topic_buf == nullptr);
+}
+
+/* A struct with no queue -- never started, or destroyed while a delayed MQTT
+ * callback was still in flight -- must drop topics the way a full queue does
+ * and must not write through NULL when flushing. */
+TEST(ha_discovery_cleanup, callback_and_flush_tolerate_an_unallocated_queue)
+{
+    i_mqtt_client_t client = make_stub_client();
+    g_stub_publish_calls = 0;
+
+    ha_discovery_cleanup_t cl = make_cleanup("Dishwasher_PDT715");
+    cl.mqtt_client = &client;
+    cl.topic_buf = NULL;       /* the pointer goes first, so the free below never
+                                * follows a dangling read */
+    release_live_queues();
+
+    cleanup_topic_callback(
+        "homeassistant/binary_sensor/Dishwasher_PDT715/3218_washzones/config",
+        "{\"data\":1}", 10, &cl);
+
+    CHECK_EQUAL(0, cl.queue_count);
+    CHECK_EQUAL(1, cl.dropped_count);
+    CHECK_EQUAL(1, cl.pass_received_count);
+
+    cl.queue_count = 1;         /* stale counters must not reach the compaction */
+    CHECK_EQUAL(1, cleanup_flush_queue(&cl));
+    CHECK_EQUAL(0, g_stub_publish_calls);
+    CHECK_EQUAL(0, (int) cl.total_removed_count);
 }

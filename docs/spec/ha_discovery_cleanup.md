@@ -34,7 +34,7 @@ The HA Discovery Cleanup module discovers and removes stale Home Assistant MQTT 
 | `HA_CLEANUP_DRAIN_WAIT_MS` | 1000 | Wait after unsubscribe for the inbound MQTT event queue to drain before re-subscribing. If no new topic callbacks fire during this window, the queue is empty and it's safe to re-subscribe. |
 | `HA_CLEANUP_FLUSH_BATCH` | 1 | Flush one topic per batch call. Each publish allocates a `std::string` on the heap; processing one at a time minimizes peak heap pressure. |
 | `HA_CLEANUP_PUBLISH_RETRY_BACKOFF_MS` | 64 | Wait after a dropped removal publish before attempting again. The topic stays queued, so waiting costs only convergence time, while retrying at main-loop rate against a full outbound ring churns the backend's drop counter. Matches `HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS`; the phase timeout that bounds it is an idle timeout on progress, so this value trades attempt rate against convergence only. |
-| `HA_CLEANUP_TOPIC_BUF_SIZE` | 6144 | Size of the internal topic buffer. Overridable via `HA_CLEANUP_TEST_BUF_SIZE` for tests. |
+| `HA_CLEANUP_TOPIC_BUF_SIZE` | 6144 | Size of the topic queue, allocated by `ha_discovery_cleanup_start()` and released by `ha_discovery_cleanup_destroy()` — never embedded in the struct. Overridable via `HA_CLEANUP_TEST_BUF_SIZE` for tests. |
 
 ---
 
@@ -65,8 +65,10 @@ typedef struct {
   ha_cleanup_state_t state;
   uint32_t (*get_time_ms)(void);
 
-  /* Topic queue — ring buffer */
-  char topic_buf[HA_CLEANUP_TOPIC_BUF_SIZE];
+  /* Topic queue — allocated for the run, NULL between runs */
+  char* topic_buf;
+  void *(*alloc_fn)(size_t size);
+  void (*free_fn)(void *buffer);
   uint16_t queue_write_pos;
   uint16_t queue_count;
   uint16_t dropped_count;
@@ -94,7 +96,7 @@ typedef struct {
 | `device_id` | `const char*` | Device ID used to build the wildcard subscription topic. |
 | `state` | `ha_cleanup_state_t` | Current lifecycle state. |
 | `get_time_ms` | `uint32_t (*)(void)` | Time source function (defaults to `esphome::millis`). Overridable for testing. |
-| `topic_buf` | `char[HA_CLEANUP_TOPIC_BUF_SIZE]` | Fixed-size buffer for queuing discovered topic strings. Topics are appended linearly as null-terminated strings: `[topic:variable][null:1]`. |
+| `topic_buf` | `char*` | Heap-allocated queue for discovered topic strings, sized `HA_CLEANUP_TOPIC_BUF_SIZE` by `start()` and released by `destroy()`. NULL between runs; the callback and the flush both guard on it. Topics are appended linearly as null-terminated strings: `[topic:variable][null:1]`. |
 | `queue_write_pos` | `uint16_t` | Current write position in `topic_buf`. |
 | `queue_count` | `uint16_t` | Number of topics currently queued in `topic_buf`. |
 | `dropped_count` | `uint16_t` | Cumulative count of topics dropped due to buffer full. |
@@ -153,6 +155,7 @@ void ha_discovery_cleanup_destroy(ha_discovery_cleanup_t* self);
   - Save `mqtt_client` to a local variable, then null `self->mqtt_client` (prevents a concurrent callback from using a stale pointer)
   - If `device_id` is not NULL, unsubscribe from the wildcard topic using the saved client
   - Set `subscribed = false`
+- Release `topic_buf` through `free_fn` (after the drain delay, so no callback can still be appending to it)
 - Zero the struct with `memset`
 
 ---
@@ -162,11 +165,13 @@ void ha_discovery_cleanup_destroy(ha_discovery_cleanup_t* self);
 ### 5.1 Start
 
 ```c
-void ha_discovery_cleanup_start(ha_discovery_cleanup_t* self);
+bool ha_discovery_cleanup_start(ha_discovery_cleanup_t* self);
 ```
 
 `start()` MUST:
-- Set `state = ha_cleanup_state_cleaning`
+- Release any queue left by a previous run (`alloc_fn`/`free_fn` are the seam; the defaults are `malloc`/`free`)
+- Allocate `HA_CLEANUP_TOPIC_BUF_SIZE` bytes for `topic_buf`. On failure: log error "Cleanup refused: could not allocate the N-byte topic queue; the existing discovery configs were left in place", leave `state` untouched and `topic_buf` NULL, and return `false` — the caller must refuse the cleanup rather than start a teardown it cannot track
+- Set `state = ha_cleanup_state_cleaning` and return `true`
 - Reset all tracking fields via the internal `cleanup_start()` function:
   - `queue_write_pos = 0`, `queue_count = 0`, `dropped_count = 0`
   - `flushed_once = false`
@@ -370,17 +375,21 @@ The default `HA_CLEANUP_TOPIC_BUF_SIZE` of 6144 bytes can hold approximately 100
 
 ## 9. Memory Management
 
-### 9.1 No Heap Allocation
+### 9.1 The Topic Queue Is Allocated Per Run
 
-The cleanup module uses only stack-allocated and struct-embedded buffers:
+`ha_discovery_cleanup_start()` allocates `HA_CLEANUP_TOPIC_BUF_SIZE` bytes through `alloc_fn` (default `malloc`) and `ha_discovery_cleanup_destroy()` releases them through `free_fn` (default `free`). The struct carries only the pointer: it is embedded in the permanent `ha_discovery_manager_t`, so a fixed array there is DRAM every bridge pays for its whole life, inside the pool a publish run later needs 53 KB of contiguously (architecture review rec 10 leftover; measured −6 128 B RAM on `docs/test-compile.yaml`, esp32c3).
 
 | Buffer | Size | Location | Purpose |
 |--------|------|----------|---------|
-| `topic_buf` | 6144 bytes (default) | Embedded in struct | Queuing discovered topic strings |
+| `topic_buf` | 6144 bytes (default) | Heap, for the duration of a run | Queuing discovered topic strings |
 | `topic` | 256 bytes | Stack in `flush_queue()` | Temporary copy before compact |
 | `sub_topic` | 128 bytes | Stack in `run()` / `destroy()` | Wildcard subscription topic string |
 
-No dynamic memory allocation is performed by the cleanup module itself. The only heap allocation occurs indirectly via `mqtt_client_publish_raw()`, which allocates a `std::string` internally.
+Allocation failure is a refusal, not a degraded run: `start()` returns `false` and leaves the module idle with nothing allocated, and `DiscoveryLifecycleManager::begin_cleanup_()` then refuses the cleanup **before** arming the pending-publish marker — nothing has been removed, so there is nothing for a later boot to recover. `start()` is idempotent: a restart releases the previous queue first.
+
+The queue also has to survive its owner being reset: `ha_discovery_manager_init()` runs on every Discovery Refresh and on an aborted run and `memset()`s the whole manager, so it calls `ha_discovery_cleanup_release_queue()` next to the four run-buffer frees. `destroy()` is not usable there — it unsubscribes and delays, which a re-init must not do to a struct that may hold garbage.
+
+The remaining heap traffic is indirect, via `mqtt_client_publish_raw()`, which allocates a `std::string` internally.
 
 ### 9.2 Heap Fragmentation Monitoring
 
@@ -394,6 +403,8 @@ This provides diagnostic visibility into heap pressure during the cleanup proces
 ### 9.3 Critical Sections
 
 Both `cleanup_topic_callback()` and `cleanup_flush_queue()` use `taskENTER_CRITICAL(&self->mux)` / `taskEXIT_CRITICAL(&self->mux)` — a per-instance `portMUX_TYPE` spinlock — to protect shared access to `topic_buf`, `queue_write_pos`, `queue_count`, and related fields. The callback runs in the MQTT task context; `flush_queue()` runs in the main loop context. On single-core (C3/C6) the critical section disables interrupts; on dual-core (S3) the `portMUX_TYPE` is a spinlock, so concurrent access is prevented on both. The mux is initialized in `ha_discovery_cleanup_init()` and re-initialized in `ha_discovery_cleanup_destroy()`, where the `memset()` that zeroes the struct would otherwise leave the embedded spinlock in an invalid state for a late callback.
+
+The queue pointer is part of what the mux guards: a callback that observed a non-NULL `get_time_ms` before `destroy()` poisoned it can still be inside its critical section, which is why `destroy()` releases the queue only after its 50 ms drain delay and before the `memset()`.
 
 ---
 

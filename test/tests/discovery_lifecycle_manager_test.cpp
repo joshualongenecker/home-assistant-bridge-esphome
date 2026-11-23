@@ -89,11 +89,14 @@ struct HookRecorder {
   int save_seq{0};
   int pending_clear_seq{0};
   int pending_arm_seq{0};
-  /* Which state the cleanup module was in when the marker was armed: idle
-   * means the arm happened before ha_discovery_cleanup_start() flipped it to
-   * cleaning, which is the safety property (the marker must precede the
-   * teardown). */
+  /* What the cleanup module had (not) done when the marker was armed. The
+   * safety property is that the marker precedes the teardown: the module may
+   * already be cleaning, because the per-run topic queue is allocated ahead of
+   * the marker so a failed allocation can refuse without touching NVS, but it
+   * must not have subscribed or removed anything yet. */
   ha_cleanup_state_t cleanup_state_at_arm{ha_cleanup_state_idle};
+  bool subscribed_at_arm{false};
+  uint32_t removed_at_arm{0};
 
   void reset() { *this = HookRecorder{}; }
 };
@@ -152,9 +155,13 @@ bool hook_pending_write(void* context, bool pending) {
   recorder->publish_pending = pending;
   if (pending) {
     recorder->pending_arm_seq = ++recorder->effect_seq;
-    recorder->cleanup_state_at_arm = g_cleanup_under_test != nullptr
-        ? g_cleanup_under_test->state
-        : ha_cleanup_state_idle;
+    if (g_cleanup_under_test != nullptr) {
+      recorder->cleanup_state_at_arm = g_cleanup_under_test->state;
+      recorder->subscribed_at_arm = g_cleanup_under_test->subscribed;
+      recorder->removed_at_arm = g_cleanup_under_test->total_removed_count;
+    } else {
+      recorder->cleanup_state_at_arm = ha_cleanup_state_idle;
+    }
   } else if (recorder->pending_clear_seq == 0) {
     recorder->pending_clear_seq = ++recorder->effect_seq;
   }
@@ -171,6 +178,9 @@ void hook_availability(void* context, ha_discovery_manager_t*) {
   static_cast<HookRecorder*>(context)->availability_calls++;
 }
 
+/* Forces the cleanup topic-queue allocation to fail, to drive the refusal
+ * path in begin_cleanup_(). */
+void *alloc_fails(size_t) { return nullptr; }
 }  // namespace
 
 TEST_GROUP(discovery_lifecycle_manager)
@@ -1277,10 +1287,13 @@ TEST(discovery_lifecycle_manager, starting_a_cleanup_arms_the_pending_publish_ma
 
   CHECK_TRUE(hooks_.publish_pending);
   CHECK_EQUAL(1, hooks_.pending_write_calls);
-  /* Armed before the teardown started: the marker write happens before
-   * ha_discovery_cleanup_start() flips the module to cleaning. A crash in the
-   * window the other way round would leave a teardown with no record of it. */
-  CHECK_EQUAL(ha_cleanup_state_idle, hooks_.cleanup_state_at_arm);
+  /* Armed before the teardown can start. The module is already allocated and
+   * cleaning -- the topic queue is allocated ahead of the marker so a failed
+   * allocation refuses without touching NVS -- but it has neither subscribed
+   * nor removed anything, and that is the point of no return. */
+  CHECK_EQUAL(ha_cleanup_state_cleaning, hooks_.cleanup_state_at_arm);
+  CHECK_FALSE(hooks_.subscribed_at_arm);
+  CHECK_EQUAL(0, (int) hooks_.removed_at_arm);
   CHECK_TRUE(hooks_.pending_arm_seq > 0);
 }
 
@@ -1388,6 +1401,41 @@ TEST(discovery_lifecycle_manager, cleanup_is_refused_when_the_marker_cannot_be_s
   CHECK_EQUAL(1, hooks_.pending_write_calls);
   CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
   CHECK_EQUAL(0, (int) ha_discovery_cleanup_total_removed(&manager_.cleanup));
+}
+
+TEST(discovery_lifecycle_manager, a_cleanup_is_refused_when_the_topic_queue_cannot_be_allocated)
+{
+  /* The cleanup topic queue is a per-run allocation, so a degraded heap can
+   * refuse a cleanup. The refusal has to happen before the marker is armed and
+   * before the broker is touched: nothing was removed, so there is nothing for
+   * a later boot to recover. */
+  manager_.cleanup.alloc_fn = &alloc_fails;
+
+  lifecycle_.trigger_discovery_refresh();
+  lifecycle_.loop();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+  CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
+  CHECK_TRUE(manager_.cleanup.topic_buf == nullptr);
+  CHECK_EQUAL(0, hooks_.pending_write_calls);
+  CHECK_FALSE(hooks_.publish_pending);
+  CHECK_EQUAL(0, (int) ha_discovery_cleanup_total_removed(&manager_.cleanup));
+}
+
+TEST(discovery_lifecycle_manager, the_cleanup_topic_queue_lives_only_for_the_run)
+{
+  /* Rec 10 leftover: the queue is allocated for the run and released on the
+   * way out, so the permanent object never carries it. The lifecycle destroys
+   * the module on every kPhaseCleaning exit. */
+  enter_cleaning();
+  CHECK_TRUE(manager_.cleanup.topic_buf != nullptr);
+
+  manager_.cleanup.state = ha_cleanup_state_done;
+  lifecycle_.loop();
+
+  CHECK_TRUE(manager_.cleanup.topic_buf == nullptr);
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhasePublishing, lifecycle_.phase());
 }
 
 TEST(discovery_lifecycle_manager, a_publish_run_too_big_for_the_heap_is_refused)

@@ -59,7 +59,20 @@ typedef struct {
   ha_cleanup_state_t state;
   uint32_t (*get_time_ms)(void);
 
-  char topic_buf[HA_CLEANUP_TOPIC_BUF_SIZE];
+  /* The topic queue is allocated when a cleanup run starts and freed by
+   * ha_discovery_cleanup_destroy(). This struct is embedded in the permanent
+   * ha_discovery_manager_t, so a fixed array here is DRAM every bridge pays
+   * for its whole life whether or not a cleanup ever runs — the leftover of
+   * architecture-review rec 10 (6 144 B, and it sits in the pool the 53 KB a
+   * publish run needs contiguously). NULL between runs; every access is
+   * guarded. Sized at compile time by HA_CLEANUP_TOPIC_BUF_SIZE, which is
+   * also the bound the MQTT callback appends against. */
+  char* topic_buf;
+  /* Allocation seam, installed by init() with the default malloc/free pair and
+   * replaced by tests to drive the allocation-failure refusal and to watch the
+   * queue's lifetime. */
+  void *(*alloc_fn)(size_t size);
+  void (*free_fn)(void *buffer);
   uint16_t queue_write_pos;
   uint16_t queue_count;
   uint16_t dropped_count;
@@ -89,16 +102,36 @@ typedef struct {
   portMUX_TYPE mux;
 } ha_discovery_cleanup_t;
 
+/* Guards the rec 10 leftover: the topic queue must stay a per-run heap
+ * allocation. If a fixed buffer ever comes back into this struct, the
+ * permanent DRAM carve grows by its size on every bridge. */
+#ifdef __cplusplus
+  static_assert(sizeof(ha_discovery_cleanup_t) <= 128,
+                "ha_discovery_cleanup_t must not embed per-run buffers");
+#else
+  _Static_assert(sizeof(ha_discovery_cleanup_t) <= 128,
+                 "ha_discovery_cleanup_t must not embed per-run buffers");
+#endif
+
 void ha_discovery_cleanup_init(ha_discovery_cleanup_t* self);
 
 void ha_discovery_cleanup_configure(ha_discovery_cleanup_t* self,
     const char* device_id, i_mqtt_client_t* mqtt_client, uint32_t (*get_time_ms)(void));
 
-void ha_discovery_cleanup_start(ha_discovery_cleanup_t* self);
+/* Allocates the topic queue and resets the run counters. Returns false, with
+ * the module left idle and nothing allocated, when the queue cannot be
+ * allocated: the caller must then refuse the cleanup rather than start a
+ * teardown it cannot track. */
+bool ha_discovery_cleanup_start(ha_discovery_cleanup_t* self);
 
 void ha_discovery_cleanup_run(ha_discovery_cleanup_t* self);
 
 void ha_discovery_cleanup_destroy(ha_discovery_cleanup_t* self);
+
+/* Releases the per-run topic queue (NULL-safe, idempotent). Callers that zero
+ * the owning struct without going through destroy() — ha_discovery_manager_init()
+ * on a re-init — MUST call this first, or the queue is orphaned. */
+void ha_discovery_cleanup_release_queue(ha_discovery_cleanup_t* self);
 
 ha_cleanup_state_t ha_discovery_cleanup_get_state(ha_discovery_cleanup_t* self);
 
