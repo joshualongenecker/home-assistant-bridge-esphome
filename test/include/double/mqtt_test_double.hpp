@@ -54,7 +54,7 @@ class MqttTestDouble : public MQTTClientComponent {
     last_published_payload_ = payload;
     last_published_retain_ = retain;
     publish_calls_++;
-    last_publish_critical_depth_ = esp_test_critical_depth_;
+    last_publish_critical_depth_ = esp_test_critical_depth_get_();
     if (on_publish_) on_publish_();
     return !publish_should_fail_;
   }
@@ -65,7 +65,7 @@ class MqttTestDouble : public MQTTClientComponent {
     last_published_payload_.assign(payload, payload_length);
     last_published_retain_ = retain;
     publish_calls_++;
-    last_publish_critical_depth_ = esp_test_critical_depth_;
+    last_publish_critical_depth_ = esp_test_critical_depth_get_();
     if (on_publish_) on_publish_();
     return !publish_should_fail_;
   }

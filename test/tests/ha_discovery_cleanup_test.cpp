@@ -480,8 +480,8 @@ TEST_GROUP(ha_discovery_cleanup_critical_section)
         test_time_ms = 1000;
         /* Canary: an unbalanced critical section in an earlier test lands here.
          * Assert before clearing, so a leak is never laundered by the next test. */
-        LONGS_EQUAL(0, esp_test_critical_depth_);
-        esp_test_critical_depth_ = 0;
+        LONGS_EQUAL(0, esp_test_critical_depth_get_());
+        esp_test_critical_depth_reset_();
         ha_discovery_cleanup_init(&cl);
         esphome_mqtt_client_adapter_init(&adapter, kDeviceId);
         esphome::mqtt::global_mqtt_client = &mqtt_double;
@@ -514,7 +514,7 @@ TEST(ha_discovery_cleanup_critical_section, removal_publish_runs_at_depth_zero)
 
     LONGS_EQUAL(1, mqtt_double.publish_calls_);
     CHECK_EQUAL(0, mqtt_double.last_publish_critical_depth_);
-    CHECK_EQUAL(0, esp_test_critical_depth_);
+    CHECK_EQUAL(0, esp_test_critical_depth_get_());
     CHECK_EQUAL(0, cl.queue_count);
     CHECK_EQUAL(1, (int) cl.total_removed_count);
 }
@@ -532,7 +532,7 @@ TEST(ha_discovery_cleanup_critical_section, dropped_removal_leaves_depth_zero)
 
     LONGS_EQUAL(1, mqtt_double.publish_calls_);
     CHECK_EQUAL(0, mqtt_double.last_publish_critical_depth_);
-    CHECK_EQUAL(0, esp_test_critical_depth_);
+    CHECK_EQUAL(0, esp_test_critical_depth_get_());
     CHECK_EQUAL(1, cl.queue_count);
     CHECK_EQUAL(0, (int) cl.total_removed_count);
 }
@@ -558,7 +558,7 @@ TEST(ha_discovery_cleanup_critical_section, truncated_topic_logs_at_depth_zero)
      * must not overwrite what the depth assertion observes. */
     LONGS_EQUAL(1, esp_test_log_count_at_depth_("ha_cleanup", 0));
     LONGS_EQUAL(0, esp_test_log_count_at_depth_("ha_cleanup", 1));
-    CHECK_EQUAL(0, esp_test_critical_depth_);
+    CHECK_EQUAL(0, esp_test_critical_depth_get_());
     CHECK_EQUAL(0, cl.queue_count);
     CHECK_EQUAL(0, (int) cl.total_removed_count);
 }
@@ -568,7 +568,7 @@ TEST(ha_discovery_cleanup_critical_section, truncated_topic_logs_at_depth_zero)
 TEST(ha_discovery_cleanup_critical_section, empty_queue_flush_leaves_depth_zero)
 {
     CHECK_EQUAL(0, (int) cleanup_flush_queue(&cl));
-    CHECK_EQUAL(0, esp_test_critical_depth_);
+    CHECK_EQUAL(0, esp_test_critical_depth_get_());
     LONGS_EQUAL(0, mqtt_double.publish_calls_);
 }
 
@@ -587,7 +587,7 @@ TEST(ha_discovery_cleanup_critical_section, append_during_the_release_window_kee
 
     LONGS_EQUAL(1, mqtt_double.publish_calls_);
     CHECK_EQUAL(0, mqtt_double.last_publish_critical_depth_);
-    CHECK_EQUAL(0, esp_test_critical_depth_);
+    CHECK_EQUAL(0, esp_test_critical_depth_get_());
     /* Only the front topic was compacted away; the late append survives. */
     STRCMP_EQUAL(kTopic, mqtt_double.last_published_topic_.c_str());
     CHECK_EQUAL(1, cl.queue_count);

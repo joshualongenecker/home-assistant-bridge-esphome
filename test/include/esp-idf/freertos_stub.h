@@ -108,8 +108,8 @@ static inline void vSemaphoreDelete(SemaphoreHandle_t) { }
 typedef void* portMUX_TYPE;
 #define portMUX_INITIALIZER_UNLOCKED (NULL)
 #define portMUX_INITIALIZE(x) do { (void)(x); } while (0)
-#define taskENTER_CRITICAL(x) do { (void)(x); esp_test_critical_depth_++; } while (0)
-#define taskEXIT_CRITICAL(x) do { (void)(x); esp_test_critical_depth_--; } while (0)
+#define taskENTER_CRITICAL(x) do { (void)(x); esp_test_critical_depth_add_(1); } while (0)
+#define taskEXIT_CRITICAL(x) do { (void)(x); esp_test_critical_depth_add_(-1); } while (0)
 
 /* ---------- Task state ---------- */
 typedef enum {

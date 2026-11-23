@@ -53,11 +53,11 @@ inline uint32_t millis() {
  * esp_test_log_depth_(); reset with esp_test_log_reset_(). Test files that want
  * mock() based log expectations include CppUTest first and redefine these. */
 #define ESP_LOG_TAG "test"
-#define ESP_LOGE(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_)
-#define ESP_LOGW(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_)
-#define ESP_LOGI(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_)
-#define ESP_LOGD(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_)
-#define ESP_LOGV(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_)
-#define ESP_LOGCONFIG(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_)
+#define ESP_LOGE(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_get_())
+#define ESP_LOGW(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_get_())
+#define ESP_LOGI(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_get_())
+#define ESP_LOGD(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_get_())
+#define ESP_LOGV(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_get_())
+#define ESP_LOGCONFIG(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_get_())
 
 #endif  // esphome_hal_double_hpp

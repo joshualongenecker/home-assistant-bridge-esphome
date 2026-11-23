@@ -21,7 +21,13 @@
 extern "C" {
 #endif
 
-extern int esp_test_critical_depth_;
+/* Depth of nested host critical sections. It is shared static state and the
+ * concurrency suites run real threads that log and enter critical sections, so
+ * it is only reachable through these mutex-guarded accessors (ThreadSanitizer
+ * flagged the raw global). */
+int esp_test_critical_depth_get_(void);
+void esp_test_critical_depth_add_(int delta);  /* +1 on enter, -1 on exit */
+void esp_test_critical_depth_reset_(void);
 
 /* Log-call recording. The ESP_LOGx stubs in double/esphome_hal_double.hpp call
  * esp_test_log_record_() with the tag and the critical-section depth at the call
