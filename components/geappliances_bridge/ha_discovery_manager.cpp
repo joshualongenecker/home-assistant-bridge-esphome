@@ -1159,6 +1159,10 @@ void ha_discovery_manager_start(ha_discovery_manager_t* self)
 
 void ha_discovery_manager_cleanup(ha_discovery_manager_t* self)
 {
+    /* cleanup_resources() -> ha_discovery_cleanup_destroy() releases the
+     * per-run topic queue before the memset below, the same way init() does
+     * on a re-init; a cleanup holding the queue here would otherwise orphan
+     * it (rec 10). */
     cleanup_resources(self);
 
     memset(self, 0, sizeof(*self));

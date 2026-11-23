@@ -327,8 +327,8 @@ bool ha_discovery_cleanup_start(ha_discovery_cleanup_t* self)
     /* Fall back to the default when the struct was built without init() (the
      * test fixtures memset a struct and set only the fields they use). */
     void *(*alloc)(size_t) = self->alloc_fn != NULL ? self->alloc_fn : cleanup_default_alloc;
-    self->topic_buf = (char *) alloc(HA_CLEANUP_TOPIC_BUF_SIZE);
-    if (self->topic_buf == NULL) {
+    char *buf = (char *) alloc(HA_CLEANUP_TOPIC_BUF_SIZE);
+    if (buf == NULL) {
         /* Nothing has been removed yet, so refusing here is recoverable: the
          * caller leaves Home Assistant's retained configs alone and the next
          * boot tries again. */
@@ -340,6 +340,14 @@ bool ha_discovery_cleanup_start(ha_discovery_cleanup_t* self)
 
     self->state = ha_cleanup_state_cleaning;
     cleanup_start(self);
+
+    /* Publish the pointer under the same mux the callback's NULL check and
+     * append run in, and only after the counters are reset: a dual-core
+     * callback appending between the store and the reset would lose the
+     * append uncounted. Symmetric with release_queue()'s NULL store. */
+    taskENTER_CRITICAL(&self->mux);
+    self->topic_buf = buf;
+    taskEXIT_CRITICAL(&self->mux);
     return true;
 }
 

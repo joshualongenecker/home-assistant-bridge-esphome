@@ -90,6 +90,10 @@ static ha_discovery_cleanup_t make_cleanup(const char* device_id)
 {
     ha_discovery_cleanup_t cl;
     memset(&cl, 0, sizeof(cl));
+    /* start()/destroy()/release_queue() really execute the spinlock on
+     * hardware; a zeroed mux is owner=0, an invalid state. The host stub
+     * ignores the mux, so initialize it the way init() would. */
+    portMUX_INITIALIZE(&cl.mux);
     cl.device_id = device_id;
     cl.get_time_ms = test_get_time_ms;
     cl.state = ha_cleanup_state_cleaning;
