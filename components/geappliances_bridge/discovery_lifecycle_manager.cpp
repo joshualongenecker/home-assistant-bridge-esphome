@@ -680,7 +680,7 @@ void DiscoveryLifecycleManager::abort_publish_run_() {
   const uint8_t armed = this->hooks_.read_abort_reboot_count(this->hooks_.context);
   if (armed >= kMaxAbortReboots) {
     ESP_LOGE(TAG, "HA discovery aborted and the reboot budget (%" PRIu8
-             ") is spent, staying up. Discovery Refresh or a power cycle will retry.",
+             ") is spent, staying up. Press Discovery Refresh to retry.",
              static_cast<uint8_t>(kMaxAbortReboots));
     this->set_phase_(kPhaseIdle);
     return;
