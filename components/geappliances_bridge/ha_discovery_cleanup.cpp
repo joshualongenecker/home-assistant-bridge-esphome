@@ -91,7 +91,6 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
     /* Detect truncation: if the topic was longer than our stack buffer,
      * skip it to avoid publishing to a malformed topic. */
     if (strlen(topic) != strlen(self->topic_buf)) {
-        ESP_LOGW(TAG, "Topic truncated during flush, skipping");
         consumed = (uint16_t)(strlen(self->topic_buf) + 1);
         if (consumed > self->queue_write_pos) {
             consumed = self->queue_write_pos;
@@ -102,6 +101,7 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
         self->queue_count--;
         remaining = self->queue_count;
         taskEXIT_CRITICAL(&self->mux);
+        ESP_LOGW(TAG, "Topic truncated during flush, skipping");
         return remaining;
     }
     consumed = (uint16_t)(strlen(self->topic_buf) + 1);
@@ -119,6 +119,15 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
      * here -- the MQTT callback only appends -- so the topic copied above is
      * still at the front when the publish lands, even if callbacks appended
      * while it was in flight. */
+
+    /* Leave the critical section before touching the network. On the
+     * single-core parts taskENTER_CRITICAL disables interrupts, so a publish
+     * that blocks on the outbound ring keeps them disabled long enough to trip
+     * the interrupt watchdog, and any log the publish path emits aborts inside
+     * newlib's stdio lock ("recursive mutexes make no sense in ISR context",
+     * issue #198). Appends from the MQTT callback only ever move the buffer's
+     * tail, so the front topic and `consumed` stay valid across the window. */
+    taskEXIT_CRITICAL(&self->mux);
     if (!mqtt_client_publish_raw(self->mqtt_client, topic, "", 0, true)) {
         /* Post-attempt timestamp + backoff. queue_count is read unlocked on
          * purpose: a single aligned uint16_t load, and the return value is an

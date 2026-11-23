@@ -16,6 +16,7 @@
 #endif
 
 #include "esphome/components/mqtt/mqtt_client.h"
+#include "double/critical_depth_shim.hpp"
 #include <string>
 #include <vector>
 #include <functional>
@@ -31,12 +32,20 @@ class MqttTestDouble : public MQTTClientComponent {
   std::string last_published_payload_;
   bool last_published_retain_{false};
   int publish_calls_{0};
+  /* Critical-section depth at the last publish. A removal publish made at
+   * depth != 0 runs with interrupts disabled on the single-core parts. */
+  int last_publish_critical_depth_{0};
 
   std::vector<std::string> subscribed_topics_;
   std::vector<std::string> unsubscribed_topics_;
   std::function<void(const std::string&, const std::string&)> subscribe_callback_;
   std::function<void(bool)> on_connect_callback_;
   std::function<void(MQTTClientDisconnectReason)> on_disconnect_callback_;
+
+  /* Optional hook invoked inside publish(), i.e. inside the window where the
+   * code under test has released its critical section -- the shape of a real
+   * MQTT callback appending to a queue while a removal publish is in flight. */
+  std::function<void()> on_publish_;
 
   bool is_connected() override { return connected_; }
   bool publish(const std::string& topic, const std::string& payload,
@@ -45,6 +54,8 @@ class MqttTestDouble : public MQTTClientComponent {
     last_published_payload_ = payload;
     last_published_retain_ = retain;
     publish_calls_++;
+    last_publish_critical_depth_ = esp_test_critical_depth_get_();
+    if (on_publish_) on_publish_();
     return !publish_should_fail_;
   }
 
@@ -54,6 +65,8 @@ class MqttTestDouble : public MQTTClientComponent {
     last_published_payload_.assign(payload, payload_length);
     last_published_retain_ = retain;
     publish_calls_++;
+    last_publish_critical_depth_ = esp_test_critical_depth_get_();
+    if (on_publish_) on_publish_();
     return !publish_should_fail_;
   }
 
