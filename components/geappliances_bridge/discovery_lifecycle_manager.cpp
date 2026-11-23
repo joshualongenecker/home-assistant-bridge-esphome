@@ -170,7 +170,10 @@ bool write_publish_pending(void*, bool pending) {
   return true;
 }
 
-// MALLOC_CAP_DEFAULT is what the run's plain malloc() calls draw from.
+// MALLOC_CAP_DEFAULT is what the run's plain malloc() calls draw from. On the
+// fleet's targets (C3/C6/S3, no SPIRAM heap) this equals MALLOC_CAP_INTERNAL,
+// which ha_discovery_manager_start() logs; revisit if a PSRAM target ever runs
+// discovery.
 uint32_t read_largest_free_block(void*) {
   return static_cast<uint32_t>(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
 }
@@ -370,6 +373,20 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
   // run died on the heap left a refrigerator with no entities until an operator
   // pressed the button a second time).
   if (this->hooks_.read_publish_pending(this->hooks_.context)) {
+    // The retrigger must not defeat the abort budget's terminal state: the
+    // budget exists so a permanently failing run cannot reboot-loop, and with
+    // the marker set a spent budget would otherwise turn every boot into
+    // another cleanup + refused-run cycle (an NVS write and a broker pass
+    // each) forever. Hold instead. The change check runs once per boot, so
+    // this logs once; a manual Discovery Refresh is not budget-gated, and a
+    // successful publish clears the budget and the marker together.
+    if (this->hooks_.read_abort_reboot_count(this->hooks_.context) >= kMaxAbortReboots) {
+      ESP_LOGW(TAG, "A previous boot removed the discovery configs without republishing, "
+                    "but the discovery-abort reboot budget (%u) is spent; holding the "
+                    "automatic republish. Press Discovery Refresh to retry.",
+               (unsigned) kMaxAbortReboots);
+      return;
+    }
     ESP_LOGI(TAG, "A previous boot removed the discovery configs without republishing; "
                   "cleaning old topics and republishing");
     this->trigger_pending_republish_();
@@ -452,7 +469,11 @@ void DiscoveryLifecycleManager::begin_cleanup_() {
   // completes -- a failed run, a phase timeout, a reset in between -- the marker
   // is what makes the next boot republish, because the record from the last
   // successful publish is still stored and still matches.
-  if (!this->hooks_.write_publish_pending(this->hooks_.context, true)) {
+  const bool already_pending = this->hooks_.read_publish_pending(this->hooks_.context);
+  // Skip the write when the marker is already set: a held or looping state must
+  // not write NVS on every pass.
+  if (!already_pending &&
+      !this->hooks_.write_publish_pending(this->hooks_.context, true)) {
     ESP_LOGE(TAG, "Discovery cleanup refused: the pending-publish marker could not be "
                   "stored, so a failed republish would not be recoverable. The existing "
                   "discovery configs were left in place.");
@@ -497,8 +518,11 @@ void DiscoveryLifecycleManager::begin_publish_() {
   //
   // Conservative on purpose: the run's four allocations are separate, so a heap
   // that could satisfy them out of several blocks is still refused. A false
-  // refusal costs one reboot; a false acceptance costs the appliance its
-  // entities until someone intervenes.
+  // refusal costs one reboot; a false acceptance would start a run already
+  // known to be doomed -- ha_discovery_manager_start() fails its allocations
+  // (how the #203 run died: 30 388 B free against the ~53 KB it needs) and the
+  // graceful FAILED path performs the same bounded reboot, just after burning
+  // the attempt and its 75-210 s.
   const uint32_t largest_block = this->hooks_.read_largest_free_block(this->hooks_.context);
   const uint32_t needed = ha_discovery_manager_run_allocation_size();
   if (largest_block < needed) {
@@ -565,7 +589,9 @@ void DiscoveryLifecycleManager::finish_publish_() {
   }
   [[maybe_unused]] const char* trigger_kind = this->trigger_ == kTriggerInitial
       ? "Initial"
-      : (this->trigger_ == kTriggerDiscoveryRefresh ? "Refresh" : "OTA");
+      : (this->trigger_ == kTriggerDiscoveryRefresh
+             ? "Refresh"
+             : (this->trigger_ == kTriggerPendingRepublish ? "Pending" : "OTA"));
   // A Discovery Refresh run ends any run of fingerprint-driven republishes.
   // Decided from trigger_ (published by the claim's release store), not by
   // the refresh trigger writing the count: that may run on another task.

@@ -49,6 +49,10 @@ using Trigger = DiscoveryLifecycleManager::Trigger;
 bool bridge_ready = true;
 bool stub_is_ready(void*) { return bridge_ready; }
 
+/* The cleanup module the fixture drives, so hook_pending_write can record
+ * where in the teardown the marker was armed. */
+ha_discovery_cleanup_t* g_cleanup_under_test = nullptr;
+
 /* Records every host-environment effect the phase machine asks for. */
 struct HookRecorder {
   Record stored{};
@@ -84,6 +88,12 @@ struct HookRecorder {
   int effect_seq{0};
   int save_seq{0};
   int pending_clear_seq{0};
+  int pending_arm_seq{0};
+  /* Which state the cleanup module was in when the marker was armed: idle
+   * means the arm happened before ha_discovery_cleanup_start() flipped it to
+   * cleaning, which is the safety property (the marker must precede the
+   * teardown). */
+  ha_cleanup_state_t cleanup_state_at_arm{ha_cleanup_state_idle};
 
   void reset() { *this = HookRecorder{}; }
 };
@@ -140,7 +150,12 @@ bool hook_pending_write(void* context, bool pending) {
   recorder->pending_write_calls++;
   if (recorder->pending_write_fails) return false;
   recorder->publish_pending = pending;
-  if (!pending && recorder->pending_clear_seq == 0) {
+  if (pending) {
+    recorder->pending_arm_seq = ++recorder->effect_seq;
+    recorder->cleanup_state_at_arm = g_cleanup_under_test != nullptr
+        ? g_cleanup_under_test->state
+        : ha_cleanup_state_idle;
+  } else if (recorder->pending_clear_seq == 0) {
     recorder->pending_clear_seq = ++recorder->effect_seq;
   }
   return true;
@@ -185,11 +200,13 @@ TEST_GROUP(discovery_lifecycle_manager)
     tiny_gea3_erd_client_double_init(&erd_client_);
     complete_device_identity();
     init_lifecycle();
+    g_cleanup_under_test = &manager_.cleanup;
   }
 
   void teardown()
   {
     ha_discovery_manager_cleanup(&manager_);
+    g_cleanup_under_test = nullptr;
     erd_cache_destroy(&cache_);
     esphome_mqtt_client_adapter_destroy(&adapter_);
     esphome::mqtt::global_mqtt_client = nullptr;
@@ -1260,6 +1277,11 @@ TEST(discovery_lifecycle_manager, starting_a_cleanup_arms_the_pending_publish_ma
 
   CHECK_TRUE(hooks_.publish_pending);
   CHECK_EQUAL(1, hooks_.pending_write_calls);
+  /* Armed before the teardown started: the marker write happens before
+   * ha_discovery_cleanup_start() flips the module to cleaning. A crash in the
+   * window the other way round would leave a teardown with no record of it. */
+  CHECK_EQUAL(ha_cleanup_state_idle, hooks_.cleanup_state_at_arm);
+  CHECK_TRUE(hooks_.pending_arm_seq > 0);
 }
 
 TEST(discovery_lifecycle_manager, a_completed_republish_clears_the_pending_marker)
@@ -1299,14 +1321,21 @@ TEST(discovery_lifecycle_manager, a_pending_marker_republishes_despite_a_matchin
    * matches every input, but the configs it describes are gone from the
    * broker. Without the marker every comparison says "nothing changed". */
   hooks_.stored = matching_record();
+  hooks_.stored.valid_erds_republishes = 1;
+  hooks_.stored.valid_erds_fingerprint = 0x22222222u;
   hooks_.has_stored = true;
   hooks_.publish_pending = true;
+  lifecycle_.set_valid_erds_fingerprint(0x22222222u);
 
   lifecycle_.check_discovery_changes(identity_.get_device_id());
 
   CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedCleanup, lifecycle_.phase());
   CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerPendingRepublish, lifecycle_.trigger());
   CHECK_EQUAL(1, hooks_.pending_read_calls);
+  /* The marker branch returns: the fingerprint bookkeeping below it must not
+   * run during a claimed phase (a stored republishes count of 1 plus a changed
+   * fingerprint would otherwise save a record right here). */
+  CHECK_EQUAL(0, hooks_.save_calls);
 }
 
 TEST(discovery_lifecycle_manager, a_torn_down_refresh_republishes_on_the_next_boot)
@@ -1390,4 +1419,54 @@ TEST(discovery_lifecycle_manager, a_publish_run_that_fits_is_not_refused)
   CHECK_EQUAL(DiscoveryLifecycleManager::kPhasePublishing, lifecycle_.phase());
   CHECK_EQUAL(0, (int) hooks_.abort_count);
   CHECK_EQUAL(1, hooks_.largest_block_calls);
+}
+
+TEST(discovery_lifecycle_manager, a_spent_budget_holds_the_automatic_republish)
+{
+  /* The retrigger must not defeat the abort budget's terminal state: with the
+   * marker set, a spent budget would otherwise turn every boot into another
+   * cleanup + refused-run cycle (an NVS write and a broker pass each) forever.
+   * Holding is the contract the abort log states. */
+  hooks_.stored = matching_record();
+  hooks_.has_stored = true;
+  hooks_.publish_pending = true;
+  hooks_.abort_count = (int) DiscoveryLifecycleManager::kMaxAbortReboots;
+
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+  CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
+  CHECK_EQUAL(0, (int) ha_discovery_cleanup_total_removed(&manager_.cleanup));
+  /* Held, not forgotten: the marker stays set so a later boot with budget
+   * left -- or a manual refresh -- still recovers. */
+  CHECK_TRUE(hooks_.publish_pending);
+  CHECK_EQUAL(0, hooks_.pending_write_calls);
+}
+
+TEST(discovery_lifecycle_manager, a_manual_refresh_is_not_budget_gated)
+{
+  /* The operator's own press is the recovery path the hold message points at,
+   * so it must work while the automatic retrigger is held. */
+  hooks_.abort_count = (int) DiscoveryLifecycleManager::kMaxAbortReboots;
+
+  lifecycle_.trigger_discovery_refresh();
+  lifecycle_.loop();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
+  CHECK_TRUE(hooks_.publish_pending);
+}
+
+TEST(discovery_lifecycle_manager, the_marker_is_not_rewritten_when_already_set)
+{
+  /* A held or looping state must not write NVS on every pass: the arm skips
+   * the write when the marker is already set. */
+  hooks_.publish_pending = true;
+
+  lifecycle_.trigger_ota_cleanup();
+  lifecycle_.loop();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
+  CHECK_EQUAL(0, hooks_.pending_write_calls);
+  CHECK_TRUE(hooks_.publish_pending);
 }
