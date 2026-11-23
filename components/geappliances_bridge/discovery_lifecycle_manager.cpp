@@ -379,7 +379,11 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
     // another cleanup + refused-run cycle (an NVS write and a broker pass
     // each) forever. Hold instead. The change check runs once per boot, so
     // this logs once; a manual Discovery Refresh is not budget-gated, and a
-    // successful publish clears the budget and the marker together.
+    // successful publish clears the budget and the marker together. The hold
+    // also takes precedence over every change branch below it: with the marker
+    // set, a concurrent hash, device-id or version change is swallowed until
+    // the hold lifts -- the configs are already gone, so a second teardown
+    // could only lose more. Do not "fix" that ordering.
     if (this->hooks_.read_abort_reboot_count(this->hooks_.context) >= kMaxAbortReboots) {
       ESP_LOGW(TAG, "A previous boot removed the discovery configs without republishing, "
                     "but the discovery-abort reboot budget (%u) is spent; holding the "

@@ -1286,6 +1286,7 @@ TEST(discovery_lifecycle_manager, starting_a_cleanup_arms_the_pending_publish_ma
 
 TEST(discovery_lifecycle_manager, a_completed_republish_clears_the_pending_marker)
 {
+  hooks_.abort_count = 2;
   enter_cleaning();
   CHECK_TRUE(hooks_.publish_pending);
 
@@ -1301,6 +1302,10 @@ TEST(discovery_lifecycle_manager, a_completed_republish_clears_the_pending_marke
    * extra republish on the next boot rather than a lost one. */
   CHECK_EQUAL(2, hooks_.pending_write_calls);
   CHECK_TRUE(hooks_.pending_clear_seq > hooks_.save_seq);
+  /* ...and a successful publish clears the abort budget at the same time, so
+   * the hold lifts exactly when the recovery it was waiting for happened. */
+  CHECK_EQUAL(0, (int) hooks_.abort_count);
+  CHECK_EQUAL(1, hooks_.abort_write_calls);
 }
 
 TEST(discovery_lifecycle_manager, a_failed_republish_leaves_the_marker_set)
@@ -1469,4 +1474,53 @@ TEST(discovery_lifecycle_manager, the_marker_is_not_rewritten_when_already_set)
   CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
   CHECK_EQUAL(0, hooks_.pending_write_calls);
   CHECK_TRUE(hooks_.publish_pending);
+}
+
+TEST(discovery_lifecycle_manager, three_refused_runs_end_in_a_hold)
+{
+  /* Chains the transition the seeding test skips: each refused run persists
+   * its abort, and the boot after the third holds instead of retrying. */
+  hooks_.stored = matching_record();
+  hooks_.has_stored = true;
+  hooks_.largest_block = ha_discovery_manager_run_allocation_size() - 1;
+  hooks_.publish_pending = true;  // the #203 state: a teardown already happened
+
+  for (int attempt = 1;
+       attempt <= (int) DiscoveryLifecycleManager::kMaxAbortReboots; ++attempt) {
+    lifecycle_.check_discovery_changes(identity_.get_device_id());
+    CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedCleanup, lifecycle_.phase());
+    lifecycle_.loop();
+    manager_.cleanup.state = ha_cleanup_state_done;
+    lifecycle_.loop();
+    CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
+    esphome_hal_double_set_millis(attempt * (int) DiscoveryLifecycleManager::kRebootDelayMs);
+    lifecycle_.loop();
+    CHECK_EQUAL(attempt, hooks_.reboot_calls);
+    CHECK_EQUAL(attempt, (int) hooks_.abort_count);
+  }
+
+  /* The boot after the third refusal: held, quiet, nothing removed. The marker
+   * the refusals left behind is what the hold reads. */
+  init_lifecycle();
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+  CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
+}
+
+TEST(discovery_lifecycle_manager, a_config_disabled_device_never_claims_the_pending_republish)
+{
+  /* The generate_device_config_ guard sits above the marker branch on purpose:
+   * with discovery generation off, the automatic republish would tear the
+   * topics down and publish nothing. */
+  hooks_.stored = matching_record();
+  hooks_.has_stored = true;
+  hooks_.publish_pending = true;
+
+  init_lifecycle(false);
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+  CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
 }
