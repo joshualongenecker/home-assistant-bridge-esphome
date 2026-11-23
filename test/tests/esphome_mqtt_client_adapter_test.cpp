@@ -67,6 +67,30 @@ TEST(esphome_mqtt_client_adapter, init_sets_api_pointer)
 
 
 /* ------------------------------------------------------------------ */
+/* is_connected                                                         */
+/* ------------------------------------------------------------------ */
+
+TEST(esphome_mqtt_client_adapter, is_connected_reports_the_client_state)
+{
+  init_adapter();
+  esphome::mqtt::MqttTestDouble mqtt_double;
+  mqtt_double.connected_ = true;
+  esphome::mqtt::global_mqtt_client = &mqtt_double;
+
+  CHECK(mqtt_client_is_connected(&adapter.interface));
+
+  mqtt_double.connected_ = false;
+  CHECK(!mqtt_client_is_connected(&adapter.interface));
+}
+
+TEST(esphome_mqtt_client_adapter, is_connected_is_false_with_no_client_wired)
+{
+  init_adapter();
+  esphome::mqtt::global_mqtt_client = nullptr;
+  CHECK(!mqtt_client_is_connected(&adapter.interface));
+}
+
+/* ------------------------------------------------------------------ */
 /* update_erd_write_result                                              */
 /* ------------------------------------------------------------------ */
 

@@ -178,7 +178,15 @@ i_tiny_event_t* on_mqtt_connect(i_mqtt_client_t* self);
 
 Return a pointer to the `on_mqtt_connect_event` interface. Bridges subscribe to this to resume operations or re-publish state.
 
-### 4.5 `publish_raw`
+### 4.5 `is_connected`
+
+```c
+bool adapter_is_connected(i_mqtt_client_t* self);
+```
+
+Return `true` when `esphome::mqtt::global_mqtt_client` is non-null and reports a live connection, `false` otherwise. This is the connection-state query behind the `is_connected` vtable slot: data-path modules such as the ERD cache publisher ask through the injected interface instead of reading the global, so the host tests can substitute a double. It is the only seam-side connectivity query; `publish_raw` and `subscribe` still inspect the global inline for their own null/disconnected guards.
+
+### 4.6 `publish_raw`
 
 ```c
 bool publish_raw(
@@ -191,7 +199,7 @@ bool publish_raw(
 
 Forward to `esphome_mqtt_client_adapter_publish_raw()`. Guards against null or disconnected MQTT client; returns the publish result.
 
-### 4.6 `subscribe`
+### 4.7 `subscribe`
 
 ```c
 void subscribe(
@@ -205,7 +213,7 @@ Register a callback for an MQTT topic. The adapter wraps the C function pointer 
 
 Guards against null MQTT client: if `global_mqtt_client` is `nullptr` at the time of the call, the function returns immediately without registering the callback.
 
-### 4.7 `unsubscribe`
+### 4.8 `unsubscribe`
 
 ```c
 void unsubscribe(i_mqtt_client_t* self, const char* topic);

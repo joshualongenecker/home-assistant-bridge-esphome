@@ -5,6 +5,12 @@
 
 struct erd_cache_t;
 
+namespace esphome {
+namespace geappliances_bridge {
+class ErdRegistry;
+}  // namespace geappliances_bridge
+}  // namespace esphome
+
 extern "C" {
 #include "i_tiny_gea3_erd_client.h"
 #include "tiny_hsm.h"
@@ -20,9 +26,10 @@ typedef struct {
   tiny_event_subscription_t erd_client_activity_subscription;
   erd_set_t erd_set;
   erd_cache_t* erd_cache;
-  // Opaque pointer to ErdRegistry for valid-ERD filtering.
-  // Set via erd_bridge_subscribe_set_erd_registry(). Cast in .cpp.
-  void* erd_registry;
+  // Valid-ERD filter (feature-bit set + custom ERDs). Owned by
+  // GeappliancesBridge and outlives the subscribe bridge; set via
+  // erd_bridge_subscribe_set_erd_registry(). nullptr disables filtering.
+  esphome::geappliances_bridge::ErdRegistry* erd_registry;
   tiny_hsm_t hsm;
   uint8_t erd_host_address;
   subscription_state_t current_state;
@@ -52,6 +59,6 @@ void erd_bridge_subscribe_destroy(
  */
 void erd_bridge_subscribe_set_erd_registry(
   erd_bridge_subscribe_t* self,
-  void* erd_registry);
+  esphome::geappliances_bridge::ErdRegistry* erd_registry);
 
 #endif

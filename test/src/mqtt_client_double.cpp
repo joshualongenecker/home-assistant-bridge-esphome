@@ -53,11 +53,18 @@ static void unsubscribe(i_mqtt_client_t* self, const char* topic)
     .withParameter("topic", topic);
 }
 
+static bool is_connected(i_mqtt_client_t* _self)
+{
+  auto self = reinterpret_cast<mqtt_client_double_t*>(_self);
+  return self->connected;
+}
+
 static const i_mqtt_client_api_t api = {
   update_erd_write_result,
   on_write_request,
   on_mqtt_disconnect,
   on_mqtt_connect,
+  is_connected,
   mqtt_client_double_publish_raw,
   subscribe,
   unsubscribe
@@ -69,6 +76,7 @@ void mqtt_client_double_init(mqtt_client_double_t* self)
   tiny_event_init(&self->on_write_request);
   tiny_event_init(&self->on_mqtt_disconnect);
   tiny_event_init(&self->on_mqtt_connect);
+  self->connected = false;
 }
 
 void mqtt_client_double_trigger_write_request(
@@ -109,4 +117,9 @@ bool mqtt_client_double_publish_raw(
     .withParameter("payload_len", payload_len)
     .withParameter("retain", retain);
   return true;
+}
+
+void mqtt_client_double_set_connected(mqtt_client_double_t* self, bool connected)
+{
+  self->connected = connected;
 }

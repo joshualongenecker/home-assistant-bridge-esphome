@@ -27,8 +27,7 @@ static tiny_hsm_result_t sub_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
        * erd_set insertion so that filtered ERDs don't count toward the
        * quiet-period decision — if only invalid ERDs are published, the
        * bridge correctly falls through to state_failed. */
-      auto* registry = static_cast<esphome::geappliances_bridge::ErdRegistry*>(self->erd_registry);
-      if (registry && !registry->is_valid(erd)) {
+      if (self->erd_registry && !self->erd_registry->is_valid(erd)) {
         break;
       }
 
@@ -310,7 +309,7 @@ void erd_bridge_subscribe_destroy(erd_bridge_subscribe_t* self)
 
 void erd_bridge_subscribe_set_erd_registry(
   erd_bridge_subscribe_t* self,
-  void* erd_registry)
+  esphome::geappliances_bridge::ErdRegistry* erd_registry)
 {
   self->erd_registry = erd_registry;
 }

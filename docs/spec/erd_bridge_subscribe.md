@@ -36,6 +36,7 @@ typedef struct {
   tiny_event_subscription_t erd_client_activity_subscription;
   erd_set_t erd_set;
   erd_cache_t* erd_cache;
+  esphome::geappliances_bridge::ErdRegistry* erd_registry;  // valid-ERD filter; nullptr disables filtering
   tiny_hsm_t hsm;
   uint8_t erd_host_address;
   subscription_state_t current_state;

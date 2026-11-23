@@ -35,6 +35,11 @@ typedef struct i_mqtt_client_api_t {
 
   i_tiny_event_t* (*on_mqtt_connect)(i_mqtt_client_t* self);
 
+  /* Current connection state. Lets a data-path module ask "may I publish?"
+   * through the injected client instead of reaching for ESPHome's global
+   * MQTT client, which the host tests cannot substitute. */
+  bool (*is_connected)(i_mqtt_client_t* self);
+
   bool (*publish_raw)(i_mqtt_client_t* self, const char* topic, const char* payload, size_t payload_len, bool retain);
 
   void (*subscribe)(i_mqtt_client_t* self, const char* topic, void (*callback)(const char* topic, const char* payload, size_t payload_len, void* arg), void* arg);
@@ -60,6 +65,11 @@ static inline i_tiny_event_t* mqtt_client_on_mqtt_disconnect(i_mqtt_client_t* se
 static inline i_tiny_event_t* mqtt_client_on_mqtt_connect(i_mqtt_client_t* self)
 {
   return self->api->on_mqtt_connect(self);
+}
+
+static inline bool mqtt_client_is_connected(i_mqtt_client_t* self)
+{
+  return self->api->is_connected(self);
 }
 
 static inline bool mqtt_client_publish_raw(i_mqtt_client_t* self, const char* topic, const char* payload, size_t payload_len, bool retain)

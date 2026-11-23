@@ -75,8 +75,13 @@ static bool stub_publish_raw(i_mqtt_client_t*, const char*, const char*, size_t,
     return true;
 }
 
+static bool stub_is_connected(i_mqtt_client_t*)
+{
+    return false;
+}
+
 static const i_mqtt_client_api_t g_stub_api = {
-    nullptr, nullptr, nullptr, nullptr, stub_publish_raw, nullptr, nullptr
+    nullptr, nullptr, nullptr, nullptr, stub_is_connected, stub_publish_raw, nullptr, nullptr
 };
 
 static i_mqtt_client_t make_stub_client()

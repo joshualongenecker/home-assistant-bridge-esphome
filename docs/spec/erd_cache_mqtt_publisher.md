@@ -49,7 +49,7 @@ void erd_cache_mqtt_publisher_init(
 - Zero the struct with `memset`
 - Store all parameters
 - Set `publish_index = 0`
-- Set `mqtt_connected = false`, then check the actual MQTT connection state via `esphome::mqtt::global_mqtt_client->is_connected()` and set it to `true` if already connected
+- Set `mqtt_connected = false`, then set it to `true` if `mqtt_client_is_connected(mqtt_client)` reports the injected client as already connected. Requires a non-null `mqtt_client`: the bridge always injects the initialized adapter, and a NULL client reaches the event-subscribe step below regardless, so the check adds no new failure class
 - Set `get_time_ms = esphome::millis`
 - On ESP-IDF: create three semaphores (`work_semaphore`, `state_mutex`, `done_semaphore`)
 - Subscribe to `mqtt_client_on_mqtt_disconnect` and `mqtt_client_on_mqtt_connect` events
@@ -253,8 +253,8 @@ Override the time source (defaults to `esphome::millis`). Used for testing to co
 ## 8. Invariants
 
 1. **No cache ownership:** The publisher holds a raw pointer to the cache but never frees or modifies its lifecycle. Cache ownership belongs to `GeappliancesBridge`.
-2. **No MQTT lifecycle ownership:** The publisher does not create, connect, or destroy the MQTT client. It reacts to connect/disconnect events from `EsphomeMqttClientAdapter`.
-3. **Pessimistic connection state:** `mqtt_connected` is initialized to `false` in `init()`. The actual connection state is then checked via `esphome::mqtt::global_mqtt_client->is_connected()`, and set to `true` if the broker is already connected. If not yet connected, the first `on_connected()` event will set the flag.
+2. **No MQTT lifecycle ownership:** The publisher does not create, connect, or destroy the MQTT client. It reacts to connect/disconnect events from `EsphomeMqttClientAdapter` and queries connectivity through the injected `i_mqtt_client_t`; it never reads `esphome::mqtt::global_mqtt_client` itself.
+3. **Pessimistic connection state:** `mqtt_connected` is initialized to `false` in `init()`. The actual connection state is then queried through the injected client (`mqtt_client_is_connected`), and set to `true` if the broker is already connected. If not yet connected, the first `on_connected()` event will set the flag.
 4. **Publish index is monotonic:** `publish_index` advances through the cache entries via `erd_cache_snapshot_next_updated()`, wrapping around as the cache implementation dictates.
 5. **Retain flag is always true:** All publishes use `retain=true` to ensure the broker retains the last known value for each ERD topic.
 6. **Clean destroy:** All event subscriptions are unsubscribed and all semaphores are deleted before the struct is zeroed. Null guards prevent crashes on partial init.
