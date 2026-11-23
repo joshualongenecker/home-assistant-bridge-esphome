@@ -1,0 +1,49 @@
+# Build-variant compile config (architecture review rec 9).
+#
+# docs/test-compile.yaml configures both UARTs, so it only ever exercises the
+# "both protocol stacks present" build. This config configures GEA3 alone, so
+# the codegen must emit GEA_BRIDGE_HAS_GEA3 and no GEA_BRIDGE_HAS_GEA2, which
+# is what makes ProtocolStack drop the 8447 B of GEA2 ring buffers.
+# scripts/check_protocol_buffer_defines.py asserts the defines track the
+# configured UARTs; `make check-protocol-variants` compiles the component with
+# each protocol's buffers absent.
+#
+# Kept deliberately minimal: it exists to be validated and generated, not to
+# be flashed. It declares no secrets (so the CI step needs no docs/secrets.yaml)
+# and no api/ota; the literal wifi/mqtt blocks are only there because the
+# component requires the mqtt component, which requires network.
+
+esphome:
+  name: gea-test-gea3-only
+  friendly_name: gea-test-gea3-only
+  name_add_mac_suffix: true
+
+logger:
+
+esp32:
+  board: seeed_xiao_esp32c3
+  variant: esp32c3
+  framework:
+    type: esp-idf
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [ geappliances_bridge ]
+
+uart:
+  - id: gea3_uart
+    tx_pin: GPIO21 # D6 on Xiao ESP32-C3
+    rx_pin: GPIO20 # D7 on Xiao ESP32-C3
+    baud_rate: 230400
+
+wifi:
+  ssid: rec9-check
+  password: rec9-check
+
+mqtt:
+  broker: 127.0.0.1
+
+geappliances_bridge:
+  gea3_uart_id: gea3_uart

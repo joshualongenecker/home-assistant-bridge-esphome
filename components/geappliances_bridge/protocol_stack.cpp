@@ -9,7 +9,9 @@
 //       shared timer group.
 //
 // Responsibilities:
-//   - init(): initialize the stack for the configured UARTs (zero, one, two)
+//   - init(): initialize the stack for the configured UARTs (zero, one, two);
+//     an unconfigured protocol's ring buffers are compiled out entirely
+//     (GEA_BRIDGE_HAS_GEA2 / GEA_BRIDGE_HAS_GEA3, see protocol_stack.h)
 //   - run(): dispatch one iteration — GEA2 tight loop, GEA3 iteration, or
 //     timer-only — with the dual-UART adapter gating
 //   - teardown(): reset tick tracking and the GEA2-active latch
@@ -61,8 +63,21 @@ void ProtocolStack::init(uint8_t client_address,
                          uart::UARTComponent* gea3_uart,
                          uart::UARTComponent* gea2_uart)
 {
+#ifdef GEA_BRIDGE_HAS_GEA3
   this->gea3_uart_ = gea3_uart;
+#else
+  // This build declares no GEA3 ring buffers, so the protocol can never run.
+  // Pin the runtime gate (has_gea3_uart) to the compile-time one rather than
+  // trusting codegen and configuration to agree.
+  this->gea3_uart_ = nullptr;
+  (void) gea3_uart;
+#endif
+#ifdef GEA_BRIDGE_HAS_GEA2
   this->gea2_uart_ = gea2_uart;
+#else
+  this->gea2_uart_ = nullptr;
+  (void) gea2_uart;
+#endif
 
   // Reset tick tracking on re-init (deep sleep wake, ESPHome reconfiguration)
   this->gea2_tick_count_ = 0;
@@ -71,6 +86,7 @@ void ProtocolStack::init(uint8_t client_address,
 
   tiny_timer_group_init(&this->timer_group_, esphome_time_source_init());
 
+#ifdef GEA_BRIDGE_HAS_GEA3
   if (this->gea3_uart_ != nullptr) {
     esphome_uart_adapter_init(&this->gea3_uart_adapter_, &this->timer_group_, this->gea3_uart_);
 
@@ -92,7 +108,9 @@ void ProtocolStack::init(uint8_t client_address,
       sizeof(this->client_queue_buffer_),
       &client_configuration);
   }
+#endif
 
+#ifdef GEA_BRIDGE_HAS_GEA2
   if (this->gea2_uart_ != nullptr) {
     esphome_uart_adapter_init(&this->gea2_uart_adapter_, &this->timer_group_, this->gea2_uart_);
 
@@ -128,6 +146,7 @@ void ProtocolStack::init(uint8_t client_address,
 
     gea2_erd_client_adapter_init(&this->gea2_erd_client_adapter_, &this->gea2_erd_client_.interface);
   }
+#endif
 }
 
 void ProtocolStack::teardown()

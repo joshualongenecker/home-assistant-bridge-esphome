@@ -165,11 +165,11 @@ The method MUST:
 
 #### Requirement 3.5.2: Valid-ERD Filter Application
 
-When `appliance_api_parsing_` is `true`, the feature bit manager is in `FEATURE_BIT_STATE_COMPLETE`, and the valid ERD count is greater than zero, the method MUST call `erd_registry_.set_valid_erds()` with the feature bit manager's valid ERD list.
+When `appliance_api_parsing_` is `true`, the feature bit manager is in `FEATURE_BIT_STATE_COMPLETE`, and the valid ERD count is greater than zero, the method MUST call `erd_registry_.set_valid_erds()` with the feature bit manager's valid ERD list, obtained through `get_valid_erds_for_filter()`. The registry borrows that array and sorts it in place rather than copying it (architecture review rec 9), so the manager's own view of the set is sorted from this point on.
 
 **Rationale:** The valid-ERD filter restricts publishing to only the ERDs the appliance actually supports, reducing noise and avoiding publishing undefined values. An empty set is intentionally ignored by the registry (all ERDs are published).
 
-**Implementation:** `geappliances_bridge_bridge_init.cpp` lines 201–206.
+**Implementation:** `GeappliancesBridge::initialize_erd_bridge_()`, the `set_valid_erds()` / `add_valid_erds()` block.
 
 #### Requirement 3.5.3: Mode Selection
 

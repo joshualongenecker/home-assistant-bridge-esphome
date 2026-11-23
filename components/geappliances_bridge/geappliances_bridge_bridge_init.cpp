@@ -143,13 +143,18 @@ void GeappliancesBridge::initialize_erd_bridge_()
 
   // Apply the valid-ERD filter when appliance API parsing is enabled and
   // produced results. An empty set is ignored by the registry so all ERDs
-  // continue to be published in that case.
+  // continue to be published in that case. The registry borrows the
+  // manager's array and sorts it in place rather than copying 645 entries
+  // (architecture review rec 9), so the manager's own view of the set is
+  // sorted from here on.
   if (this->appliance_api_parsing_ &&
       this->feature_bit_manager_.get_state() == FEATURE_BIT_STATE_COMPLETE &&
       this->feature_bit_manager_.get_valid_erd_count() > 0) {
-    this->erd_registry_.set_valid_erds(this->feature_bit_manager_.get_valid_erds(),
+    this->erd_registry_.set_valid_erds(this->feature_bit_manager_.get_valid_erds_for_filter(),
                                        this->feature_bit_manager_.get_valid_erd_count());
-    // Merge custom ERDs so they always pass the filter.
+    // Merge custom ERDs so they pass the filter — up to the merged cap
+    // (ERD_REGISTRY_MAX_VALID); past it add_valid_erds() drops them, same as
+    // the pre-rec-9 copy kept the total at 645.
     if (this->custom_erds_count_ > 0) {
       std::vector<tiny_erd_t> erd_ids(this->custom_erds_count_);
       for (uint16_t i = 0; i < this->custom_erds_count_; i++) {

@@ -169,13 +169,14 @@ The `get_state()` method returns the current `FeatureBitState`. The bridge start
 
 ### Requirement 3.2: Valid ERD Access
 
-The class exposes two accessor methods for the valid ERD list:
+The class exposes these accessor methods for the valid ERD list:
 
 - `get_valid_erd_count()` returns a `uint16_t` indicating the number of valid ERDs collected. Before parsing completes, this returns 0. When in `FEATURE_BIT_STATE_FAILED`, the valid ERD count is 0 (no feature filtering is applied).
 - `get_valid_erd(uint16_t idx)` returns a `tiny_erd_t` for the ERD at the given 0-based index. If `idx` is >= `get_valid_erd_count()`, it returns 0.
+- `get_valid_erds_for_filter()` returns a mutable pointer to the array for the `ErdRegistry::set_valid_erds()` handoff (nullptr while the set is empty). The registry sorts the array in place and borrows the pointer instead of copying 645 entries (architecture review rec 9).
 - `is_initialized()` returns `true` once `init()` has installed an ERD client and `false` after `cleanup()` resets it. The bridge's `start_feature_bit_reading_()` guard uses it instead of a bridge-side `feature_bit_reading_started_` flag: a second `init()` while reads are in flight (or after PARSING/FAILED/COMPLETE) would double-queue the first read, and `cleanup()` re-arms the guard for a re-init.
 
-The underlying storage is a public fixed array `valid_erds_[FEATURE_BIT_MAX_ERDS]` (645 elements), directly accessible by callers. The bridge uses `get_valid_erd_count()` to determine how many entries in the array are valid.
+The storage is a private fixed array `valid_erds_[FEATURE_BIT_MAX_ERDS]` (645 elements) owned here — it is the only copy of the valid-ERD set in the component; `ErdRegistry` borrows it. The bridge uses `get_valid_erd_count()` to determine how many entries are valid. From the `set_valid_erds()` handoff onward the array is sorted ascending, because the registry sorts the storage it borrows; before that handoff the entries are in parse order.
 
 ### Requirement 3.3: List Readiness
 
@@ -184,7 +185,7 @@ The private `valid_list_ready_` flag is false until parsing completes and the ma
 ### Prohibited
 
 - Returning a non-zero `get_valid_erd_count()` before parsing completes.
-- Modifying `valid_erds_` after transitioning to COMPLETE.
+- Modifying `valid_erds_` after transitioning to COMPLETE. The one permitted post-COMPLETE mutation is `ErdRegistry::set_valid_erds()` sorting the borrowed array in place.
 
 ---
 

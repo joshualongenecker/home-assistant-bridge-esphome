@@ -2261,8 +2261,10 @@ TEST(startup_integration, valid_erds_fingerprint_follows_the_valid_erd_set)
   // No filter yet (feature bits not read): unknown
   CHECK_EQUAL(0u, b->valid_erds_fingerprint_());
 
-  const tiny_erd_t set_a[] = {0x0001, 0x0002, 0x0008, 0x7130};
-  const tiny_erd_t set_b[] = {0x0001, 0x0002, 0x0008, 0x7131};
+  // rec 9: set_valid_erds() sorts the caller's array in place and borrows it,
+  // so the arrays cannot be const here.
+  tiny_erd_t set_a[] = {0x0001, 0x0002, 0x0008, 0x7130};
+  tiny_erd_t set_b[] = {0x0001, 0x0002, 0x0008, 0x7131};
   b->erd_registry_.set_valid_erds(set_a, 4);
   const uint32_t fp_a = b->valid_erds_fingerprint_();
   CHECK(fp_a != 0u);
@@ -2274,7 +2276,7 @@ TEST(startup_integration, valid_erds_fingerprint_follows_the_valid_erd_set)
   CHECK(fp_b != fp_a);
 
   // Same set in another order: same fingerprint (the registry keeps it sorted)
-  const tiny_erd_t set_a_shuffled[] = {0x7130, 0x0008, 0x0001, 0x0002};
+  tiny_erd_t set_a_shuffled[] = {0x7130, 0x0008, 0x0001, 0x0002};
   b->erd_registry_.clear_valid_erds();
   b->erd_registry_.set_valid_erds(set_a_shuffled, 4);
   CHECK_EQUAL(fp_a, b->valid_erds_fingerprint_());

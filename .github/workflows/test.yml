@@ -25,6 +25,9 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: 'recursive'
+    # Fastest gate for the rec 9 build variants: the component must compile
+    # with each protocol's ring buffers compiled out, not just with both.
+    - run: make check-protocol-variants
 
     - run: make test -j${{ steps.cpu-cores.outputs.count }}
     - run: make integration-test -j${{ steps.cpu-cores.outputs.count }}

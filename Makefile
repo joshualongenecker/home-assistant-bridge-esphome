@@ -148,6 +148,25 @@ pytest:
 check-generated:
 	@bash scripts/check_generated_sync.sh
 
+.PHONY: check-protocol-variants
+# Build-variant gate for rec 9: the ESPHome build emits GEA_BRIDGE_HAS_GEA3 /
+# GEA_BRIDGE_HAS_GEA2 per configured UART, so the component must also compile
+# with one protocol's ring buffers absent. The default test build defines
+# neither, which protocol_stack.h reads as "both stacks", so no other target
+# ever compiles the single-protocol shape. -fsyntax-only keeps the gate to a
+# few seconds; the flags mirror the test build so the same warnings bite.
+#
+# -MMD would drop a .d file per source in the working directory: nothing is
+# linked or built here, so the dependency flags are stripped.
+VARIANT_CPPFLAGS := $(filter-out -MMD -MP,$(CPPFLAGS))
+check-protocol-variants:
+	@for variant in GEA_BRIDGE_HAS_GEA3 GEA_BRIDGE_HAS_GEA2; do \
+		echo "Compiling component sources with -D$$variant only..."; \
+		for src in $(filter %.cpp,$(SRC_FILES)); do \
+			$(CXX) $(VARIANT_CPPFLAGS) $(CXXFLAGS) -fsyntax-only -D$$variant $$src || exit 1; \
+		done; \
+	done
+
 .PHONY: check-diagnostic-mqtt
 # Regenerate the CI config's sources and assert every component-created diagnostic
 # entity got an MQTT wrapper. --only-generate is what makes this cheap: the check
