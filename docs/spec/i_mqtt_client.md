@@ -53,6 +53,8 @@ typedef struct i_mqtt_client_api_t {
 } i_mqtt_client_api_t;
 ```
 
+Implementations must populate every slot: the slot order is load-bearing for the positional aggregate initializers used by the adapter, the test double, and the cleanup-test stub. A typed entry displaced by an inserted slot is a compile error, which is the point; an all-`nullptr` initializer shifts silently, so a stub with only nulls must be updated by hand whenever a slot is added.
+
 ---
 
 ## 3. Methods

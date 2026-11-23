@@ -184,7 +184,7 @@ Return a pointer to the `on_mqtt_connect_event` interface. Bridges subscribe to 
 bool adapter_is_connected(i_mqtt_client_t* self);
 ```
 
-Return `true` when `esphome::mqtt::global_mqtt_client` is non-null and reports a live connection, `false` otherwise. This is the connection-state query behind the `is_connected` vtable slot: data-path modules such as the ERD cache publisher ask through the injected interface instead of reading the global, so the host tests can substitute a double. The adapter is the only place that global is consulted for connectivity.
+Return `true` when `esphome::mqtt::global_mqtt_client` is non-null and reports a live connection, `false` otherwise. This is the connection-state query behind the `is_connected` vtable slot: data-path modules such as the ERD cache publisher ask through the injected interface instead of reading the global, so the host tests can substitute a double. It is the only seam-side connectivity query; `publish_raw` and `subscribe` still inspect the global inline for their own null/disconnected guards.
 
 ### 4.6 `publish_raw`
 

@@ -49,7 +49,7 @@ void erd_cache_mqtt_publisher_init(
 - Zero the struct with `memset`
 - Store all parameters
 - Set `publish_index = 0`
-- Set `mqtt_connected = false`, then set it to `true` if `mqtt_client_is_connected(mqtt_client)` reports the injected client as already connected
+- Set `mqtt_connected = false`, then set it to `true` if `mqtt_client_is_connected(mqtt_client)` reports the injected client as already connected. Requires a non-null `mqtt_client`: the bridge always injects the initialized adapter, and a NULL client reaches the event-subscribe step below regardless, so the check adds no new failure class
 - Set `get_time_ms = esphome::millis`
 - On ESP-IDF: create three semaphores (`work_semaphore`, `state_mutex`, `done_semaphore`)
 - Subscribe to `mqtt_client_on_mqtt_disconnect` and `mqtt_client_on_mqtt_connect` events
