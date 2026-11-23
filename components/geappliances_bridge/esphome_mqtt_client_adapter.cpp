@@ -78,11 +78,22 @@ static i_tiny_event_t* on_mqtt_connect(i_mqtt_client_t* _self)
   return &self->on_mqtt_connect_event.interface;
 }
 
+/* The adapter is the seam boundary: ESPHome's global client is only ever
+ * reached from here, so data-path modules query connectivity through the
+ * injected i_mqtt_client_t. */
+static bool adapter_is_connected(i_mqtt_client_t* _self)
+{
+  (void)_self;
+  auto mqtt_client = esphome::mqtt::global_mqtt_client;
+  return mqtt_client != nullptr && mqtt_client->is_connected();
+}
+
 static const i_mqtt_client_api_t api = {
   update_erd_write_result,
   on_write_request,
   on_mqtt_disconnect,
   on_mqtt_connect,
+  adapter_is_connected,
   esphome_mqtt_client_adapter_publish_raw,
   esphome_mqtt_client_adapter_subscribe,
   esphome_mqtt_client_adapter_unsubscribe

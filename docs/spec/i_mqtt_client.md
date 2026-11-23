@@ -43,6 +43,8 @@ typedef struct i_mqtt_client_api_t {
 
   i_tiny_event_t* (*on_mqtt_connect)(i_mqtt_client_t* self);
 
+  bool (*is_connected)(i_mqtt_client_t* self);
+
   void (*publish_raw)(i_mqtt_client_t* self, const char* topic, const char* payload, size_t payload_len, bool retain);
 
   void (*subscribe)(i_mqtt_client_t* self, const char* topic, void (*callback)(const char* topic, const char* payload, size_t payload_len, void* arg), void* arg);
@@ -89,7 +91,14 @@ i_tiny_event_t* mqtt_client_on_mqtt_connect(i_mqtt_client_t* self);
 ```
 
 Event raised when the client connects to the MQTT broker.
-### 3.5 `mqtt_client_publish_raw`
+### 3.5 `mqtt_client_is_connected`
+
+```c
+bool mqtt_client_is_connected(i_mqtt_client_t* self);
+```
+
+Current connection state. Data-path modules query this instead of reading `esphome::mqtt::global_mqtt_client` directly: the global exists only in the firmware build, so a direct read is invisible to the host tests. The ESPHome adapter answers from the global client (false when it is null); a test double answers from its own state.
+### 3.6 `mqtt_client_publish_raw`
 
 ```c
 void mqtt_client_publish_raw(
@@ -101,7 +110,7 @@ void mqtt_client_publish_raw(
 ```
 
 Publish a raw MQTT message (C-string topic and payload).
-### 3.6 `mqtt_client_subscribe`
+### 3.7 `mqtt_client_subscribe`
 
 ```c
 void mqtt_client_subscribe(
@@ -112,7 +121,7 @@ void mqtt_client_subscribe(
 ```
 
 Subscribe to a topic with a raw C callback.
-### 3.7 `mqtt_client_unsubscribe`
+### 3.8 `mqtt_client_unsubscribe`
 
 ```c
 void mqtt_client_unsubscribe(i_mqtt_client_t* self, const char* topic);
@@ -131,6 +140,7 @@ Each vtable method has a corresponding `static inline` wrapper in the header:
 | `mqtt_client_on_write_request(self)` | `self->api->on_write_request(self)` |
 | `mqtt_client_on_mqtt_disconnect(self)` | `self->api->on_mqtt_disconnect(self)` |
 | `mqtt_client_on_mqtt_connect(self)` | `self->api->on_mqtt_connect(self)` |
+| `mqtt_client_is_connected(self)` | `self->api->is_connected(self)` |
 | `mqtt_client_publish_raw(self, topic, payload, payload_len, retain)` | `self->api->publish_raw(self, topic, payload, payload_len, retain)` |
 | `mqtt_client_subscribe(self, topic, callback, arg)` | `self->api->subscribe(self, topic, callback, arg)` |
 | `mqtt_client_unsubscribe(self, topic)` | `self->api->unsubscribe(self, topic)` |

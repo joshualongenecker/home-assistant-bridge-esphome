@@ -7,7 +7,6 @@
 #include "i_mqtt_client.h"
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
-#include "esphome/components/mqtt/mqtt_client.h"
 
 #include <cstdio>
 #include <string.h>
@@ -145,8 +144,7 @@ void erd_cache_mqtt_publisher_init(
   /* If MQTT is already connected when we register, set the flag so the
    * publisher knows it can publish.  Don't call on_connected() — that
    * logs "MQTT reconnected" which is misleading at init time. */
-  auto global = esphome::mqtt::global_mqtt_client;
-  if (global != nullptr && global->is_connected()) {
+  if (mqtt_client_is_connected(self->mqtt_client)) {
     self->mqtt_connected = true;
   }
 

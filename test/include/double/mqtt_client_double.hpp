@@ -17,6 +17,10 @@ typedef struct {
   tiny_event_t on_write_request;
   tiny_event_t on_mqtt_disconnect;
   tiny_event_t on_mqtt_connect;
+
+  /* Reported by the is_connected vtable slot; set with
+   * mqtt_client_double_set_connected(). */
+  bool connected;
 } mqtt_client_double_t;
 
 /*!
@@ -45,6 +49,13 @@ void mqtt_client_double_trigger_mqtt_disconnect(
  */
 void mqtt_client_double_trigger_mqtt_connect(
   mqtt_client_double_t* self);
+
+/*!
+ * Set the connection state reported by is_connected().
+ */
+void mqtt_client_double_set_connected(
+  mqtt_client_double_t* self,
+  bool connected);
 
 /*!
  * Implement the publish_raw vtable slot for the test double.

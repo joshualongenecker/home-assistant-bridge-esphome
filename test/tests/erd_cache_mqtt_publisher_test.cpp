@@ -16,6 +16,7 @@ extern "C" {
 }
 
 #include "esphome_mqtt_client_adapter.h"
+#include "double/mqtt_client_double.hpp"
 #include "double/mqtt_test_double.hpp"
 #include "double/esphome_hal_double.hpp"
 
@@ -25,6 +26,8 @@ TEST_GROUP(erd_cache_mqtt_publisher)
   erd_cache_t cache;
   esphome_mqtt_client_adapter_t adapter;
   esphome::mqtt::MqttTestDouble mqtt_double;
+  /* Pure i_mqtt_client_t double: no ESPHome global involved. */
+  mqtt_client_double_t seam_client;
 
   void setup()
   {
@@ -35,6 +38,7 @@ TEST_GROUP(erd_cache_mqtt_publisher)
     memset(&publisher, 0, sizeof(publisher));
     erd_cache_init(&cache);
     esphome_mqtt_client_adapter_init(&adapter, "test_device");
+    mqtt_client_double_init(&seam_client);
     esphome::mqtt::global_mqtt_client = &mqtt_double;
     mqtt_double.connected_ = true;
   }
@@ -85,6 +89,40 @@ TEST(erd_cache_mqtt_publisher, init_sets_mqtt_connected_false)
     "device",
     0xE0);
   erd_cache_mqtt_publisher_on_disconnected(&publisher); // double starts connected in setup
+  CHECK(!publisher.mqtt_connected);
+}
+
+TEST(erd_cache_mqtt_publisher, init_reads_connected_from_the_injected_client)
+{
+  /* The already-connected check at init must come from the injected
+   * i_mqtt_client_t.  With ESPHome's global client absent the seam is the
+   * only possible source of the answer. */
+  esphome::mqtt::global_mqtt_client = nullptr;
+  mqtt_client_double_set_connected(&seam_client, true);
+
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &seam_client.interface,
+    "device",
+    0xE0);
+
+  CHECK(publisher.mqtt_connected);
+}
+
+TEST(erd_cache_mqtt_publisher, init_ignores_the_global_when_the_injected_client_is_disconnected)
+{
+  /* The fixture leaves the global client connected; a publisher wired to a
+   * disconnected client must still start disconnected. */
+  mqtt_client_double_set_connected(&seam_client, false);
+
+  erd_cache_mqtt_publisher_init(
+    &publisher,
+    &cache,
+    &seam_client.interface,
+    "device",
+    0xE0);
+
   CHECK(!publisher.mqtt_connected);
 }
 
