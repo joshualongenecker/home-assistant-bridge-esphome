@@ -23,6 +23,16 @@ extern "C" {
 
 extern int esp_test_critical_depth_;
 
+/* Log-call recording. The ESP_LOGx stubs in double/esphome_hal_double.hpp call
+ * esp_test_log_record_() with the tag and the critical-section depth at the call
+ * site, so a test can assert a warning was emitted at depth 0: the dishwasher
+ * crash of issue #198 was a log taken inside a critical section, which is not
+ * observable from the publish-side depth alone. Tags are matched by string. */
+void esp_test_log_record_(const char* tag, int depth);
+void esp_test_log_reset_(void);
+int esp_test_log_count_(const char* tag);   /* calls recorded for tag; 0 if none */
+int esp_test_log_depth_(const char* tag);   /* depth of the last call for tag; -1 if none */
+
 #ifdef __cplusplus
 }
 #endif

@@ -478,6 +478,9 @@ TEST_GROUP(ha_discovery_cleanup_critical_section)
     void setup()
     {
         test_time_ms = 1000;
+        /* Canary: an unbalanced critical section in an earlier test lands here.
+         * Assert before clearing, so a leak is never laundered by the next test. */
+        LONGS_EQUAL(0, esp_test_critical_depth_);
         esp_test_critical_depth_ = 0;
         ha_discovery_cleanup_init(&cl);
         esphome_mqtt_client_adapter_init(&adapter, kDeviceId);
@@ -486,6 +489,7 @@ TEST_GROUP(ha_discovery_cleanup_critical_section)
         ha_discovery_cleanup_configure(&cl, kDeviceId, &adapter.interface,
                                        test_get_time_ms);
         cl.state = ha_cleanup_state_cleaning;
+        esp_test_log_reset_();  /* ignore any init/configure logging */
     }
 
     void teardown()
@@ -534,8 +538,11 @@ TEST(ha_discovery_cleanup_critical_section, dropped_removal_leaves_depth_zero)
 }
 
 /* The third exit out of the section: a topic too long for the stack buffer is
- * skipped, and its warning is logged. Same leak, same consequence. */
-TEST(ha_discovery_cleanup_critical_section, truncated_topic_leaves_depth_zero)
+ * skipped and its warning is logged. That log is the dishwasher failure mode of
+ * issue #198 -- inside the section it takes newlib's stdio lock and aborts. The
+ * pre-fix code balanced this path and only logged too early, so the assertion is
+ * on the depth the log was emitted at, not on the depth after the return. */
+TEST(ha_discovery_cleanup_critical_section, truncated_topic_logs_at_depth_zero)
 {
     std::string long_topic =
         std::string("homeassistant/sensor/") + kDeviceId + "/entity_" +
@@ -546,7 +553,46 @@ TEST(ha_discovery_cleanup_critical_section, truncated_topic_leaves_depth_zero)
     cleanup_flush_queue(&cl);
 
     LONGS_EQUAL(0, mqtt_double.publish_calls_);
+    LONGS_EQUAL(1, esp_test_log_count_("ha_cleanup"));
+    CHECK_EQUAL(0, esp_test_log_depth_("ha_cleanup"));
     CHECK_EQUAL(0, esp_test_critical_depth_);
     CHECK_EQUAL(0, cl.queue_count);
     CHECK_EQUAL(0, (int) cl.total_removed_count);
+}
+
+/* The empty-queue exit also takes the section, and it is the cheapest path to
+ * get wrong: a `return 0` moved above the exit leaks it for the rest of the boot. */
+TEST(ha_discovery_cleanup_critical_section, empty_queue_flush_leaves_depth_zero)
+{
+    CHECK_EQUAL(0, (int) cleanup_flush_queue(&cl));
+    CHECK_EQUAL(0, esp_test_critical_depth_);
+    LONGS_EQUAL(0, mqtt_double.publish_calls_);
+}
+
+/* The window left open by releasing the section before the publish is only safe
+ * because the MQTT callback appends -- the copied front topic and `consumed` must
+ * still describe the front when the compaction re-takes the section. Drive an
+ * append from inside publish() so that claim is checked, not argued. */
+TEST(ha_discovery_cleanup_critical_section, append_during_the_release_window_keeps_the_front)
+{
+    static constexpr const char* kLate =
+        "homeassistant/sensor/Dishwasher_PDT715/late_arrival/config";
+    queue_topic(kTopic);
+    mqtt_double.on_publish_ = [this]() { queue_topic(kLate); };
+
+    cleanup_flush_queue(&cl);
+
+    LONGS_EQUAL(1, mqtt_double.publish_calls_);
+    CHECK_EQUAL(0, mqtt_double.last_publish_critical_depth_);
+    CHECK_EQUAL(0, esp_test_critical_depth_);
+    /* Only the front topic was compacted away; the late append survives. */
+    STRCMP_EQUAL(kTopic, mqtt_double.last_published_topic_.c_str());
+    CHECK_EQUAL(1, cl.queue_count);
+    CHECK_EQUAL(1, (int) cl.total_removed_count);
+
+    mqtt_double.on_publish_ = nullptr;
+    cleanup_flush_queue(&cl);
+    STRCMP_EQUAL(kLate, mqtt_double.last_published_topic_.c_str());
+    CHECK_EQUAL(0, cl.queue_count);
+    CHECK_EQUAL(2, (int) cl.total_removed_count);
 }

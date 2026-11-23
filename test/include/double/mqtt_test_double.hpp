@@ -42,6 +42,11 @@ class MqttTestDouble : public MQTTClientComponent {
   std::function<void(bool)> on_connect_callback_;
   std::function<void(MQTTClientDisconnectReason)> on_disconnect_callback_;
 
+  /* Optional hook invoked inside publish(), i.e. inside the window where the
+   * code under test has released its critical section -- the shape of a real
+   * MQTT callback appending to a queue while a removal publish is in flight. */
+  std::function<void()> on_publish_;
+
   bool is_connected() override { return connected_; }
   bool publish(const std::string& topic, const std::string& payload,
                uint8_t /*qos*/, bool retain) override {
@@ -50,6 +55,7 @@ class MqttTestDouble : public MQTTClientComponent {
     last_published_retain_ = retain;
     publish_calls_++;
     last_publish_critical_depth_ = esp_test_critical_depth_;
+    if (on_publish_) on_publish_();
     return !publish_should_fail_;
   }
 
@@ -60,6 +66,7 @@ class MqttTestDouble : public MQTTClientComponent {
     last_published_retain_ = retain;
     publish_calls_++;
     last_publish_critical_depth_ = esp_test_critical_depth_;
+    if (on_publish_) on_publish_();
     return !publish_should_fail_;
   }
 
