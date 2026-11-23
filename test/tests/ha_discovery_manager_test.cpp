@@ -327,6 +327,22 @@ TEST(ha_discovery_manager_run_memory, reinit_after_start_releases_the_run_memory
     CHECK_TRUE(all_run_memory_released());
 }
 
+/* The cleanup topic queue is a per-run heap allocation too (rec 10), and the
+ * manager owns the struct that holds it. A re-init zeroes that struct, so it
+ * has to release the queue: the leak detector is the assertion here, because
+ * init() clears the pointer either way. */
+TEST(ha_discovery_manager_run_memory, reinit_releases_the_cleanup_topic_queue)
+{
+    ha_discovery_cleanup_configure(&manager.cleanup, "run-mem", NULL, esphome::millis);
+    CHECK_TRUE(ha_discovery_cleanup_start(&manager.cleanup));
+    CHECK_TRUE(manager.cleanup.topic_buf != NULL);
+
+    ha_discovery_manager_init(&manager);
+
+    LONGS_EQUAL(ha_discovery_state_idle, manager.state);
+    CHECK_TRUE(manager.cleanup.topic_buf == NULL);
+}
+
 /* Dropped-config-publish backoff. Drives the real publish path — the generated
  * discovery data is inflated with tinfl and published through the ESPHome MQTT
  * double — so the only variable is whether the backend accepts the publish.

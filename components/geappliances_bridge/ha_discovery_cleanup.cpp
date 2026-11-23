@@ -48,6 +48,34 @@
 
 GEA_TAG(TAG) = "ha_cleanup";
 
+/* Default allocator for the per-run topic queue. Plain malloc() matches the
+ * discovery run buffers, so the queue and the publish run draw from the same
+ * pool the largest-free-block gate in begin_publish_() measures. */
+static void *cleanup_default_alloc(size_t size)
+{
+    return malloc(size);
+}
+
+static void cleanup_default_free(void *buffer)
+{
+    free(buffer);
+}
+
+/* Releases the per-run topic queue through the seam so a test can watch the
+ * allocation balance. Idempotent: a restart without destroy() must not leak the
+ * previous queue. Public because the owner is not always the cleanup module:
+ * ha_discovery_manager_init() zeroes the whole manager struct, and a re-init
+ * (Discovery Refresh, an aborted run) landing while a cleanup still holds its
+ * queue would otherwise orphan it. Safe on a zero-initialized struct — the same
+ * contract the manager's four run-buffer frees already rely on. */
+void ha_discovery_cleanup_release_queue(ha_discovery_cleanup_t* self)
+{
+    if (self->topic_buf == NULL) return;
+    if (self->free_fn != NULL) self->free_fn(self->topic_buf);
+    else free(self->topic_buf);
+    self->topic_buf = NULL;
+}
+
 /* Publishes empty retained payloads to remove topics. Called from
  * cleanup_run(), not the MQTT callback, to avoid blocking the ESP-IDF
  * framework MQTT task. Returns the number of topics remaining in the
@@ -56,6 +84,10 @@ CLEANUP_FN uint16_t cleanup_flush_queue(ha_discovery_cleanup_t* self)
 {
     if (self == NULL) return 0;
     if (self->mqtt_client == NULL) return self->queue_count;
+
+    /* No queue allocated means nothing is queued, and the compaction below
+     * would write through NULL. */
+    if (self->topic_buf == NULL) return self->queue_count;
 
     /* A dropped removal publish holds off further attempts until the window
      * passes. The topic stays queued, so waiting loses nothing, while retrying
@@ -216,8 +248,12 @@ CLEANUP_FN void cleanup_topic_callback(const char* topic, const char* payload, s
     /* Count all callbacks received (inside the critical section to avoid a race). */
     self->pass_received_count++;
 
-    /* Linear append, no ring buffer. */
-    if (self->queue_write_pos + needed <= HA_CLEANUP_TOPIC_BUF_SIZE) {
+    /* Linear append, no ring buffer. A NULL queue means the run never
+     * allocated, or destroy() freed the queue while a delayed callback was
+     * still in flight: count it the way a full queue is counted, so the pass
+     * reports it and a later pass rediscovers the topic. */
+    if (self->topic_buf != NULL &&
+        self->queue_write_pos + needed <= HA_CLEANUP_TOPIC_BUF_SIZE) {
         memcpy(self->topic_buf + self->queue_write_pos, topic, topic_len);
         self->topic_buf[self->queue_write_pos + topic_len] = '\0';
         self->queue_write_pos += needed;
@@ -261,6 +297,8 @@ void ha_discovery_cleanup_init(ha_discovery_cleanup_t* self)
 {
     memset(self, 0, sizeof(*self));
     self->state = ha_cleanup_state_idle;
+    self->alloc_fn = cleanup_default_alloc;
+    self->free_fn = cleanup_default_free;
     portMUX_INITIALIZE(&self->mux);
 }
 
@@ -272,10 +310,27 @@ void ha_discovery_cleanup_configure(ha_discovery_cleanup_t* self,
     self->get_time_ms = get_time_ms;
 }
 
-void ha_discovery_cleanup_start(ha_discovery_cleanup_t* self)
+bool ha_discovery_cleanup_start(ha_discovery_cleanup_t* self)
 {
+    ha_discovery_cleanup_release_queue(self);
+
+    /* Fall back to the default when the struct was built without init() (the
+     * test fixtures memset a struct and set only the fields they use). */
+    void *(*alloc)(size_t) = self->alloc_fn != NULL ? self->alloc_fn : cleanup_default_alloc;
+    self->topic_buf = (char *) alloc(HA_CLEANUP_TOPIC_BUF_SIZE);
+    if (self->topic_buf == NULL) {
+        /* Nothing has been removed yet, so refusing here is recoverable: the
+         * caller leaves Home Assistant's retained configs alone and the next
+         * boot tries again. */
+        ESP_LOGE(TAG, "Cleanup refused: could not allocate the %u-byte topic queue; "
+                      "the existing discovery configs were left in place",
+                 (unsigned) HA_CLEANUP_TOPIC_BUF_SIZE);
+        return false;
+    }
+
     self->state = ha_cleanup_state_cleaning;
     cleanup_start(self);
+    return true;
 }
 
 void ha_discovery_cleanup_run(ha_discovery_cleanup_t* self)
@@ -448,6 +503,11 @@ void ha_discovery_cleanup_destroy(ha_discovery_cleanup_t* self)
          * conservative margin (~1000x the actual CS duration). */
         vTaskDelay(pdMS_TO_TICKS(50));
     }
+    /* Release the per-run topic queue only after the drain delay above: a
+     * callback that read a non-NULL get_time_ms before the poison may still be
+     * inside its critical section. */
+    ha_discovery_cleanup_release_queue(self);
+
     memset(self, 0, sizeof(*self));
 
     /* Re-initialize the per-instance spinlock: the memset zeroed it to

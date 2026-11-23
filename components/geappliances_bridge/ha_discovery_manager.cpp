@@ -990,7 +990,10 @@ void ha_discovery_manager_init(ha_discovery_manager_t* self)
     /* Free any discovery allocations still held from a prior run before
      * zeroing the struct, so a re-init can never orphan the ~52 KB of heap
      * memory (mirrors ha_discovery_manager_cleanup()). free(NULL) is a no-op
-     * when they were never allocated. */
+     * when they were never allocated. The cleanup topic queue is a per-run
+     * allocation too (rec 10), and a refresh cycle or an aborted run can land
+     * while a cleanup still owns it. */
+    ha_discovery_cleanup_release_queue(&self->cleanup);
     free(self->decomp_buf);
     free(self->line_buf);
     free(self->payload_buf);

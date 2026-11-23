@@ -491,11 +491,27 @@ void DiscoveryLifecycleManager::begin_cleanup_() {
   if (!is_ready()) {
     return;
   }
-  // Record the intent before removing anything: this is the point of no return
-  // for Home Assistant's retained configs. If the republish that follows never
-  // completes -- a failed run, a phase timeout, a reset in between -- the marker
-  // is what makes the next boot republish, because the record from the last
-  // successful publish is still stored and still matches.
+  // Allocate the cleanup module's per-run topic queue before anything is
+  // committed. A cleanup that cannot track the topics it removes must not
+  // start, and refusing here changes neither NVS nor the broker, so the next
+  // boot simply tries again.
+  ha_discovery_cleanup_configure(&this->ha_discovery_manager_->cleanup,
+      this->device_identity_manager_->get_device_id(),
+      &this->mqtt_client_adapter_->interface, this->get_time_ms_);
+  if (!ha_discovery_cleanup_start(&this->ha_discovery_manager_->cleanup)) {
+    ESP_LOGE(TAG, "Discovery cleanup refused: the topic queue could not be allocated. "
+                  "The existing discovery configs were left in place.");
+    this->trigger_ = kTriggerNone;
+    this->set_phase_(kPhaseIdle);
+    return;
+  }
+
+  // Record the intent before removing anything. The point of no return for
+  // Home Assistant's retained configs is the first removal publish, which only
+  // happens once the phase is kPhaseCleaning, so arming the marker after the
+  // allocation above is still ahead of every teardown; if the marker cannot be
+  // written, nothing has been removed and the queue allocated above is
+  // released again.
   const bool already_pending = this->hooks_.read_publish_pending(this->hooks_.context);
   // Skip the write when the marker is already set: a held or looping state must
   // not write NVS on every pass.
@@ -504,15 +520,11 @@ void DiscoveryLifecycleManager::begin_cleanup_() {
     ESP_LOGE(TAG, "Discovery cleanup refused: the pending-publish marker could not be "
                   "stored, so a failed republish would not be recoverable. The existing "
                   "discovery configs were left in place.");
+    ha_discovery_cleanup_destroy(&this->ha_discovery_manager_->cleanup);
     this->trigger_ = kTriggerNone;
     this->set_phase_(kPhaseIdle);
     return;
   }
-
-  ha_discovery_cleanup_configure(&this->ha_discovery_manager_->cleanup,
-      this->device_identity_manager_->get_device_id(),
-      &this->mqtt_client_adapter_->interface, this->get_time_ms_);
-  ha_discovery_cleanup_start(&this->ha_discovery_manager_->cleanup);
   if (this->trigger_ == kTriggerDiscoveryRefresh) {
     ESP_LOGI(TAG, "Starting discovery-refresh HA discovery cleanup...");
   } else if (this->trigger_ == kTriggerPendingRepublish) {
