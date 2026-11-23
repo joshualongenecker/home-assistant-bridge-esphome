@@ -151,12 +151,15 @@ Diagnostic flow for common issues with the GE Appliances Bridge.
 - After a firmware update, entities briefly disappear from Home Assistant.
 - The Discovery Refresh button does not seem to do anything immediately.
 - After the appliance's boards changed (moved to another board, reflashed, swapped), Home Assistant shows an entity list that doesn't match the appliance, and the log shows "Valid-ERD set changed again after 2 republishes in a row; not republishing".
+- A Discovery Refresh (or an update) removed every entity and the follow-up publish never finished — the bridge retries the republish on the next boot by itself.
 
 ### Explanation
 
 - **After firmware update:** The bridge detects discovery changes (data hash, device ID, config flags) at steady state, cleans old discovery topics, publishes fresh ones, and reboots. During this cycle, entities may temporarily disappear. They will reappear after the bridge completes the cleanup → publish → reboot cycle.
 - **Discovery Refresh button:** When pressed, the request is queued. If the bridge is not yet ready (steady state, MQTT connected, device ID complete), the request waits until those conditions are met. Check logs for "Discovery refresh queued, will execute when appliance is ready".
 - **Valid-ERD set changes:** The bridge also republishes when the appliance's valid-ERD set changes: another host board, a secondary board appearing or disappearing, or firmware with other feature bits. Because that set is read from the appliance at every startup, a set that reads differently from boot to boot could otherwise republish and reboot forever. So after 2 republishes in a row caused only by it, further changes are logged as "Valid-ERD set changed again after 2 republishes in a row; not republishing" and ignored, until the set has read the same at 3 startups in a row. This can also hold back a genuine change that follows soon after two others.
+- **A refresh that did not finish:** Removing Home Assistant's discovery configs and publishing new ones is two steps, and a reboot in between can leave the first done and the second not. The bridge stores a marker when a cleanup starts and clears it when a publish run records its result, so a boot that finds the marker republishes whatever the stored state otherwise says: look for "A previous boot removed the discovery configs without republishing; cleaning old topics and republishing". If the marker itself cannot be stored, the cleanup is refused instead ("Discovery cleanup refused: the pending-publish marker could not be stored...") — the existing configs are never removed without a retry behind them.
+- **A run that cannot fit in memory:** A discovery run allocates about 53 KB at once. After a cleanup in the same boot, or on a device whose heap has degraded, the largest free block can be far below that, so the run would die with the old configs already removed. The bridge checks the largest free block first and refuses the run: "Not starting the discovery publish run: largest free block ... B, run needs ... B; rebooting to recover the heap". The recovery reboot is bounded (3 attempts), and the next boot republishes on the clean heap a reset gives.
 
 ### Diagnostic Steps
 
@@ -165,6 +168,7 @@ Diagnostic flow for common issues with the GE Appliances Bridge.
 3. **Check logs for fresh install:** Look for "Starting initial HA discovery publish..." on first boot.
 4. **Wait for the cycle to complete:** The cleanup → publish → reboot cycle can take 1–2 minutes depending on the number of entities.
 5. **"Valid-ERD set changed again ... not republishing":** Press **Discovery Refresh** to republish the current entity list; it also resets the count. If the warning comes back on later boots without any change to the appliance, the feature-bit reads are inconsistent: check the "Feature bit parsing complete: N valid ERDs, M skipped" line at each startup (a varying N or M points at failed reads) and the appliance connection (see No Communication with Appliance).
+6. **Entities gone after a refresh and never came back:** Look for "A previous boot removed the discovery configs without republishing; cleaning old topics and republishing" on the next boot — that is the automatic retry. If instead the run was refused for memory, the log shows "Not starting the discovery publish run: largest free block ... B, run needs ... B; rebooting to recover the heap" and "HA discovery aborted; rebooting to recover the heap (attempt N of 3)". Once the 3 reboots are spent the bridge stays up and logs "HA discovery aborted and the reboot budget (3) is spent, staying up. Discovery Refresh or a power cycle will retry."; a power cycle restarts the budget.
 
 
 ## Write Commands Fail

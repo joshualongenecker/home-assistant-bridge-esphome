@@ -19,6 +19,7 @@
 #include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "esp_task_wdt.h"
+#include "esp_heap_caps.h"
 #include "esphome/core/application.h"
 #include "esphome/core/preferences.h"
 #include "esphome/components/mqtt/mqtt_client.h"
@@ -49,6 +50,17 @@ uint8_t read_abort_reboot_count(void*) { return 0; }
 
 bool write_abort_reboot_count(void*, uint8_t) { return true; }
 
+// "No teardown is waiting for a republish", and a write that always succeeds:
+// the view a working NVS gives when the marker is clear. Tests that need the
+// torn-down state or an unwritable marker inject their own recorder.
+bool read_publish_pending(void*) { return false; }
+
+bool write_publish_pending(void*, bool) { return true; }
+
+// A heap that always fits, i.e. the view a freshly booted device gives. Tests
+// that need a fragmented heap inject their own value.
+uint32_t read_largest_free_block(void*) { return 0xFFFFFFFFu; }
+
 void feed_watchdog(void*) {}
 
 void reboot(void*) {}
@@ -62,6 +74,11 @@ constexpr uint32_t kSafeModeRtcKey = 233825507UL;
 // record and from ESPHome's safe-mode counter: those are firmware-validation
 // state, this counts discovery runs.
 constexpr uint32_t kAbortRebootNvsKey = 0x64726162u;
+// NVS key for the "a cleanup has not been republished yet" marker ("drpp").
+// A separate preference rather than a DiscoveryRecord field: a record field
+// would force kRecordVersion up, and a version bump makes every bridge clean
+// up and republish once at the next OTA. Same reasoning as kAbortRebootNvsKey.
+constexpr uint32_t kPublishPendingNvsKey = 0x64727070u;
 
 void apply_mqtt_availability(void*, ha_discovery_manager_t* manager) {
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
@@ -135,6 +152,29 @@ bool write_abort_reboot_count(void*, uint8_t count) {
   return true;
 }
 
+bool read_publish_pending(void*) {
+  auto pref = global_preferences->make_preference<uint8_t>(kPublishPendingNvsKey);
+  uint8_t pending = 0;
+  if (!pref.load(&pending)) return false;
+  return pending != 0;
+}
+
+bool write_publish_pending(void*, bool pending) {
+  auto pref = global_preferences->make_preference<uint8_t>(kPublishPendingNvsKey);
+  const uint8_t value = pending ? 1u : 0u;
+  if (!pref.save(&value)) {
+    ESP_LOGE(TAG, "Could not persist the pending-discovery-publish marker");
+    return false;
+  }
+  global_preferences->sync();
+  return true;
+}
+
+// MALLOC_CAP_DEFAULT is what the run's plain malloc() calls draw from.
+uint32_t read_largest_free_block(void*) {
+  return static_cast<uint32_t>(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+}
+
 void feed_watchdog(void*) { esp_task_wdt_reset(); }
 
 void reboot(void*) { esphome::App.safe_reboot(); }
@@ -183,6 +223,15 @@ void DiscoveryLifecycleManager::init(
   }
   if (this->hooks_.write_abort_reboot_count == nullptr) {
     this->hooks_.write_abort_reboot_count = &write_abort_reboot_count;
+  }
+  if (this->hooks_.read_publish_pending == nullptr) {
+    this->hooks_.read_publish_pending = &read_publish_pending;
+  }
+  if (this->hooks_.write_publish_pending == nullptr) {
+    this->hooks_.write_publish_pending = &write_publish_pending;
+  }
+  if (this->hooks_.read_largest_free_block == nullptr) {
+    this->hooks_.read_largest_free_block = &read_largest_free_block;
   }
   if (this->hooks_.feed_watchdog == nullptr) {
     this->hooks_.feed_watchdog = &feed_watchdog;
@@ -279,6 +328,14 @@ void DiscoveryLifecycleManager::trigger_initial_discovery() {
   ESP_LOGI(TAG, "Initial HA discovery publish queued, will execute when appliance is ready");
 }
 
+void DiscoveryLifecycleManager::trigger_pending_republish_() {
+  if (!this->claim_request_(kPhaseQueuedCleanup, kTriggerPendingRepublish,
+                            "Pending discovery republish")) {
+    return;
+  }
+  ESP_LOGI(TAG, "Pending discovery republish queued, will execute when appliance is ready");
+}
+
 void DiscoveryLifecycleManager::check_discovery_changes(const char* current_device_id) {
   if (current_device_id == nullptr) {
     return;
@@ -301,6 +358,21 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
   DiscoveryRecord stored{};
   if (!this->hooks_.load_discovery_record(this->hooks_.context, &stored)) {
     this->trigger_initial_discovery();
+    return;
+  }
+
+  // A cleanup that tore the topics down in an earlier boot and never got its
+  // republish leaves exactly this state: the stored record still matches every
+  // current input (it was written by the last successful publish), so all the
+  // comparisons below report "nothing changed" while the broker has no configs
+  // at all. The marker is the only surviving evidence of the teardown, so it
+  // forces a cleanup + republish (issue #203: a Discovery Refresh whose publish
+  // run died on the heap left a refrigerator with no entities until an operator
+  // pressed the button a second time).
+  if (this->hooks_.read_publish_pending(this->hooks_.context)) {
+    ESP_LOGI(TAG, "A previous boot removed the discovery configs without republishing; "
+                  "cleaning old topics and republishing");
+    this->trigger_pending_republish_();
     return;
   }
 
@@ -375,12 +447,28 @@ void DiscoveryLifecycleManager::begin_cleanup_() {
   if (!is_ready()) {
     return;
   }
+  // Record the intent before removing anything: this is the point of no return
+  // for Home Assistant's retained configs. If the republish that follows never
+  // completes -- a failed run, a phase timeout, a reset in between -- the marker
+  // is what makes the next boot republish, because the record from the last
+  // successful publish is still stored and still matches.
+  if (!this->hooks_.write_publish_pending(this->hooks_.context, true)) {
+    ESP_LOGE(TAG, "Discovery cleanup refused: the pending-publish marker could not be "
+                  "stored, so a failed republish would not be recoverable. The existing "
+                  "discovery configs were left in place.");
+    this->trigger_ = kTriggerNone;
+    this->set_phase_(kPhaseIdle);
+    return;
+  }
+
   ha_discovery_cleanup_configure(&this->ha_discovery_manager_->cleanup,
       this->device_identity_manager_->get_device_id(),
       &this->mqtt_client_adapter_->interface, this->get_time_ms_);
   ha_discovery_cleanup_start(&this->ha_discovery_manager_->cleanup);
   if (this->trigger_ == kTriggerDiscoveryRefresh) {
     ESP_LOGI(TAG, "Starting discovery-refresh HA discovery cleanup...");
+  } else if (this->trigger_ == kTriggerPendingRepublish) {
+    ESP_LOGI(TAG, "Starting HA discovery cleanup to recover a torn-down publish...");
   } else {
     ESP_LOGI(TAG, "Starting OTA-triggered HA discovery cleanup...");
   }
@@ -395,6 +483,36 @@ void DiscoveryLifecycleManager::begin_cleanup_() {
 }
 
 void DiscoveryLifecycleManager::begin_publish_() {
+  // Refuse a run that cannot fit instead of starting one that dies part-way.
+  // Freeing a run's buffers does not give the heap back to the next allocation
+  // (see abort_publish_run_()), and a long-lived device's heap is often far
+  // below what a run needs: on gea-esphome-refer a Discovery Refresh had
+  // 30 388 B free when its cleanup started and 15 172 B by the time the cleanup
+  // finished, against the ~53 KB ha_discovery_manager_start() allocates. The run
+  // died with every config already removed and the appliance stayed entity-less.
+  // Refusing costs one reboot out of the bounded budget, and the next boot
+  // republishes on a clean heap -- measured at 237 568 B largest block after a
+  // reset against 102 400-143 360 B after an aborted run -- because the pending
+  // marker says to.
+  //
+  // Conservative on purpose: the run's four allocations are separate, so a heap
+  // that could satisfy them out of several blocks is still refused. A false
+  // refusal costs one reboot; a false acceptance costs the appliance its
+  // entities until someone intervenes.
+  const uint32_t largest_block = this->hooks_.read_largest_free_block(this->hooks_.context);
+  const uint32_t needed = ha_discovery_manager_run_allocation_size();
+  if (largest_block < needed) {
+    ESP_LOGE(TAG, "Not starting the discovery publish run: largest free block %" PRIu32
+                  " B, run needs %" PRIu32 " B; rebooting to recover the heap",
+             largest_block, needed);
+    // Same contract as the other abort paths: the firmware is confirmed
+    // whatever discovery does, so a good OTA is not rolled back because a run
+    // was refused.
+    this->hooks_.confirm_firmware(this->hooks_.context);
+    this->abort_publish_run_();
+    return;
+  }
+
   ha_discovery_manager_init(this->ha_discovery_manager_);
 
   ha_discovery_manager_configure(
@@ -431,9 +549,12 @@ void DiscoveryLifecycleManager::finish_publish_() {
   if (discovery_failed) {
     // abort_publish_run_() releases the discovery allocations (the ~52 KB of
     // run buffers plus tinfl state), clears run state and decides whether to
-    // reboot. It never saves the record: leaving the stored record
-    // stale/absent is what makes check_discovery_changes() re-trigger
-    // discovery on the next boot.
+    // reboot. It never saves the record: an absent or stale record is what
+    // makes check_discovery_changes() re-trigger discovery on the next boot.
+    // The record alone is NOT enough for a run that followed a cleanup -- the
+    // record from the previous successful publish is still stored and still
+    // matches, so the change check would report "nothing changed" over a broker
+    // with no configs. The marker armed in begin_cleanup_() covers that case.
     this->abort_publish_run_();
     ESP_LOGE(TAG, "HA discovery failed; not saving discovery state, will retry on next boot");
     return;
@@ -465,6 +586,15 @@ void DiscoveryLifecycleManager::finish_publish_() {
   record.valid_erds_stable_checks = 0;
   this->next_valid_erds_republishes_ = 0;
   this->hooks_.save_discovery_record(this->hooks_.context, record);
+
+  // The teardown has been republished, so the marker is no longer needed.
+  // Clearing it after the record is saved means a reset between the two costs
+  // one extra republish on the next boot; clearing it before would risk a boot
+  // with no configs and no retry.
+  if (!this->hooks_.write_publish_pending(this->hooks_.context, false)) {
+    ESP_LOGW(TAG, "Could not clear the pending-publish marker; the next boot will republish "
+                  "discovery once more");
+  }
 
   // The reboot below pays for whatever the run did to the heap, so the abort
   // budget is spent for a different reason now; clearing it gives a later

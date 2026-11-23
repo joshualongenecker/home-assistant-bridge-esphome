@@ -220,6 +220,14 @@ void ha_discovery_manager_start(ha_discovery_manager_t* self);
 
 void ha_discovery_manager_run(ha_discovery_manager_t* self);
 
+/* Total heap a run needs for its four temporary allocations: the decompress
+ * buffer, the line buffer, the payload buffer and the tinfl state. They are
+ * allocated by ha_discovery_manager_start() and released when the run ends.
+ * DiscoveryLifecycleManager gates a run on this so a run that cannot fit is
+ * not started (issue #203): a run that dies part-way through a cleanup leaves
+ * Home Assistant with no discovery configs. */
+uint32_t ha_discovery_manager_run_allocation_size(void);
+
 /* Override the time source after init (test seam; mirrors
  * erd_bridge_poll_set_time_fn). MUST be called after
  * ha_discovery_manager_init(): init installs the HAL default unconditionally
