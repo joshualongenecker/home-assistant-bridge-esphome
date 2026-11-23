@@ -19,6 +19,7 @@
 #define esphome_hal_double_hpp
 
 #include <cstdint>
+#include "double/critical_depth_shim.hpp"
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,15 +46,18 @@ inline uint32_t millis() {
 }
 }
 
-/* Override ESP_LOG* macros to be no-ops in production code.
- * Test files that want to mock logs should include CppUTest first
- * and then use the mock versions. */
+/* ESP_LOG* stubs. These are NOT no-ops: each records the tag and the
+ * critical-section depth at the call site, so a test can assert that a warning
+ * was emitted at depth 0 (issue #198: the crash was a log taken inside a
+ * critical section). Read back with esp_test_log_count_() /
+ * esp_test_log_depth_(); reset with esp_test_log_reset_(). Test files that want
+ * mock() based log expectations include CppUTest first and redefine these. */
 #define ESP_LOG_TAG "test"
-#define ESP_LOGE(tag, ...) ((void)0)
-#define ESP_LOGW(tag, ...) ((void)0)
-#define ESP_LOGI(tag, ...) ((void)0)
-#define ESP_LOGD(tag, ...) ((void)0)
-#define ESP_LOGV(tag, ...) ((void)0)
-#define ESP_LOGCONFIG(tag, ...) ((void)0)
+#define ESP_LOGE(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_get_())
+#define ESP_LOGW(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_get_())
+#define ESP_LOGI(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_get_())
+#define ESP_LOGD(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_get_())
+#define ESP_LOGV(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_get_())
+#define ESP_LOGCONFIG(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_get_())
 
 #endif  // esphome_hal_double_hpp
