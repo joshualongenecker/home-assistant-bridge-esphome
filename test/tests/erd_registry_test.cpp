@@ -304,6 +304,29 @@ TEST(erd_registry, add_valid_erds_deduplicates_across_batches)
   CHECK_EQUAL(0x0400, registry.valid_erd(2));
 }
 
+TEST(erd_registry, add_valid_erds_deduplicates_against_its_own_extras)
+{
+  /* The linear scan over the registry's own extra storage is what catches a
+   * duplicate of a previously-added extra and a duplicate within one batch.
+   * Neither lives in the base set, so the binary-search branch cannot catch
+   * them: call 1 adds 0x0500, call 2 passes {0x0500, 0x0600, 0x0600}. */
+  tiny_erd_t base[] = { 0x0100 };
+  registry.set_valid_erds(base, 1);
+
+  tiny_erd_t first[] = { 0x0500 };
+  registry.add_valid_erds(first, 1);
+
+  tiny_erd_t second[] = { 0x0500, 0x0600, 0x0600 };
+  registry.add_valid_erds(second, 3);
+
+  CHECK_EQUAL(3, registry.valid_erd_count());
+  CHECK_TRUE(registry.is_valid(0x0500));
+  CHECK_TRUE(registry.is_valid(0x0600));
+  CHECK_EQUAL(0x0100, registry.valid_erd(0));
+  CHECK_EQUAL(0x0500, registry.valid_erd(1));
+  CHECK_EQUAL(0x0600, registry.valid_erd(2));
+}
+
 TEST(erd_registry, clear_valid_erds_disables_the_filter)
 {
   tiny_erd_t erds[] = {0x0001, 0x0002};
