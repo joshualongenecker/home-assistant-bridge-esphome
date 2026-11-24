@@ -95,7 +95,10 @@ typedef struct {
    * (its board did not answer at this boot; issue #212). Counted in
    * total_published too. */
   uint32_t total_uncached_configured;
-  /* Set by process_jsonl_line() for the line it just accepted. */
+
+  /* Not a statistic: a one-line channel from process_jsonl_line() to the
+   * publish site in run(). Valid only between a process_jsonl_line() call
+   * that returned true and the publish of that line; every call resets it. */
   bool line_uncached_configured;
 
   uint16_t sorted_erds[HA_DISCOVERY_MAX_ERDS];
