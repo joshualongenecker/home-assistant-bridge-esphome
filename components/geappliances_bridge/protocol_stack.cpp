@@ -10,8 +10,11 @@
 //
 // Responsibilities:
 //   - init(): initialize the stack for the configured UARTs (zero, one, two);
-//     an unconfigured protocol's ring buffers are compiled out entirely
-//     (GEA_BRIDGE_HAS_GEA2 / GEA_BRIDGE_HAS_GEA3, see protocol_stack.h)
+//     an unconfigured protocol's ring buffers, ERD client and client
+//     configuration (and, for GEA2, the GEA2->GEA3 adapter) are compiled out
+//     entirely (GEA_BRIDGE_HAS_GEA2 / GEA_BRIDGE_HAS_GEA3, see
+//     protocol_stack.h). A single-protocol build never references the other
+//     protocol's, which clang rejects under -Werror if they stay declared.
 //   - run(): dispatch one iteration — GEA2 tight loop, GEA3 iteration, or
 //     timer-only — with the dual-UART adapter gating
 //   - teardown(): reset tick tracking and the GEA2-active latch
@@ -33,6 +36,7 @@ namespace geappliances_bridge {
 
 GEA_TAG(TAG) = "protocol_stack";
 
+#ifdef GEA_BRIDGE_HAS_GEA3
 // GEA3 ERD client: ten internal retries.  With request_timeout=250ms and
 // request_retries=10, each read gets eleven attempts (2.75s total), which is
 // long enough for appliances to service slow first-access NVRAM lookups.
@@ -40,7 +44,9 @@ static const tiny_gea3_erd_client_configuration_t client_configuration = {
   .request_timeout = 250,
   .request_retries = 10
 };
+#endif
 
+#ifdef GEA_BRIDGE_HAS_GEA2
 // GEA2 ERD client: one internal retry.  With request_timeout=250ms and
 // request_retries=1, each read gets two attempts (500ms total), giving
 // appliances time to service slow first-access NVRAM lookups or transient
@@ -49,6 +55,7 @@ static const tiny_gea2_erd_client_configuration_t gea2_client_configuration = {
   .request_timeout = 250,
   .request_retries = 1
 };
+#endif
 
 tiny_time_source_ticks_t ProtocolStack::gea2_tick_ticks_(i_tiny_time_source_t* _self)
 {

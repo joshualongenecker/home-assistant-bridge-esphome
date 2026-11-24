@@ -40,6 +40,8 @@ make test
 
 Compiles and runs the CppUTest suite. Tests run on the host (not the ESP32) using stubs for ESP-IDF APIs.
 
+Both suites run under AddressSanitizer and UndefinedBehaviorSanitizer. On Linux, LeakSanitizer is on too, so a leaked allocation fails the run. On macOS the Makefile turns leak detection off, because Apple clang's sanitizer runtime has no LeakSanitizer; leaks are caught by CI on Linux instead. `make test TSAN=1` is Linux-only for the same reason.
+
 ### Python Tests
 
 ```bash
