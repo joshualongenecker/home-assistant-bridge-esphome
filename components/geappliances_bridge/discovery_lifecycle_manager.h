@@ -171,23 +171,36 @@ class DiscoveryLifecycleManager {
   // rebooted with 39 of its 171 configs published; gea-esphome-refer (C3)
   // bottomed at 15 900 B and completed.
   //
+  // When it is read: at the top of every Cleaning/Publishing loop(), and
+  // again right after each successful publish. The real bound on reaction
+  // time is main-loop liveness, not a fixed period: heap drawn by the MQTT
+  // backend, lwIP and Wi-Fi tasks between iterations is seen only at the
+  // next loop(), and in this failure mode the loop has been sampled at
+  // 218-434 ms (refer, haieridu fleet CSVs). The overshoot past the floor is
+  // roughly what those tasks consume in one iteration plus one publish.
+  //
   // Why 12 KiB:
-  //   - Above the ~5 KB at which haieridu died, with ~7 KB of margin for the
-  //     heap a run consumes between two samples. The floor is sampled once
-  //     per main-loop iteration (~29 ms, spikes to ~150 ms); before publish
-  //     pacing a run drew down ~76 KB in a few seconds, i.e. a few KB per
-  //     slow iteration.
-  //   - Leaves room for the abort path itself: confirm_firmware() and the
-  //     reboot-count write are NVS writes that run before the reboot, and
-  //     while Cleaning the run's 53 KB of buffers do not exist yet to be
-  //     freed first.
-  //   - Below refer's 15 900 B, so a run that completed before pacing --
-  //     measured with an API log session attached, which only lowers the
-  //     reading -- is not aborted by it. A false abort is not free: it spends
-  //     one of kMaxAbortReboots and, after a cleanup, leaves Home Assistant
-  //     without configs until the next boot republishes them.
-  // Revisit against heap_min_free measured with publish pacing on and no
-  // log session attached.
+  //   - Above the ~5 KB at which haieridu died. Its true trough was 1 188 B,
+  //     ~11 KB below a 12 KiB crossing inside a handful of ~400 ms
+  //     iterations before pacing, so the margin is the same order as the
+  //     unpaced overshoot. Pacing is what is expected to shrink that
+  //     overshoot; the floor alone does not guarantee it.
+  //   - Leaves room for the abort path itself. confirm_firmware() and the
+  //     reboot-count write are NVS writes before the reboot. While Cleaning
+  //     the run's 53 KB of buffers do not exist yet to be freed first, and
+  //     ha_discovery_cleanup_destroy() sends an unsubscribe through the same
+  //     MQTT backend and then waits 50 ms before releasing anything, during
+  //     which the heap can keep draining. While Publishing,
+  //     abort_publish_run_() frees the 53 KB before its own NVS write.
+  //   - A false abort is not free: it spends one of kMaxAbortReboots and,
+  //     after a cleanup, leaves Home Assistant without configs until the
+  //     next boot republishes them; three in a row end in a logged hold.
+  //     Bench refer bottomed at 15 900 B in a completed run, but production
+  //     refer has a recorded heap_min_free of 9 508 B whose phase is not yet
+  //     known. If that dip was a run that completed, an unpaced run on refer
+  //     would have been aborted by this floor.
+  // Hardware validation decides whether the value stands: heap_min_free on
+  // refer and haieridu during a paced run, with no log session attached.
   static constexpr uint32_t kRunFreeHeapFloorBytes = 12u * 1024u;
 
   // Why the current phase was entered. Orthogonal to the phase: the same
@@ -268,8 +281,9 @@ class DiscoveryLifecycleManager {
     // so begin_publish_() refuses to start a run whose buffers cannot fit and
     // lets the bounded abort reboot recover the heap instead.
     uint32_t (*read_largest_free_block)(void* context);
-    // Total free internal heap in bytes. Read once per loop() while Cleaning or
-    // Publishing to enforce kRunFreeHeapFloorBytes; the entry gate above only
+    // Total free internal heap in bytes. Read on every loop() while Cleaning
+    // or Publishing, and again after each successful publish, to enforce
+    // kRunFreeHeapFloorBytes; the entry gate above only
     // decides whether a run may start, this bounds what it then consumes.
     // Called from the main loop only, never from the MQTT task.
     uint32_t (*read_free_heap)(void* context);

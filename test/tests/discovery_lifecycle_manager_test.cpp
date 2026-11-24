@@ -85,6 +85,11 @@ struct HookRecorder {
    * below it). */
   uint32_t free_heap{0xFFFFFFFFu};
   int free_heap_calls{0};
+  /* When set, free_heap_after_publish is reported once that many publishes
+   * have reached the MQTT double -- a publish whose own copy crosses the
+   * floor. */
+  const int* publish_calls{nullptr};
+  uint32_t free_heap_after_publish{0xFFFFFFFFu};
 
   /* Order of the two effects that have to stay in a specific order: the record
    * save and the pending-marker clear. Each records the sequence number of the
@@ -181,6 +186,9 @@ uint32_t hook_largest_block(void* context) {
 uint32_t hook_free_heap(void* context) {
   auto* recorder = static_cast<HookRecorder*>(context);
   recorder->free_heap_calls++;
+  if (recorder->publish_calls != nullptr && *recorder->publish_calls > 0) {
+    return recorder->free_heap_after_publish;
+  }
   return recorder->free_heap;
 }
 
@@ -1102,6 +1110,33 @@ TEST(discovery_lifecycle_manager, publishing_below_the_heap_floor_aborts_into_th
   /* Nothing was recorded, so the next boot's change check retries. */
   lifecycle_.check_discovery_changes(identity_.get_device_id());
   CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedInitial, lifecycle_.phase());
+}
+
+TEST(discovery_lifecycle_manager, a_publish_that_crosses_the_heap_floor_aborts_in_the_same_iteration)
+{
+  /* The floor is checked again right after a publish, so the gap is one
+   * publish rather than one main-loop iteration (sampled at ~400 ms in this
+   * failure mode). Drive the real run: register an ERD so it has a config
+   * to publish, and report a low heap from the moment that publish lands. */
+  uint8_t value = 0x42;
+  erd_cache_update(&cache_, (tiny_erd_t)0x0001, 0xFF, &value, sizeof(value));
+  hooks_.publish_calls = &mqtt_double_.publish_calls_;
+  hooks_.free_heap_after_publish = DiscoveryLifecycleManager::kRunFreeHeapFloorBytes - 1;
+
+  enter_publishing();
+  for (int i = 0; i < 10000 && mqtt_double_.publish_calls_ == 0 &&
+                  lifecycle_.phase() == DiscoveryLifecycleManager::kPhasePublishing; i++) {
+    lifecycle_.loop();
+  }
+
+  /* The iteration that published is the one that aborted: no loop() ran
+   * with the heap below the floor except the publishing one. */
+  CHECK_EQUAL(1, mqtt_double_.publish_calls_);
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
+  CHECK_EQUAL(1, (int) hooks_.abort_count);
+  CHECK_EQUAL(1, hooks_.confirm_calls);
+  CHECK_EQUAL(0, hooks_.save_calls);
+  CHECK_EQUAL(ha_discovery_state_idle, manager_.state);
 }
 
 TEST(discovery_lifecycle_manager, publishing_at_the_heap_floor_keeps_running)

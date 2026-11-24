@@ -838,6 +838,21 @@ void DiscoveryLifecycleManager::loop() {
           return;
         }
         ha_discovery_manager_run(this->ha_discovery_manager_);
+        // Again right after a publish: the consumption the floor guards
+        // against is per publish (the backend's heap copy is made inside
+        // the publish call), so checking here bounds the gap by one publish
+        // instead of one main-loop iteration -- which in this failure mode
+        // has been sampled at ~400 ms. Heap the backend, lwIP and Wi-Fi tasks
+        // draw between iterations is still only seen at the next loop(). A
+        // run that just completed or failed is left to finish_publish_().
+        if (ha_discovery_manager_is_processing(this->ha_discovery_manager_) &&
+            ha_discovery_manager_total_published(this->ha_discovery_manager_) !=
+                this->progress_snapshot_ &&
+            this->free_heap_below_floor_("publish")) {
+          this->hooks_.confirm_firmware(this->hooks_.context);
+          this->abort_publish_run_();
+          return;
+        }
         return;
       }
       this->finish_publish_();
