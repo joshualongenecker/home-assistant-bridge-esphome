@@ -28,6 +28,11 @@ jobs:
     # Fastest gate for the rec 9 build variants: the component must compile
     # with each protocol's ring buffers compiled out, not just with both.
     - run: make check-protocol-variants
+    # Same gate under clang. GCC emits neither -Wunused-private-field nor the
+    # C++ form of -Wunused-const-variable, so a protocol-gated member left
+    # declared outside its #ifdef passes the GCC run above and breaks every
+    # macOS build. -fsyntax-only, so this needs no clang sanitizer runtime.
+    - run: make check-protocol-variants CXX=clang++
 
     - run: make test -j${{ steps.cpu-cores.outputs.count }}
     - run: make integration-test -j${{ steps.cpu-cores.outputs.count }}

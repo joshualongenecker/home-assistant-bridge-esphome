@@ -10,8 +10,11 @@
 //
 // Responsibilities:
 //   - init(): initialize the stack for the configured UARTs (zero, one, two);
-//     an unconfigured protocol's ring buffers are compiled out entirely
-//     (GEA_BRIDGE_HAS_GEA2 / GEA_BRIDGE_HAS_GEA3, see protocol_stack.h)
+//     an unconfigured protocol's ring buffers, ERD client and client
+//     configuration (and, for GEA2, the GEA2->GEA3 adapter) are compiled out
+//     entirely (GEA_BRIDGE_HAS_GEA2 / GEA_BRIDGE_HAS_GEA3, see
+//     protocol_stack.h). A single-protocol build never references the other
+//     protocol's, which clang rejects under -Werror if they stay declared.
 //   - run(): dispatch one iteration — GEA2 tight loop, GEA3 iteration, or
 //     timer-only — with the dual-UART adapter gating
 //   - teardown(): reset tick tracking and the GEA2-active latch
@@ -32,10 +35,6 @@ namespace esphome {
 namespace geappliances_bridge {
 
 GEA_TAG(TAG) = "protocol_stack";
-
-// Each configuration is gated with the ERD client it configures (see the
-// build-variant notes in protocol_stack.h): a single-protocol build never
-// references the other protocol's, which clang rejects under -Werror.
 
 #ifdef GEA_BRIDGE_HAS_GEA3
 // GEA3 ERD client: ten internal retries.  With request_timeout=250ms and
