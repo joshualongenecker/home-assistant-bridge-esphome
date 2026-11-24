@@ -27,11 +27,13 @@ class MockClearGuardPlugin : public TestPlugin {
   {
     if(!test.hasFailed() && !mock().hasData(marker)) {
       result.addFailure(TestFailure(&test,
-        "mock().clear() was called during this test. It discards pending "
-        "expectations before MockSupportPlugin checks them, so unmet "
-        "expectations pass silently. Remove it: the plugin checks and "
-        "clears after every test. Use mock().checkExpectations() to check "
-        "mid-test."));
+        "mock() was cleared during this test (mock().clear() or "
+        "mock().clearAllData()). A clear discards pending expectations "
+        "before MockSupportPlugin checks them, so unmet expectations pass "
+        "silently. Remove it: the plugin checks and clears after every "
+        "test. Use mock().checkExpectations() to check mid-test. If every "
+        "test fails with this message, the guard was installed after "
+        "MockSupportPlugin in main()."));
     }
   }
 
@@ -41,8 +43,11 @@ class MockClearGuardPlugin : public TestPlugin {
 
 int main(int argc, char** argv)
 {
-  /* Plugins run their postTestAction in reverse install order: the guard is
-   * installed first so it inspects mock() before MockSupportPlugin clears it. */
+  /* CppUTest runs preTestAction in reverse install order and postTestAction
+   * in install order. Installed first, the guard plants its marker after
+   * every other plugin's pre-test work and inspects it before
+   * MockSupportPlugin's post-test clear. Install it after MockSupportPlugin
+   * and that clear erases the marker first, so every test fails. */
   MockClearGuardPlugin guardPlugin;
   TestRegistry::getCurrentRegistry()->installPlugin(&guardPlugin);
 

@@ -20,37 +20,55 @@ TEST_GROUP(gea2_erd_client_adapter)
 {
   enum {
     test_address = 0xC0,
-    test_erd = 0x0001
+    test_erd = 0x0001,
+    test_request_id = 1
   };
 
   gea2_erd_client_adapter_t adapter;
   tiny_gea2_erd_client_double_t gea2_client;
   tiny_event_subscription_t activity_subscription;
 
-  static tiny_erd_t erd_of(const tiny_gea3_erd_client_on_activity_args_t* args)
-  {
-    switch(args->type) {
-      case tiny_gea3_erd_client_activity_type_read_completed:
-        return args->read_completed.erd;
-      case tiny_gea3_erd_client_activity_type_read_failed:
-        return args->read_failed.erd;
-      case tiny_gea3_erd_client_activity_type_write_completed:
-        return args->write_completed.erd;
-      case tiny_gea3_erd_client_activity_type_write_failed:
-        return args->write_failed.erd;
-      default:
-        return 0xFFFF;
-    }
-  }
-
+  /* The adapter republishes the GEA2 args pointer unchanged, relying on the
+   * GEA2 and GEA3 arg structs being layout-compatible for types 0-3. The
+   * listener reads every forwarded field through the GEA3 layout, so a
+   * divergence between the two unions fails here instead of corrupting the
+   * payload on device. */
   static void on_adapter_activity(void*, const void* _args)
   {
     auto args = static_cast<const tiny_gea3_erd_client_on_activity_args_t*>(_args);
-    mock()
-      .actualCall("on_activity")
-      .withParameter("type", static_cast<unsigned>(args->type))
-      .withParameter("address", args->address)
-      .withParameter("erd", erd_of(args));
+    MockActualCall& call = mock()
+                             .actualCall("on_activity")
+                             .withParameter("type", static_cast<unsigned>(args->type))
+                             .withParameter("address", args->address);
+
+    switch(args->type) {
+      case tiny_gea3_erd_client_activity_type_read_completed:
+        call.withParameter("request_id", args->read_completed.request_id)
+          .withParameter("erd", args->read_completed.erd)
+          .withParameter("data_size", args->read_completed.data_size)
+          .withMemoryBufferParameter("data",
+            static_cast<const unsigned char*>(args->read_completed.data),
+            args->read_completed.data_size);
+        break;
+      case tiny_gea3_erd_client_activity_type_read_failed:
+        call.withParameter("request_id", args->read_failed.request_id)
+          .withParameter("erd", args->read_failed.erd);
+        break;
+      case tiny_gea3_erd_client_activity_type_write_completed:
+        call.withParameter("request_id", args->write_completed.request_id)
+          .withParameter("erd", args->write_completed.erd)
+          .withParameter("data_size", args->write_completed.data_size)
+          .withMemoryBufferParameter("data",
+            static_cast<const unsigned char*>(args->write_completed.data),
+            args->write_completed.data_size);
+        break;
+      case tiny_gea3_erd_client_activity_type_write_failed:
+        call.withParameter("request_id", args->write_failed.request_id)
+          .withParameter("erd", args->write_failed.erd);
+        break;
+      default:
+        break;
+    }
   }
 
   void given_a_listener_on_the_adapter_activity_event()
@@ -59,13 +77,28 @@ TEST_GROUP(gea2_erd_client_adapter)
     tiny_event_subscribe(tiny_gea3_erd_client_on_activity(&adapter.interface), &activity_subscription);
   }
 
-  void should_publish_gea3_activity(tiny_gea3_erd_client_activity_type_t type)
+  void should_publish_gea3_failure(tiny_gea3_erd_client_activity_type_t type)
   {
     mock()
       .expectOneCall("on_activity")
       .withParameter("type", static_cast<unsigned>(type))
       .withParameter("address", test_address)
+      .withParameter("request_id", test_request_id)
       .withParameter("erd", test_erd);
+  }
+
+  void should_publish_gea3_completion(tiny_gea3_erd_client_activity_type_t type,
+                                      const void* data, uint8_t data_size)
+  {
+    mock()
+      .expectOneCall("on_activity")
+      .withParameter("type", static_cast<unsigned>(type))
+      .withParameter("address", test_address)
+      .withParameter("request_id", test_request_id)
+      .withParameter("erd", test_erd)
+      .withParameter("data_size", data_size)
+      .withMemoryBufferParameter("data",
+        static_cast<const unsigned char*>(data), data_size);
   }
 
   void setup()
@@ -117,7 +150,7 @@ TEST_GROUP(gea2_erd_client_adapter)
     tiny_gea2_erd_client_on_activity_args_t args;
     args.type = tiny_gea2_erd_client_activity_type_read_completed;
     args.address = address;
-    args.read_completed.request_id = 1;
+    args.read_completed.request_id = test_request_id;
     args.read_completed.erd = erd;
     args.read_completed.data = data;
     args.read_completed.data_size = data_size;
@@ -129,7 +162,7 @@ TEST_GROUP(gea2_erd_client_adapter)
     tiny_gea2_erd_client_on_activity_args_t args;
     args.type = tiny_gea2_erd_client_activity_type_read_failed;
     args.address = address;
-    args.read_failed.request_id = 1;
+    args.read_failed.request_id = test_request_id;
     args.read_failed.erd = erd;
     args.read_failed.reason = tiny_gea2_erd_client_read_failure_reason_retries_exhausted;
     tiny_gea2_erd_client_double_trigger_activity_event(&gea2_client, &args);
@@ -141,7 +174,7 @@ TEST_GROUP(gea2_erd_client_adapter)
     tiny_gea2_erd_client_on_activity_args_t args;
     args.type = tiny_gea2_erd_client_activity_type_write_completed;
     args.address = address;
-    args.write_completed.request_id = 1;
+    args.write_completed.request_id = test_request_id;
     args.write_completed.erd = erd;
     args.write_completed.data = data;
     args.write_completed.data_size = data_size;
@@ -153,7 +186,7 @@ TEST_GROUP(gea2_erd_client_adapter)
     tiny_gea2_erd_client_on_activity_args_t args;
     args.type = tiny_gea2_erd_client_activity_type_write_failed;
     args.address = address;
-    args.write_failed.request_id = 1;
+    args.write_failed.request_id = test_request_id;
     args.write_failed.erd = erd;
     args.write_failed.reason = tiny_gea2_erd_client_write_failure_reason_retries_exhausted;
     args.write_failed.data = nullptr;
@@ -268,7 +301,7 @@ TEST(gea2_erd_client_adapter, gea2_read_completed_republished_as_gea3_event)
   uint8_t data = 0x05;
 
   given_a_listener_on_the_adapter_activity_event();
-  should_publish_gea3_activity(tiny_gea3_erd_client_activity_type_read_completed);
+  should_publish_gea3_completion(tiny_gea3_erd_client_activity_type_read_completed, &data, sizeof(data));
 
   trigger_gea2_read_completed(test_address, test_erd, &data, sizeof(data));
 }
@@ -278,7 +311,7 @@ TEST(gea2_erd_client_adapter, gea2_read_failed_republished_as_gea3_event)
   given_that_the_adapter_has_been_initialized();
 
   given_a_listener_on_the_adapter_activity_event();
-  should_publish_gea3_activity(tiny_gea3_erd_client_activity_type_read_failed);
+  should_publish_gea3_failure(tiny_gea3_erd_client_activity_type_read_failed);
 
   trigger_gea2_read_failed(test_address, test_erd);
 }
@@ -290,7 +323,7 @@ TEST(gea2_erd_client_adapter, gea2_write_completed_republished_as_gea3_event)
   uint8_t data = 0x01;
 
   given_a_listener_on_the_adapter_activity_event();
-  should_publish_gea3_activity(tiny_gea3_erd_client_activity_type_write_completed);
+  should_publish_gea3_completion(tiny_gea3_erd_client_activity_type_write_completed, &data, sizeof(data));
 
   trigger_gea2_write_completed(test_address, test_erd, &data, sizeof(data));
 }
@@ -300,7 +333,7 @@ TEST(gea2_erd_client_adapter, gea2_write_failed_republished_as_gea3_event)
   given_that_the_adapter_has_been_initialized();
 
   given_a_listener_on_the_adapter_activity_event();
-  should_publish_gea3_activity(tiny_gea3_erd_client_activity_type_write_failed);
+  should_publish_gea3_failure(tiny_gea3_erd_client_activity_type_write_failed);
 
   trigger_gea2_write_failed(test_address, test_erd);
 }
