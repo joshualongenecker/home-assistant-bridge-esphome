@@ -24,6 +24,9 @@ extern "C" {
 #include "double/mqtt_test_double.hpp"
 #include "double/esphome_hal_double.hpp"
 
+#include <string>
+#include <vector>
+
 TEST_GROUP(ha_discovery_manager)
 {
 };
@@ -470,4 +473,222 @@ TEST(ha_discovery_manager_publish_backoff, armed_window_survives_the_millis_roll
     esphome_hal_double_set_millis(0xFFFFFFF0u + 100u);
     CHECK_TRUE(attempts_one_more_publish(2));
     LONGS_EQUAL(3, mqtt_double.publish_calls_);
+}
+
+/* Issue #212: a configured custom ERD on an explicit board is published even
+ * when its board did not answer at this boot (the ERD is not in the cache), so
+ * Home Assistant keeps the entity instead of deleting it. Everything else keeps
+ * the cache filter. */
+static const ha_discovery_board_erd_t kConfiguredBoardErds[] = {
+    {0xF400, 0x62},
+    {0xF401, 0x62},
+    {0xF093, 0xFF},  /* a primary-board custom ERD: names no board */
+};
+
+TEST_GROUP(ha_discovery_manager_configured_board_erds)
+{
+    ha_discovery_manager_t manager;
+    char payload[HA_DISCOVERY_PAYLOAD_BUF_SIZE];
+
+    void setup()
+    {
+        memset(&manager, 0, sizeof(manager));
+        ha_discovery_manager_init(&manager);
+        ha_discovery_manager_set_configured_board_erds(&manager, kConfiguredBoardErds, 3);
+        ha_discovery_manager_configure(&manager, "unit", NULL, NULL, 0, false, NULL, NULL);
+        /* The cache holds only the primary board's 0x0001 */
+        manager.sorted_erds[0] = 0x0001;
+        manager.sorted_erds_count = 1;
+        manager.payload_buf = payload;
+    }
+
+    void teardown()
+    {
+        manager.payload_buf = NULL;
+        ha_discovery_manager_cleanup(&manager);
+    }
+
+    bool build(const char* line)
+    {
+        return ha_discovery_test_build_payload(&manager, line);
+    }
+};
+
+TEST(ha_discovery_manager_configured_board_erds, an_uncached_configured_board_erd_is_published)
+{
+    CHECK_TRUE(build("{\"i\":\"f400\",\"n\":\"Inverter Temp\",\"d\":\"sensor\",\"a\":\"62\"}"));
+
+    CHECK(strstr(payload, "\"state_topic\":\"geappliances/unit/erd/0x62_0xf400/value\"") != NULL);
+    CHECK(strstr(manager.unique_id_buf, "_erd_f400_address_62") != NULL);
+    CHECK_TRUE(manager.line_uncached_configured);
+    UNSIGNED_LONGS_EQUAL(0, manager.total_filtered);
+}
+
+TEST(ha_discovery_manager_configured_board_erds, the_same_erd_on_another_board_is_filtered)
+{
+    CHECK_FALSE(build("{\"i\":\"f400\",\"n\":\"Inverter Temp\",\"d\":\"sensor\",\"a\":\"63\"}"));
+    UNSIGNED_LONGS_EQUAL(1, manager.total_filtered);
+}
+
+TEST(ha_discovery_manager_configured_board_erds, an_unconfigured_erd_on_the_board_is_filtered)
+{
+    CHECK_FALSE(build("{\"i\":\"f402\",\"n\":\"Not Configured\",\"d\":\"sensor\",\"a\":\"62\"}"));
+    UNSIGNED_LONGS_EQUAL(1, manager.total_filtered);
+}
+
+TEST(ha_discovery_manager_configured_board_erds, a_line_without_a_board_keeps_the_cache_filter)
+{
+    /* Static category lines name no board; the exemption never reaches them,
+     * not even for an ERD a board entry or a primary custom entry names. */
+    CHECK_FALSE(build("{\"i\":\"f400\",\"n\":\"Inverter Temp\",\"d\":\"sensor\"}"));
+    CHECK_FALSE(build("{\"i\":\"f093\",\"n\":\"Primary Custom\",\"d\":\"sensor\"}"));
+    UNSIGNED_LONGS_EQUAL(2, manager.total_filtered);
+}
+
+TEST(ha_discovery_manager_configured_board_erds, a_cached_line_is_not_counted_as_uncached)
+{
+    CHECK_TRUE(build("{\"i\":\"0001\",\"n\":\"Model Number\",\"d\":\"sensor\",\"a\":\"62\"}"));
+    CHECK_FALSE(manager.line_uncached_configured);
+}
+
+TEST(ha_discovery_manager_configured_board_erds, a_paired_erd_must_be_cached_or_configured_on_the_board)
+{
+    CHECK_TRUE(build("{\"i\":\"f400\",\"n\":\"Mode\",\"d\":\"select\",\"ct\":\"{{ value }}\","
+                     "\"a\":\"62\",\"p\":\"f401\",\"r\":\"request\"}"));
+    CHECK(strstr(payload, "\"state_topic\":\"geappliances/unit/erd/0x62_0xf401/value\"") != NULL);
+    CHECK(strstr(payload, "\"command_topic\":\"geappliances/unit/erd/0x62_0xf400/write\"") != NULL);
+
+    CHECK_FALSE(build("{\"i\":\"f400\",\"n\":\"Mode\",\"d\":\"select\",\"ct\":\"{{ value }}\","
+                      "\"a\":\"62\",\"p\":\"f402\",\"r\":\"request\"}"));
+    UNSIGNED_LONGS_EQUAL(1, manager.total_filtered);
+}
+
+TEST(ha_discovery_manager_configured_board_erds, the_list_survives_a_reinit)
+{
+    /* The lifecycle re-inits the manager before every run. payload is
+     * test-owned, so keep init() from freeing it. */
+    manager.payload_buf = NULL;
+    ha_discovery_manager_init(&manager);
+    ha_discovery_manager_configure(&manager, "unit", NULL, NULL, 0, false, NULL, NULL);
+    manager.payload_buf = payload;
+
+    CHECK_TRUE(build("{\"i\":\"f400\",\"n\":\"Inverter Temp\",\"d\":\"sensor\",\"a\":\"62\"}"));
+}
+
+TEST(ha_discovery_manager_configured_board_erds, no_list_keeps_the_cache_filter)
+{
+    ha_discovery_manager_set_configured_board_erds(&manager, NULL, 3);
+
+    CHECK_FALSE(build("{\"i\":\"f400\",\"n\":\"Inverter Temp\",\"d\":\"sensor\",\"a\":\"62\"}"));
+}
+
+/* A zlib stream holding `text` as one stored (uncompressed) deflate block:
+ * what the run's tinfl call inflates, without needing a compressor here. */
+static std::vector<uint8_t> zlib_stored(const std::string& text)
+{
+    std::vector<uint8_t> out = {0x78, 0x01, 0x01};
+    const uint16_t len = (uint16_t)text.size();
+    out.push_back((uint8_t)(len & 0xFF));
+    out.push_back((uint8_t)(len >> 8));
+    out.push_back((uint8_t)(~len & 0xFF));
+    out.push_back((uint8_t)((uint16_t)~len >> 8));
+    out.insert(out.end(), text.begin(), text.end());
+    uint32_t a = 1, b = 0;
+    for (unsigned char c : text) {
+        a = (a + c) % 65521u;
+        b = (b + a) % 65521u;
+    }
+    const uint32_t adler = (b << 16) | a;
+    out.push_back((uint8_t)(adler >> 24));
+    out.push_back((uint8_t)(adler >> 16));
+    out.push_back((uint8_t)(adler >> 8));
+    out.push_back((uint8_t)adler);
+    return out;
+}
+
+TEST_GROUP(ha_discovery_manager_configured_board_erds_run)
+{
+    ha_discovery_manager_t manager;
+    erd_cache_t cache;
+    esphome_mqtt_client_adapter_t adapter;
+    esphome::mqtt::MqttTestDouble mqtt_double;
+    std::vector<uint8_t> profile;
+    ha_discovery_chunk_t chunk;
+
+    void setup()
+    {
+        memset(&manager, 0, sizeof(manager));
+        erd_cache_init(&cache);
+        esphome::mqtt::global_mqtt_client = &mqtt_double;
+        mqtt_double.connected_ = true;
+        esphome_mqtt_client_adapter_init(&adapter, "board-test");
+    }
+
+    void teardown()
+    {
+        ha_discovery_manager_cleanup(&manager);
+        esphome_mqtt_client_adapter_destroy(&adapter);
+        esphome::mqtt::global_mqtt_client = nullptr;
+        erd_cache_destroy(&cache);
+        esphome_hal_double_set_millis(0);
+    }
+
+    void run_to_completion()
+    {
+        ha_discovery_manager_init(&manager);
+        ha_discovery_manager_set_time_fn(&manager, esphome_hal_double_get_millis);
+        ha_discovery_manager_configure(&manager, "board-test", NULL, NULL, 0,
+                                       false, &cache, &adapter.interface);
+        ha_discovery_manager_start(&manager);
+        for (int i = 0; i < 200000 && ha_discovery_manager_is_processing(&manager); i++) {
+            ha_discovery_manager_run(&manager);
+        }
+        CHECK_EQUAL(ha_discovery_state_complete, ha_discovery_manager_get_state(&manager));
+    }
+};
+
+TEST(ha_discovery_manager_configured_board_erds_run, a_silent_boards_configured_erds_are_still_published)
+{
+    /* The custom profile of waterheaters3 in miniature: two ERDs on board
+     * 0x62, which did not answer at this boot, so the cache holds neither.
+     * The last line is one of them, so the double's last publish shows it. */
+    const std::string text =
+        "{\"i\":\"f402\",\"n\":\"Not Configured\",\"d\":\"sensor\",\"a\":\"62\"}\n"
+        "{\"i\":\"f400\",\"n\":\"Inverter Temp\",\"d\":\"sensor\",\"a\":\"62\"}\n"
+        "{\"i\":\"f401\",\"n\":\"Inverter Mode\",\"d\":\"sensor\",\"a\":\"62\"}\n";
+    profile = zlib_stored(text);
+    chunk.offset = 0;
+    chunk.size = (uint16_t)profile.size();
+    ha_discovery_manager_set_custom_data(&manager, profile.data(), &chunk, 1,
+                                         (uint16_t)text.size(), 0x1234u);
+    ha_discovery_manager_set_configured_board_erds(&manager, kConfiguredBoardErds, 3);
+
+    run_to_completion();
+
+    /* Nothing is cached, so every static-table line is filtered: the two
+     * configured board ERDs are the whole run */
+    UNSIGNED_LONGS_EQUAL(2, manager.total_published);
+    UNSIGNED_LONGS_EQUAL(2, manager.total_uncached_configured);
+    CHECK(strstr(mqtt_double.last_published_topic_.c_str(), "homeassistant/sensor/board-test/") ==
+          mqtt_double.last_published_topic_.c_str());
+    CHECK(strstr(mqtt_double.last_published_topic_.c_str(), "f401") != NULL);
+    CHECK(strstr(mqtt_double.last_published_payload_.c_str(),
+                 "\"state_topic\":\"geappliances/board-test/erd/0x62_0xf401/value\"") != NULL);
+    CHECK_TRUE(mqtt_double.last_published_retain_);
+}
+
+TEST(ha_discovery_manager_configured_board_erds_run, without_the_list_the_silent_boards_erds_are_dropped)
+{
+    /* What develop did before issue #212's fix: the same run publishes nothing */
+    const std::string text =
+        "{\"i\":\"f400\",\"n\":\"Inverter Temp\",\"d\":\"sensor\",\"a\":\"62\"}\n";
+    profile = zlib_stored(text);
+    chunk.offset = 0;
+    chunk.size = (uint16_t)profile.size();
+    ha_discovery_manager_set_custom_data(&manager, profile.data(), &chunk, 1,
+                                         (uint16_t)text.size(), 0x1234u);
+
+    run_to_completion();
+
+    UNSIGNED_LONGS_EQUAL(0, manager.total_published);
 }

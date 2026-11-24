@@ -163,6 +163,21 @@ static bool erd_is_registered_sorted(const ha_discovery_manager_t* self, uint16_
     return false;
 }
 
+/* Linear scan: the list is at most CUSTOM_ERDS_MAX (128) entries and is only
+ * consulted for lines that carry an explicit board address, i.e. the custom
+ * profile's lines, so a run costs at most a few thousand comparisons. */
+static bool is_configured_board_erd(const ha_discovery_manager_t* self, uint16_t erd_id,
+                                    uint8_t board_address)
+{
+    for (uint16_t i = 0; i < self->configured_board_erds_count; i++) {
+        if (self->configured_board_erds[i].erd == erd_id &&
+            self->configured_board_erds[i].board_address == board_address) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void build_sorted_erd_list(ha_discovery_manager_t* self)
 {
     self->sorted_erds_count = 0;
@@ -377,6 +392,7 @@ static bool should_filter_config_topic(const char* name) {
 
 static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
 {
+    self->line_uncached_configured = false;
     if (self->device_id == NULL) return false;
     const char* val = NULL;
     size_t len = 0;
@@ -462,19 +478,35 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
     }
     uint16_t erd_id = (uint16_t)strtoul(erd_id_hex, NULL, 16);
 
+    /* The cache filter narrows the static category tables to what this
+     * appliance answers. A configured custom ERD on an explicit board is
+     * exempt (issue #212): it was asked for by name, so a board that is silent
+     * at this boot must leave its entities stale in Home Assistant, not have
+     * them deleted by the cleanup that precedes this run. The board address
+     * check keeps the exemption to the lines that name that board; a line
+     * without "a" is a primary-board line and always takes the cache filter. */
+    const bool explicit_board = self->board_address_buf[0] != '\0';
+    bool uncached = false;
     if (!erd_is_registered_sorted(self, erd_id)) {
-        self->total_filtered++;
-        return false;
+        if (!explicit_board || !is_configured_board_erd(self, erd_id, board_address)) {
+            self->total_filtered++;
+            return false;
+        }
+        uncached = true;
     }
 
     uint16_t paired_id = 0;
     if (self->paired_erd_buf[0]) {
         paired_id = (uint16_t)strtoul(self->paired_erd_buf, NULL, 16);
         if (!erd_is_registered_sorted(self, paired_id)) {
-            self->total_filtered++;
-            return false;
+            if (!explicit_board || !is_configured_board_erd(self, paired_id, board_address)) {
+                self->total_filtered++;
+                return false;
+            }
+            uncached = true;
         }
     }
+    self->line_uncached_configured = uncached;
 
     /* Build unique_id. Address-aware entries include the two-digit board
      * address, keeping overlapping ERD IDs on separate boards distinct. */
@@ -923,6 +955,9 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
                     self->retry_backoff_until_ms = 0;
                     self->total_published++;
                     self->total_discovered++;
+                    if (self->line_uncached_configured) {
+                        self->total_uncached_configured++;
+                    }
 
                     self->current_offset = (uint32_t)(line_end - decomp) + 1;
 
@@ -964,6 +999,11 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
         size_t largest_free __attribute__((unused)) = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
         ESP_LOGI(TAG, "HA discovery complete: %lu published, %lu filtered",
             (unsigned long)self->total_published, (unsigned long)self->total_filtered);
+        if (self->total_uncached_configured > 0) {
+            ESP_LOGI(TAG, "%lu of them are configured board ERDs with no cached value "
+                          "(their board did not answer); published so Home Assistant keeps them",
+                (unsigned long)self->total_uncached_configured);
+        }
         ESP_LOGV(TAG, "Heap after discovery: free=%u, largest_block=%u, fragmentation=%.1f%%",
             (unsigned)free_heap, (unsigned)largest_free,
             (free_heap > 0) ? (1.0 - (double)largest_free / free_heap) * 100.0 : 0.0);
@@ -986,6 +1026,8 @@ void ha_discovery_manager_init(ha_discovery_manager_t* self)
     uint16_t custom_num_chunks = self->custom_num_chunks;
     uint16_t custom_max_chunk = self->custom_max_decompressed_chunk;
     uint32_t custom_data_hash = self->custom_data_hash;
+    const ha_discovery_board_erd_t* configured_board_erds = self->configured_board_erds;
+    uint16_t configured_board_erds_count = self->configured_board_erds_count;
 
     /* Free any discovery allocations still held from a prior run before
      * zeroing the struct, so a re-init can never orphan the ~52 KB of heap
@@ -1006,6 +1048,8 @@ void ha_discovery_manager_init(ha_discovery_manager_t* self)
     self->custom_num_chunks = custom_num_chunks;
     self->custom_max_decompressed_chunk = custom_max_chunk;
     self->custom_data_hash = custom_data_hash;
+    self->configured_board_erds = configured_board_erds;
+    self->configured_board_erds_count = configured_board_erds_count;
 
     /* The publish backoff needs a time source, so install the HAL default
      * unconditionally. Nothing is preserved across the memset above: the
@@ -1024,6 +1068,13 @@ void ha_discovery_manager_set_custom_data(ha_discovery_manager_t* self,
     self->custom_num_chunks = num_chunks;
     self->custom_max_decompressed_chunk = max_chunk;
     self->custom_data_hash = data_hash;
+}
+
+void ha_discovery_manager_set_configured_board_erds(ha_discovery_manager_t* self,
+    const ha_discovery_board_erd_t* erds, uint16_t count)
+{
+    self->configured_board_erds = erds;
+    self->configured_board_erds_count = (erds != NULL) ? count : 0;
 }
 
 void ha_discovery_manager_configure(

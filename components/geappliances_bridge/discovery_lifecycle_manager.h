@@ -64,8 +64,8 @@ class DiscoveryLifecycleManager {
     // unchanged
     uint8_t valid_erds_republishes;
     uint8_t valid_erds_stable_checks;
-    // Fingerprint of the host board and the valid-ERD set discovery was
-    // filtered by (see set_valid_erds_fingerprint()); 0 = no filter / unknown
+    // Fingerprint of the boards and the valid-ERD set discovery was filtered
+    // by (see set_valid_erds_fingerprint()); 0 = no filter / unknown
     uint32_t valid_erds_fingerprint;
   };
 
@@ -273,12 +273,15 @@ class DiscoveryLifecycleManager {
   // changed.
   void check_discovery_changes(const char* current_device_id);
 
-  // Fingerprint of what discovery is filtered by right now: the host board
-  // and the valid-ERD set from the appliance's feature bits. The bridge sets
-  // it before check_discovery_changes(); it is stored with each publish, and a
+  // Fingerprint of what discovery is filtered by right now: the host board,
+  // the secondary boards the configuration names, and the valid-ERD set from
+  // the appliance's feature bits. The bridge sets it before
+  // check_discovery_changes(); it is stored with each publish, and a
   // different value at a later check means the published entity list no
-  // longer matches the appliance (another board, new firmware with other
-  // features), so discovery is cleaned up and republished. 0 means there is
+  // longer matches the appliance (another host board, a board added to or
+  // removed from the configuration, new firmware with other features), so
+  // discovery is cleaned up and republished. Whether a secondary board
+  // answered at this boot is not an input (issue #212). 0 means there is
   // no filter or it is unknown (feature bits unreadable, appliance API
   // parsing off): such a check never triggers a republish, so a transient
   // feature-bit failure at boot cannot cause a republish loop.
@@ -335,6 +338,11 @@ class DiscoveryLifecycleManager {
   uint32_t valid_erds_fingerprint_{0};
   // valid_erds_republishes for the record the next publish saves
   uint8_t next_valid_erds_republishes_{0};
+  // Topics the completed cleanup ahead of this publish removed, for the
+  // published-vs-removed log in finish_publish_(); cleanup_completed_ is false
+  // for a publish no cleanup preceded (the initial publish).
+  uint32_t cleanup_removed_{0};
+  bool cleanup_completed_{false};
 
   bool (*is_ready_)(void* context) = nullptr;
   void* is_ready_context_{nullptr};

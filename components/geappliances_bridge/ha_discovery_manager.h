@@ -62,6 +62,17 @@ typedef enum {
 #define HA_DISCOVERY_AVAILABILITY_PAYLOAD_BUF_SIZE 32
 
 /*!
+ * A configured custom ERD on an explicitly addressed board: what
+ * GeappliancesBridge::add_custom_erds_with_addresses() received. The layout
+ * matches probe_entry_t and the bridge's custom_erd_entry_t, so the bridge
+ * lends its own array (see ha_discovery_manager_set_configured_board_erds()).
+ */
+typedef struct {
+  uint16_t erd;
+  uint8_t board_address;
+} ha_discovery_board_erd_t;
+
+/*!
  * Peak memory: payload buffer (~8 KB) + decompress buffer (~18 KB) +
  * line buffer (~18 KB) + tinfl decompressor state (~8 KB) + sorted ERD
  * array (~1.3 KB).
@@ -80,6 +91,12 @@ typedef struct {
   uint32_t total_discovered;
   uint32_t total_published;
   uint32_t total_filtered;         // Entities filtered out (ERD not registered)
+  /* Entities published for a configured board ERD that was not in the cache
+   * (its board did not answer at this boot; issue #212). Counted in
+   * total_published too. */
+  uint32_t total_uncached_configured;
+  /* Set by process_jsonl_line() for the line it just accepted. */
+  bool line_uncached_configured;
 
   uint16_t sorted_erds[HA_DISCOVERY_MAX_ERDS];
   uint16_t sorted_erds_count;
@@ -147,6 +164,11 @@ typedef struct {
   uint16_t custom_num_chunks;
   uint16_t custom_max_decompressed_chunk;
   uint32_t custom_data_hash;
+  /* Borrowed from the bridge and preserved across init(), like the custom
+   * data above: the configured (erd, board) pairs whose lines are published
+   * even when the ERD is not in the cache. NULL/0 = none. */
+  const ha_discovery_board_erd_t* configured_board_erds;
+  uint16_t configured_board_erds_count;
   ha_discovery_cleanup_t cleanup;
 
   /* Time injection — mirrors erd_bridge_poll_t::get_time_ms and
@@ -177,6 +199,20 @@ typedef struct {
 void ha_discovery_manager_init(ha_discovery_manager_t* self);
 void ha_discovery_manager_set_custom_data(ha_discovery_manager_t* self,
   const uint8_t* data, const void* chunks, uint16_t num_chunks, uint16_t max_chunk, uint32_t data_hash);
+
+/*!
+ * The configured custom ERDs (issue #212). A JSONL line that names an explicit
+ * board address ("a") and whose (ERD, board) pair -- and paired ERD, if any --
+ * is in this list is published even when the ERD is not in the cache, so a
+ * secondary board that is silent at one boot leaves its entities stale in Home
+ * Assistant instead of deleted. Every other line keeps the cache filter. An
+ * entry whose board_address is the primary sentinel (0xFF) never matches: a
+ * line's explicit address can never be 0xFF. The array is borrowed (it must
+ * outlive the manager), may be unsorted, and survives init() like the custom
+ * data. NULL or a zero count turns the exemption off.
+ */
+void ha_discovery_manager_set_configured_board_erds(ha_discovery_manager_t* self,
+  const ha_discovery_board_erd_t* erds, uint16_t count);
 
 /*!
  * Call after init(), before start().

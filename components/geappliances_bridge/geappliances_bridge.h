@@ -245,6 +245,17 @@ class GeappliancesBridge : public Component, public IBridgeServices {
     tiny_erd_t erd;
     uint8_t board_address;
   };
+  // Lent to HA discovery as ha_discovery_board_erd_t and to the poll-list
+  // builder as probe_entry_t, so the three layouts must stay the same.
+  static_assert(sizeof(custom_erd_entry_t) == sizeof(ha_discovery_board_erd_t) &&
+                offsetof(custom_erd_entry_t, erd) == offsetof(ha_discovery_board_erd_t, erd) &&
+                offsetof(custom_erd_entry_t, board_address) ==
+                    offsetof(ha_discovery_board_erd_t, board_address),
+                "custom_erd_entry_t must match ha_discovery_board_erd_t");
+  static_assert(sizeof(custom_erd_entry_t) == sizeof(probe_entry_t) &&
+                offsetof(custom_erd_entry_t, board_address) ==
+                    offsetof(probe_entry_t, board_address),
+                "custom_erd_entry_t must match probe_entry_t");
   custom_erd_entry_t custom_erds_[CUSTOM_ERDS_MAX];
   uint16_t custom_erds_count_{0};
   // Retain the address with the ERD when subscription mode falls back to
