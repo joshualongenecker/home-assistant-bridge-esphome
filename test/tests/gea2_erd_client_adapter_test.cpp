@@ -25,16 +25,53 @@ TEST_GROUP(gea2_erd_client_adapter)
 
   gea2_erd_client_adapter_t adapter;
   tiny_gea2_erd_client_double_t gea2_client;
+  tiny_event_subscription_t activity_subscription;
+
+  static tiny_erd_t erd_of(const tiny_gea3_erd_client_on_activity_args_t* args)
+  {
+    switch(args->type) {
+      case tiny_gea3_erd_client_activity_type_read_completed:
+        return args->read_completed.erd;
+      case tiny_gea3_erd_client_activity_type_read_failed:
+        return args->read_failed.erd;
+      case tiny_gea3_erd_client_activity_type_write_completed:
+        return args->write_completed.erd;
+      case tiny_gea3_erd_client_activity_type_write_failed:
+        return args->write_failed.erd;
+      default:
+        return 0xFFFF;
+    }
+  }
+
+  static void on_adapter_activity(void*, const void* _args)
+  {
+    auto args = static_cast<const tiny_gea3_erd_client_on_activity_args_t*>(_args);
+    mock()
+      .actualCall("on_activity")
+      .withParameter("type", static_cast<unsigned>(args->type))
+      .withParameter("address", args->address)
+      .withParameter("erd", erd_of(args));
+  }
+
+  void given_a_listener_on_the_adapter_activity_event()
+  {
+    tiny_event_subscription_init(&activity_subscription, nullptr, on_adapter_activity);
+    tiny_event_subscribe(tiny_gea3_erd_client_on_activity(&adapter.interface), &activity_subscription);
+  }
+
+  void should_publish_gea3_activity(tiny_gea3_erd_client_activity_type_t type)
+  {
+    mock()
+      .expectOneCall("on_activity")
+      .withParameter("type", static_cast<unsigned>(type))
+      .withParameter("address", test_address)
+      .withParameter("erd", test_erd);
+  }
 
   void setup()
   {
     mock().strictOrder();
     tiny_gea2_erd_client_double_init(&gea2_client);
-  }
-
-  void teardown()
-  {
-    mock().clear();
   }
 
   void when_the_adapter_is_initialized()
@@ -230,11 +267,8 @@ TEST(gea2_erd_client_adapter, gea2_read_completed_republished_as_gea3_event)
 
   uint8_t data = 0x05;
 
-  /* Subscribe a mock listener to the adapter's on_activity event. */
-  mock()
-    .expectOneCall("tiny_event_publish")
-    .withParameter("event_type",
-      static_cast<unsigned>(tiny_gea3_erd_client_activity_type_read_completed));
+  given_a_listener_on_the_adapter_activity_event();
+  should_publish_gea3_activity(tiny_gea3_erd_client_activity_type_read_completed);
 
   trigger_gea2_read_completed(test_address, test_erd, &data, sizeof(data));
 }
@@ -243,10 +277,8 @@ TEST(gea2_erd_client_adapter, gea2_read_failed_republished_as_gea3_event)
 {
   given_that_the_adapter_has_been_initialized();
 
-  mock()
-    .expectOneCall("tiny_event_publish")
-    .withParameter("event_type",
-      static_cast<unsigned>(tiny_gea3_erd_client_activity_type_read_failed));
+  given_a_listener_on_the_adapter_activity_event();
+  should_publish_gea3_activity(tiny_gea3_erd_client_activity_type_read_failed);
 
   trigger_gea2_read_failed(test_address, test_erd);
 }
@@ -257,10 +289,8 @@ TEST(gea2_erd_client_adapter, gea2_write_completed_republished_as_gea3_event)
 
   uint8_t data = 0x01;
 
-  mock()
-    .expectOneCall("tiny_event_publish")
-    .withParameter("event_type",
-      static_cast<unsigned>(tiny_gea3_erd_client_activity_type_write_completed));
+  given_a_listener_on_the_adapter_activity_event();
+  should_publish_gea3_activity(tiny_gea3_erd_client_activity_type_write_completed);
 
   trigger_gea2_write_completed(test_address, test_erd, &data, sizeof(data));
 }
@@ -269,10 +299,8 @@ TEST(gea2_erd_client_adapter, gea2_write_failed_republished_as_gea3_event)
 {
   given_that_the_adapter_has_been_initialized();
 
-  mock()
-    .expectOneCall("tiny_event_publish")
-    .withParameter("event_type",
-      static_cast<unsigned>(tiny_gea3_erd_client_activity_type_write_failed));
+  given_a_listener_on_the_adapter_activity_event();
+  should_publish_gea3_activity(tiny_gea3_erd_client_activity_type_write_failed);
 
   trigger_gea2_write_failed(test_address, test_erd);
 }

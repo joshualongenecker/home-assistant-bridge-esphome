@@ -65,7 +65,6 @@ TEST_GROUP(application_level)
     erd_bridge_subscribe_destroy(&erd_bridge_subscribe);
     erd_bridge_poll_destroy(&erd_bridge_poll);
     erd_cache_destroy(&test_cache);
-    mock().clear();
   }
   
   /*!

@@ -38,15 +38,9 @@ TEST_GROUP(feature_bit_manager)
 
   void setup()
   {
-    mock().clear();
     mock().strictOrder();
     tiny_gea3_erd_client_double_init(&erd_client);
     tiny_timer_group_double_init(&timer_group);
-  }
-
-  void teardown()
-  {
-    mock().clear();
   }
 
   void init_manager()

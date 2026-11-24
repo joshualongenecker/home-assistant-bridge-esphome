@@ -142,7 +142,6 @@ TEST_GROUP(startup_integration)
 
   void setup()
   {
-    mock().clear();
     mock().strictOrder();
     esphome_hal_double_set_millis(0);
     bridge = new GeappliancesBridge();
@@ -163,7 +162,6 @@ TEST_GROUP(startup_integration)
     bridge = nullptr;
     mqtt_double = nullptr;
     mock_uart = nullptr;
-    mock().clear();
   }
 
   /* Configure with GEA3 UART in POLL mode. */

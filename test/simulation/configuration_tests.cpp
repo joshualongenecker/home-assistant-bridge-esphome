@@ -85,7 +85,6 @@ TEST_GROUP(configuration_based_tests)
     erd_bridge_subscribe_destroy(&erd_bridge_subscribe);
     erd_bridge_poll_destroy(&erd_bridge_poll);
     erd_cache_destroy(&test_cache);
-    mock().clear();
   }
   
   // Configuration Scenarios
@@ -383,7 +382,6 @@ TEST_GROUP(dual_subscription_config)
     erd_bridge_subscribe_destroy(&bridge_a);
     erd_bridge_subscribe_destroy(&bridge_b);
     erd_cache_destroy(&test_cache);
-    mock().clear();
   }
 
   void given_both_bridges_are_initialized()
@@ -547,7 +545,6 @@ TEST_GROUP(polling_bridge_config)
     erd_bridge_poll_destroy(&bridge);
     erd_cache_destroy(&test_cache);
     mock().enable();
-    mock().clear();
   }
 
   void configure_bridge()

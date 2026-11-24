@@ -63,7 +63,6 @@ TEST_GROUP(write_flow_integration)
     erd_cache_destroy(&test_cache);
 
     esphome_mqtt_client_adapter_destroy(&adapter);
-    mock().clear();
   }
 
   void init_all(uint8_t host_address)
@@ -127,8 +126,7 @@ TEST(write_flow_integration, should_route_write_from_mqtt_to_erd_client)
 
   when_home_assistant_publishes_write(erd, "01");
 
-  /* Teardown calls mock().clear(), which silently discards unmet
-   * expectations; fail here instead if the write never reached the client. */
+  /* Fail here, at the call site, if the write never reached the client. */
   mock().checkExpectations();
 }
 
@@ -164,9 +162,7 @@ TEST(write_flow_integration, should_drop_write_when_host_is_broadcast)
   when_home_assistant_publishes_write(erd, "01");
 
   /* The real adapter's update_erd_write_result runs (it is not mocked
-   * here), so assert on the ESPHome MQTT double's recorded publish — a
-   * mock expectation on it would be silently discarded by teardown's
-   * mock().clear(). */
+   * here), so assert on the ESPHome MQTT double's recorded publish. */
   STRCMP_EQUAL("geappliances/test_device/erd/0x7701/write_result",
                mqtt_double.last_published_topic_.c_str());
   STRCMP_EQUAL("{\"error\":\"not_supported\"}", mqtt_double.last_published_payload_.c_str());

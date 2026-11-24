@@ -31,11 +31,6 @@ TEST_GROUP(esphome_time_source)
     esphome_hal_double_set_millis(0);
     time_source = esphome_time_source_init();
   }
-
-  void teardown()
-  {
-    mock().clear();
-  }
 };
 
 /* ------------------------------------------------------------------ */
