@@ -56,17 +56,6 @@ SANITIZE_FLAGS := -fsanitize=address -fsanitize=undefined
 endif
 
 
-# Leak detection is on for both suites: no test owns memory that outlives its
-# teardown, so a leak is a real leak — e.g. a discovery run orphaning its
-# ~52 KB of run allocations (buffers + tinfl state).
-#
-# halt_on_error must stay at its default (1) here: with halt_on_error=0
-# AddressSanitizer prints the LeakSanitizer report but still exits 0, so a leak
-# would not fail CI. Debug with halting disabled when you want to see several
-# mid-run ASan errors at once (leaks then only print, never fail):
-#   make test ASAN_OPTIONS="detect_leaks=1 halt_on_error=0"
-ASAN_OPTIONS ?= detect_leaks=1:detect_stack_use_after_return=0
-
 # CppUTest installation paths — auto-detect common locations
 # Override with: make CPPUTEST_PREFIX=/path/to/cpputest
 #   macOS (Apple Silicon):  /opt/homebrew  (default)
@@ -91,6 +80,27 @@ else
 endif
 CPPUTEST_INC := -I$(CPPUTEST_PREFIX)/include
 CPPUTEST_LIB := -L$(CPPUTEST_PREFIX)/lib
+
+# Leak detection is on for both suites: no test owns memory that outlives its
+# teardown, so a leak is a real leak — e.g. a discovery run orphaning its
+# ~52 KB of run allocations (buffers + tinfl state).
+#
+# halt_on_error must stay at its default (1) here: with halt_on_error=0
+# AddressSanitizer prints the LeakSanitizer report but still exits 0, so a leak
+# would not fail CI. Debug with halting disabled when you want to see several
+# mid-run ASan errors at once (leaks then only print, never fail):
+#   make test ASAN_OPTIONS="detect_leaks=1 halt_on_error=0"
+#
+# Darwin is the exception. Apple clang's AddressSanitizer runtime has no
+# LeakSanitizer, and asking for one aborts the run before a single test
+# executes ("detect_leaks is not supported on this platform"). Leak checking
+# therefore happens on Linux only, which is where CI runs; every other ASan and
+# UBSan check still applies on macOS.
+ifeq ($(UNAME_S),Darwin)
+  ASAN_OPTIONS ?= detect_leaks=0:detect_stack_use_after_return=0
+else
+  ASAN_OPTIONS ?= detect_leaks=1:detect_stack_use_after_return=0
+endif
 
 CFLAGS += -std=c11 -pedantic
 CPPFLAGS += $(SANITIZE_FLAGS) -fno-omit-frame-pointer -fprofile-arcs -ftest-coverage -DUSE_ESP_IDF -DUSE_ESP_IDF_STUBS -DUNIT_TEST_BUILD -DHA_DISCOVERY_TEST_EXPORT -DHA_DISCOVERY_CLEANUP_TEST_BUF_SIZE=512 -DHA_CLEANUP_TEST_BUF_SIZE=512 -DHA_DISCOVERY_CLEANUP_TEST_EXPORT 

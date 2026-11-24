@@ -67,9 +67,14 @@ extern "C" {
 // set_gea2_uart are only called for a configured UART — and init() nulls the
 // pointer when the matching define is absent, so has_gea2_uart() /
 // has_gea3_uart() can never report a protocol whose buffers are compiled out.
-// Only the buffers are gated: the interface, ERD client, adapter and tick
-// source members stay declared (a few hundred bytes) so the accessors and the
-// orchestration layer need no variant handling.
+// Gated with the buffers: each protocol's ERD client, and the GEA2->GEA3
+// adapter. Nothing outside the matching #ifdef may touch them: the accessors
+// return nullptr in a build without the protocol, and init() only reaches them
+// under the gate. Declaring them anyway left them unreferenced in a
+// single-protocol build, which clang rejects under -Werror
+// (-Wunused-private-field). The interface, UART adapter and tick source
+// members stay declared because run() and teardown() reference them without
+// a gate.
 // -----------------------------------------------------------------------------
 #if !defined(GEA_BRIDGE_HAS_GEA2) && !defined(GEA_BRIDGE_HAS_GEA3)
 #define GEA_BRIDGE_HAS_GEA2 1
@@ -229,8 +234,8 @@ class ProtocolStack {
 
   esphome_uart_adapter_t gea3_uart_adapter_{};
   tiny_gea3_interface_t gea3_interface_{};
-  tiny_gea3_erd_client_t gea3_erd_client_{};
 #ifdef GEA_BRIDGE_HAS_GEA3
+  tiny_gea3_erd_client_t gea3_erd_client_{};
   // GEA3 receive buffer — one complete on-wire packet.
   // Max payload is tiny_gea_packet_max_payload_length (248) + 7 bytes overhead = 255.
   uint8_t receive_buffer_[255];
@@ -250,8 +255,9 @@ class ProtocolStack {
   esphome_uart_adapter_t gea2_uart_adapter_{};
   tiny_gea2_interface_t gea2_interface_{};
 
-  tiny_gea2_erd_client_t gea2_erd_client_{};
 #ifdef GEA_BRIDGE_HAS_GEA2
+  tiny_gea2_erd_client_t gea2_erd_client_{};
+  gea2_erd_client_adapter_t gea2_erd_client_adapter_{};
   // GEA2 receive buffer — one complete on-wire packet.
   // Max payload is tiny_gea_packet_max_payload_length (248) + 7 bytes overhead = 255.
   uint8_t gea2_receive_buffer_[255];
@@ -261,8 +267,6 @@ class ProtocolStack {
 
   uint8_t gea2_client_queue_buffer_[4096];
 #endif
-
-  gea2_erd_client_adapter_t gea2_erd_client_adapter_{};
 
   // Event fired once per millisecond to drive the GEA2 interface's internal
   // timers. Published manually inside the GEA2 tight loop (not via a periodic

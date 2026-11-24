@@ -33,6 +33,11 @@ namespace geappliances_bridge {
 
 GEA_TAG(TAG) = "protocol_stack";
 
+// Each configuration is gated with the ERD client it configures (see the
+// build-variant notes in protocol_stack.h): a single-protocol build never
+// references the other protocol's, which clang rejects under -Werror.
+
+#ifdef GEA_BRIDGE_HAS_GEA3
 // GEA3 ERD client: ten internal retries.  With request_timeout=250ms and
 // request_retries=10, each read gets eleven attempts (2.75s total), which is
 // long enough for appliances to service slow first-access NVRAM lookups.
@@ -40,7 +45,9 @@ static const tiny_gea3_erd_client_configuration_t client_configuration = {
   .request_timeout = 250,
   .request_retries = 10
 };
+#endif
 
+#ifdef GEA_BRIDGE_HAS_GEA2
 // GEA2 ERD client: one internal retry.  With request_timeout=250ms and
 // request_retries=1, each read gets two attempts (500ms total), giving
 // appliances time to service slow first-access NVRAM lookups or transient
@@ -49,6 +56,7 @@ static const tiny_gea2_erd_client_configuration_t gea2_client_configuration = {
   .request_timeout = 250,
   .request_retries = 1
 };
+#endif
 
 tiny_time_source_ticks_t ProtocolStack::gea2_tick_ticks_(i_tiny_time_source_t* _self)
 {
