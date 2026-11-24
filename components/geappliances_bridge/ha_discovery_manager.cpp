@@ -53,6 +53,33 @@ GEA_TAG(TAG) = "ha_discovery";
  * B below L buys nothing: the retry would fire on the next iteration anyway. */
 static const uint32_t HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS = 64;
 
+/* Minimum interval between two successful config publishes in one run (issue
+ * #209): at most 20 configs per second leave the run, against the ~34 per
+ * second the main loop drives at the fleet-typical L ~= 29 ms.
+ *
+ * The heap a run consumes beyond its four fixed buffers is in-flight publish
+ * state below it: ESPHome's MQTTBackendESP32::enqueue_() heap-copies the topic
+ * and payload of every queued publish into a 29-element pool, and lwIP and the
+ * Wi-Fi driver buffer whatever the backend task has sent but the link has not
+ * drained. Publishing at loop rate keeps that pool full -- the drop backoff
+ * above engages only once it already is -- which is how a production C6 hit
+ * 4 836 B free mid-run. Pacing the producer below the drain rate keeps a
+ * handful of configs in flight instead of 29, and bounds all three terms at
+ * once without having to know how the heap splits between them.
+ *
+ * Why 50 ms: a config is under ~1 KB, so 20 per second is ~20 KB/s, far below
+ * what a healthy Wi-Fi link drains, and the measured 129-171-config runs take
+ * 7-9 s against the 10-11 s already observed with drops and retries. It is
+ * the starting point issue #209 asked for, to be tuned against the device's
+ * heap_min_free; it is not derived from a measured drain rate.
+ *
+ * It costs filter-disabled runs the most: a range appliance with filtering off
+ * publishes all 3605 entities and takes ~3 min instead of ~2. That does not
+ * threaten the publish phase's abort path, which is an idle timeout on
+ * successful publishes (DiscoveryLifecycleManager::kPhaseTimeoutMs, 5 min),
+ * and a paced run publishes every 50 ms. */
+static const uint32_t HA_DISCOVERY_PUBLISH_PACE_INTERVAL_MS = 50;
+
 /* Extract a JSON string value for the given key.
  * Returns a pointer to the first character of the value (after opening quote)
  * and sets *out_len to the length (not including closing quote).
@@ -835,6 +862,35 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
         return;
     }
 
+    /* Publish pacing (see HA_DISCOVERY_PUBLISH_PACE_INTERVAL_MS). Gated here,
+     * before any work, rather than just before the publish: a gate at the
+     * publish would re-parse and rebuild the same payload on every suppressed
+     * call. The cost is that a chunk decompression or category step falling
+     * inside the window waits for it too, and only the first one does, since
+     * the stamp moves only on a successful publish.
+     *
+     * 0 means nothing has been published in this run yet, so the first config
+     * is never held back however early in uptime the run starts.
+     * ha_discovery_manager_init() zeroes it for every run. A publish landing
+     * in the millisecond where get_time_ms() reads 0 (boot, or a 2^32 ms
+     * wrap) stores 0 again, re-arming the bypass for one unpaced publish;
+     * the next publish stores a non-zero stamp and closes it.
+     *
+     * The elapsed test is an unsigned modulo difference, as in
+     * erd_cache_mqtt_publisher_signal_work() (PR #184), and must stay one. The
+     * signed form reads any gap above 2^31 ms as negative, i.e. inside the
+     * window, and only a publish moves the stamp -- so a window that reads as
+     * open could never be left. A run lasts minutes, so that gap is not
+     * reachable today, but the unsigned form makes the gate correct without
+     * relying on it: it measures the true gap up to 2^32 ms, and its only false
+     * suppression is a stamp a whole number of wraps plus < 50 ms old, which
+     * expires inside the window by itself. */
+    if (self->last_publish_ms != 0 &&
+        (uint32_t)(self->get_time_ms() - self->last_publish_ms)
+            < HA_DISCOVERY_PUBLISH_PACE_INTERVAL_MS) {
+        return;
+    }
+
     while (self->state == ha_discovery_state_discovering) {
         while (self->current_category < discovery_category_count(self)) {
             ha_discovery_category_t cat = discovery_category_at(self, self->current_category);
@@ -921,6 +977,10 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
                         return;
                     }
                     self->retry_backoff_until_ms = 0;
+                    /* Stamped from the attempt, like the drop window above,
+                     * so the interval runs from when the config was handed
+                     * to the backend. */
+                    self->last_publish_ms = t_publish;
                     self->total_published++;
                     self->total_discovered++;
 

@@ -407,6 +407,9 @@ TEST_GROUP(ha_discovery_manager_publish_backoff)
 
 TEST(ha_discovery_manager_publish_backoff, dropped_publish_arms_window_and_suppresses_retries)
 {
+    /* The first publish lands one pacing interval before the drop, so the
+     * drop below is not held back by the pacing gate. */
+    esphome_hal_double_set_millis(950);
     CHECK_TRUE(attempts_one_more_publish(0));
     LONGS_EQUAL(1, mqtt_double.publish_calls_);
     UNSIGNED_LONGS_EQUAL(0, manager.retry_backoff_until_ms);
@@ -414,6 +417,7 @@ TEST(ha_discovery_manager_publish_backoff, dropped_publish_arms_window_and_suppr
     /* Backend queue full: the drop arms the window, measured from the attempt
      * (t=1000, zero-length publish, +64 ms). The double records the topic even
      * for a dropped publish, so this is the entity the window was armed for. */
+    esphome_hal_double_set_millis(1000);
     mqtt_double.publish_should_fail_ = true;
     CHECK_TRUE(attempts_one_more_publish(1));
     LONGS_EQUAL(2, mqtt_double.publish_calls_);
@@ -448,10 +452,12 @@ TEST(ha_discovery_manager_publish_backoff, dropped_publish_arms_window_and_suppr
 TEST(ha_discovery_manager_publish_backoff, armed_window_survives_the_millis_roll_over)
 {
     /* Arm the window 16 ms before the counter wraps; a cleared window must not
-     * block at this clock value. */
-    esphome_hal_double_set_millis(0xFFFFFFF0u);
+     * block at this clock value. The first publish lands one pacing interval
+     * earlier so the drop is not held back by the pacing gate. */
+    esphome_hal_double_set_millis(0xFFFFFFF0u - 50u);
     CHECK_TRUE(attempts_one_more_publish(0));
 
+    esphome_hal_double_set_millis(0xFFFFFFF0u);
     mqtt_double.publish_should_fail_ = true;
     CHECK_TRUE(attempts_one_more_publish(1));
     /* 0xFFFFFFF0 + 64 wraps to 48. */
@@ -470,4 +476,145 @@ TEST(ha_discovery_manager_publish_backoff, armed_window_survives_the_millis_roll
     esphome_hal_double_set_millis(0xFFFFFFF0u + 100u);
     CHECK_TRUE(attempts_one_more_publish(2));
     LONGS_EQUAL(3, mqtt_double.publish_calls_);
+}
+
+/* Publish pacing (issue #209). Same fixture as the backoff tests: the real run,
+ * the real publish path, and the HAL double's clock, which only moves when a
+ * test moves it -- so any number of run() calls at one clock value is "as many
+ * main-loop iterations as the window can hold". */
+
+TEST(ha_discovery_manager_publish_backoff, pacing_suppresses_inside_the_window_and_passes_at_the_boundary)
+{
+    CHECK_TRUE(attempts_one_more_publish(0));
+    LONGS_EQUAL(1, mqtt_double.publish_calls_);
+    UNSIGNED_LONGS_EQUAL(1000, manager.last_publish_ms);
+
+    /* Inside the window run() makes no attempt at all, however often the main
+     * loop calls it -- and that is not the drop backoff, which is not armed. */
+    for (int i = 0; i < 100; i++) {
+        ha_discovery_manager_run(&manager);
+    }
+    esphome_hal_double_set_millis(1049);
+    for (int i = 0; i < 100; i++) {
+        ha_discovery_manager_run(&manager);
+    }
+    LONGS_EQUAL(1, mqtt_double.publish_calls_);
+    UNSIGNED_LONGS_EQUAL(0, manager.retry_backoff_until_ms);
+
+    /* Exactly one interval later the next config goes out and restamps: the
+     * window is exclusive at its end, which pins the comparison direction. */
+    esphome_hal_double_set_millis(1050);
+    CHECK_TRUE(attempts_one_more_publish(1));
+    LONGS_EQUAL(2, mqtt_double.publish_calls_);
+    UNSIGNED_LONGS_EQUAL(1050, manager.last_publish_ms);
+
+    /* And it paces again from the new stamp, not from the first one. */
+    esphome_hal_double_set_millis(1099);
+    for (int i = 0; i < 100; i++) {
+        ha_discovery_manager_run(&manager);
+    }
+    LONGS_EQUAL(2, mqtt_double.publish_calls_);
+}
+
+TEST(ha_discovery_manager_publish_backoff, pacing_never_holds_back_the_first_publish_of_a_run)
+{
+    /* A run starting in the first 50 ms of uptime: with a zero stamp the gate
+     * would read uptime as the gap and hold the first config back, so 0 must
+     * mean "nothing published yet". */
+    UNSIGNED_LONGS_EQUAL(0, manager.last_publish_ms);
+    esphome_hal_double_set_millis(10);
+    CHECK_TRUE(attempts_one_more_publish(0));
+    UNSIGNED_LONGS_EQUAL(10, manager.last_publish_ms);
+
+    /* From then on the run is paced as usual. */
+    esphome_hal_double_set_millis(59);
+    for (int i = 0; i < 100; i++) {
+        ha_discovery_manager_run(&manager);
+    }
+    LONGS_EQUAL(1, mqtt_double.publish_calls_);
+    esphome_hal_double_set_millis(60);
+    CHECK_TRUE(attempts_one_more_publish(1));
+}
+
+TEST(ha_discovery_manager_publish_backoff, pacing_window_is_rollover_safe)
+{
+    /* Stamp 16 ms before the counter wraps. */
+    esphome_hal_double_set_millis(0xFFFFFFF0u);
+    CHECK_TRUE(attempts_one_more_publish(0));
+    UNSIGNED_LONGS_EQUAL(0xFFFFFFF0u, manager.last_publish_ms);
+
+    /* 0x20 after the wrap is 48 ms on: still paced, and not restamped. */
+    esphome_hal_double_set_millis(0x20u);
+    for (int i = 0; i < 100; i++) {
+        ha_discovery_manager_run(&manager);
+    }
+    LONGS_EQUAL(1, mqtt_double.publish_calls_);
+    UNSIGNED_LONGS_EQUAL(0xFFFFFFF0u, manager.last_publish_ms);
+
+    /* 0x22 is 50 ms on: the window has elapsed across the wrap. */
+    esphome_hal_double_set_millis(0x22u);
+    CHECK_TRUE(attempts_one_more_publish(1));
+    UNSIGNED_LONGS_EQUAL(0x22u, manager.last_publish_ms);
+}
+
+TEST(ha_discovery_manager_publish_backoff, pacing_never_locks_out_after_a_gap_above_2_to_the_31)
+{
+    /* Only a publish moves the stamp, so a window that keeps reading as open
+     * can never be left. A signed elapsed test reads any gap above 2^31 ms as
+     * negative -- inside the window -- and would suppress every later attempt;
+     * the unsigned one sees the true gap. Not reachable in a minutes-long run
+     * today; this pins the form so it cannot become reachable. */
+    CHECK_TRUE(attempts_one_more_publish(0));
+    esphome_hal_double_set_millis(1000u + 0x80000000u);
+    CHECK_TRUE(attempts_one_more_publish(1));
+}
+
+TEST(ha_discovery_manager_publish_backoff, dropped_publish_still_backs_off_and_does_not_restamp)
+{
+    CHECK_TRUE(attempts_one_more_publish(0));
+    UNSIGNED_LONGS_EQUAL(1000, manager.last_publish_ms);
+
+    /* Past the pacing window the next attempt is dropped: the backoff window
+     * is armed from the attempt, and the pacing stamp stays on the last
+     * publish that went out. */
+    esphome_hal_double_set_millis(1050);
+    mqtt_double.publish_should_fail_ = true;
+    CHECK_TRUE(attempts_one_more_publish(1));
+    LONGS_EQUAL(2, mqtt_double.publish_calls_);
+    UNSIGNED_LONGS_EQUAL(1114, manager.retry_backoff_until_ms);
+    UNSIGNED_LONGS_EQUAL(1000, manager.last_publish_ms);
+
+    /* 100 ms after the last publish the pacing gate is open, but the drop's
+     * backoff still holds every attempt: pacing does not replace it. */
+    mqtt_double.publish_should_fail_ = false;
+    esphome_hal_double_set_millis(1113);
+    for (int i = 0; i < 100; i++) {
+        ha_discovery_manager_run(&manager);
+    }
+    LONGS_EQUAL(2, mqtt_double.publish_calls_);
+
+    /* At the end of the backoff the retry goes out and restamps, and the
+     * next config is paced from it. */
+    esphome_hal_double_set_millis(1114);
+    CHECK_TRUE(attempts_one_more_publish(2));
+    UNSIGNED_LONGS_EQUAL(1114, manager.last_publish_ms);
+    UNSIGNED_LONGS_EQUAL(0, manager.retry_backoff_until_ms);
+    esphome_hal_double_set_millis(1163);
+    for (int i = 0; i < 100; i++) {
+        ha_discovery_manager_run(&manager);
+    }
+    LONGS_EQUAL(3, mqtt_double.publish_calls_);
+    esphome_hal_double_set_millis(1164);
+    CHECK_TRUE(attempts_one_more_publish(3));
+}
+
+TEST(ha_discovery_manager_publish_backoff, reinit_clears_the_pacing_stamp)
+{
+    /* Every run starts unpaced: init() is what a new run goes through
+     * (DiscoveryLifecycleManager::begin_publish_()), and the next run's first
+     * config must not wait on the previous run's last one. */
+    CHECK_TRUE(attempts_one_more_publish(0));
+    CHECK_TRUE(manager.last_publish_ms != 0);
+    ha_discovery_manager_init(&manager);
+    UNSIGNED_LONGS_EQUAL(0, manager.last_publish_ms);
 }

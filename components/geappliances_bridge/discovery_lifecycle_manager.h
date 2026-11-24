@@ -157,6 +157,39 @@ class DiscoveryLifecycleManager {
   // discovery data blob, say) would reboot on every boot forever.
   static constexpr uint8_t kMaxAbortReboots = 3;
 
+  // Run-local free-heap floor (issue #209). While Cleaning or Publishing, a
+  // loop() that reads total free internal heap below this aborts the run
+  // through abort_publish_run_() -- the bounded reboot -- instead of letting
+  // it drive the device out of memory.
+  //
+  // The begin_publish_() gate cannot see this: the run's four buffers are
+  // allocated once and do not grow, but the publishes it makes are copied
+  // into ESPHome's MQTT backend queue and buffered by lwIP and the Wi-Fi
+  // driver while they drain. Measured on production bridges with the gate
+  // passing comfortably: gea-esphome-haieridu (C6, 114 688 B largest block
+  // against the 53 420 B the run needs) reached 4 836 B free mid-run and
+  // rebooted with 39 of its 171 configs published; gea-esphome-refer (C3)
+  // bottomed at 15 900 B and completed.
+  //
+  // Why 12 KiB:
+  //   - Above the ~5 KB at which haieridu died, with ~7 KB of margin for the
+  //     heap a run consumes between two samples. The floor is sampled once
+  //     per main-loop iteration (~29 ms, spikes to ~150 ms); before publish
+  //     pacing a run drew down ~76 KB in a few seconds, i.e. a few KB per
+  //     slow iteration.
+  //   - Leaves room for the abort path itself: confirm_firmware() and the
+  //     reboot-count write are NVS writes that run before the reboot, and
+  //     while Cleaning the run's 53 KB of buffers do not exist yet to be
+  //     freed first.
+  //   - Below refer's 15 900 B, so a run that completed before pacing --
+  //     measured with an API log session attached, which only lowers the
+  //     reading -- is not aborted by it. A false abort is not free: it spends
+  //     one of kMaxAbortReboots and, after a cleanup, leaves Home Assistant
+  //     without configs until the next boot republishes them.
+  // Revisit against heap_min_free measured with publish pacing on and no
+  // log session attached.
+  static constexpr uint32_t kRunFreeHeapFloorBytes = 12u * 1024u;
+
   // Why the current phase was entered. Orthogonal to the phase: the same
   // cleanup -> publish -> reboot sequence runs for every trigger, and a few
   // transitions depend on which one started it.
@@ -179,6 +212,7 @@ class DiscoveryLifecycleManager {
   //   Cleaning --kPhaseTimeoutMs with no topic removed--> Idle   (aborted, no record)
   //   Publishing --run failed--> RebootPending (budget left) / Idle (spent)
   //   Publishing --kPhaseTimeoutMs with no successful publish--> same as a failed run
+  //   Cleaning / Publishing --free heap < kRunFreeHeapFloorBytes--> same as a failed run
   //   Publishing --run complete--> RebootPending
   //   RebootPending --kRebootDelayMs elapsed--> Idle
   enum Phase : uint8_t {
@@ -234,6 +268,11 @@ class DiscoveryLifecycleManager {
     // so begin_publish_() refuses to start a run whose buffers cannot fit and
     // lets the bounded abort reboot recover the heap instead.
     uint32_t (*read_largest_free_block)(void* context);
+    // Total free internal heap in bytes. Read once per loop() while Cleaning or
+    // Publishing to enforce kRunFreeHeapFloorBytes; the entry gate above only
+    // decides whether a run may start, this bounds what it then consumes.
+    // Called from the main loop only, never from the MQTT task.
+    uint32_t (*read_free_heap)(void* context);
     // Feeds the task watchdog while waiting out the reboot delay.
     void (*feed_watchdog)(void* context);
     // Restarts the device.
@@ -324,6 +363,10 @@ class DiscoveryLifecycleManager {
   // churns. Only a reset re-coalesces it. The caller has already confirmed the
   // firmware and logged why.
   void abort_publish_run_();
+  // True, after logging why, when free heap has fallen below
+  // kRunFreeHeapFloorBytes. Main-loop-only: called from loop() while Cleaning
+  // or Publishing; the caller performs the abort.
+  bool free_heap_below_floor_(const char* phase);
 
   ha_discovery_manager_t* ha_discovery_manager_{nullptr};
   DeviceIdentityManager* device_identity_manager_{nullptr};

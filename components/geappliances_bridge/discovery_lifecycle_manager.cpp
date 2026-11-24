@@ -61,6 +61,9 @@ bool write_publish_pending(void*, bool) { return true; }
 // that need a fragmented heap inject their own value.
 uint32_t read_largest_free_block(void*) { return 0xFFFFFFFFu; }
 
+// Same fresh-boot view for the run-local floor: never below it.
+uint32_t read_free_heap(void*) { return 0xFFFFFFFFu; }
+
 void feed_watchdog(void*) {}
 
 void reboot(void*) {}
@@ -178,6 +181,13 @@ uint32_t read_largest_free_block(void*) {
   return static_cast<uint32_t>(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
 }
 
+// MALLOC_CAP_INTERNAL, not DEFAULT: what runs out during a run is the internal
+// RAM the MQTT backend's queued copies, lwIP and the Wi-Fi driver draw from.
+// The same figure ha_discovery_manager_start() logs as "free heap".
+uint32_t read_free_heap(void*) {
+  return static_cast<uint32_t>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+}
+
 void feed_watchdog(void*) { esp_task_wdt_reset(); }
 
 void reboot(void*) { esphome::App.safe_reboot(); }
@@ -235,6 +245,9 @@ void DiscoveryLifecycleManager::init(
   }
   if (this->hooks_.read_largest_free_block == nullptr) {
     this->hooks_.read_largest_free_block = &read_largest_free_block;
+  }
+  if (this->hooks_.read_free_heap == nullptr) {
+    this->hooks_.read_free_heap = &read_free_heap;
   }
   if (this->hooks_.feed_watchdog == nullptr) {
     this->hooks_.feed_watchdog = &feed_watchdog;
@@ -712,6 +725,17 @@ void DiscoveryLifecycleManager::abort_publish_run_() {
   this->reboot_start_ms_ = this->get_time_ms_();
 }
 
+bool DiscoveryLifecycleManager::free_heap_below_floor_([[maybe_unused]] const char* phase) {
+  const uint32_t free_heap = this->hooks_.read_free_heap(this->hooks_.context);
+  if (free_heap >= kRunFreeHeapFloorBytes) {
+    return false;
+  }
+  ESP_LOGE(TAG, "HA discovery %s stopped: free heap %" PRIu32 " B is below the %" PRIu32
+                " B floor; aborting before the device runs out of memory",
+           phase, free_heap, kRunFreeHeapFloorBytes);
+  return true;
+}
+
 void DiscoveryLifecycleManager::loop() {
   switch (this->phase()) {
     case kPhaseIdle:
@@ -758,6 +782,20 @@ void DiscoveryLifecycleManager::loop() {
         this->set_phase_(kPhaseIdle);
         return;
       }
+      if (this->free_heap_below_floor_("cleanup")) {
+        // Unlike the idle timeout above, this reboots: the heap is what is
+        // short, and only a reset re-coalesces it (see abort_publish_run_()).
+        // The pending-publish marker was armed before the first topic was
+        // removed, so the next boot cleans up and republishes. Destroy first
+        // so the cleanup's subscription is gone before the run state is
+        // reset, as on the timeout path. The firmware is confirmed like every
+        // other abort that reboots, so a good OTA -- whose first boot is
+        // exactly when this cleanup runs -- is not rolled back by it.
+        ha_discovery_cleanup_destroy(&this->ha_discovery_manager_->cleanup);
+        this->hooks_.confirm_firmware(this->hooks_.context);
+        this->abort_publish_run_();
+        return;
+      }
       ha_discovery_cleanup_run(&this->ha_discovery_manager_->cleanup);
       if (!ha_discovery_cleanup_is_done(&this->ha_discovery_manager_->cleanup)) {
         return;
@@ -787,6 +825,14 @@ void DiscoveryLifecycleManager::loop() {
           // Same contract as the failed-run path: the firmware is confirmed
           // regardless of the discovery outcome, the run's allocations are
           // released, and no record is saved so the next boot retries.
+          this->hooks_.confirm_firmware(this->hooks_.context);
+          this->abort_publish_run_();
+          return;
+        }
+        if (this->free_heap_below_floor_("publish")) {
+          // Same contract as the timeout above. abort_publish_run_() frees
+          // the run's buffers first, so the reboot-count write below the floor
+          // has them back to work with.
           this->hooks_.confirm_firmware(this->hooks_.context);
           this->abort_publish_run_();
           return;

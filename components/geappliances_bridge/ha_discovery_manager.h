@@ -164,6 +164,13 @@ typedef struct {
    * immediate attempt. */
   uint32_t retry_backoff_until_ms;
 
+  /* get_time_ms() at the last successful config publish of this run, for the
+   * publish pacing gate (HA_DISCOVERY_PUBLISH_PACE_INTERVAL_MS, issue #209).
+   * 0 means nothing has been published yet and disengages the gate;
+   * ha_discovery_manager_init() zeroes it, so every run's first config goes
+   * out immediately. A dropped publish does not move it. */
+  uint32_t last_publish_ms;
+
   /* Pre-computed "homeassistant/{domain}/{device_id}/" prefix to avoid
    * repeated snprintf during discovery publish. */
   char domain_topic_prefix[128];

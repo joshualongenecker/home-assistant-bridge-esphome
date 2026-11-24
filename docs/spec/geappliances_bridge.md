@@ -274,6 +274,7 @@ Cleaning --cleanup done--> Publishing
 Cleaning --kPhaseTimeoutMs with no topic removed--> Idle  (aborted, no record)
 Publishing --run failed--> RebootPending       (budget left) / Idle (spent)
 Publishing --kPhaseTimeoutMs with no successful publish--> same as a failed run
+Cleaning / Publishing --free heap < kRunFreeHeapFloorBytes--> same as a failed run  (section 11.6.1)
 Publishing --run complete--> RebootPending
 RebootPending --5 s elapsed--> Idle
 ```
@@ -328,13 +329,27 @@ After a successful discovery run, `DiscoveryLifecycleManager::finish_publish_()`
 
 A **failed** run (or one refused by the largest-free-block gate in `begin_publish_()`) skips the record and goes through `abort_publish_run_()` instead: the run's allocations are released, `kMaxAbortReboots` (3) reboots in NVS (key `0x64726162u` / "drab") bound the recovery, and each reboot gives the clean heap a failed run cannot restore. Leaving the stored record stale or absent is what makes the next boot retry — which is why both automatic retriggers (the pending-publish marker and the absent-record initial publish) check the spent budget before starting, and why a spent budget ends in a logged hold rather than another attempt.
 
+#### 11.6.1 Run-local free-heap floor
+
+The largest-free-block gate in `begin_publish_()` decides only whether a run may **start**. It cannot bound what the run then consumes: the run's four buffers are allocated once and do not grow, but every config it publishes is heap-copied into ESPHome's MQTT backend queue and buffered by lwIP and the Wi-Fi driver while it drains (issue #209). On production bridges whose gate passed comfortably, a run took `gea-esphome-haieridu` (C6, 114 688 B largest block against the 53 420 B needed) to 4 836 B free and a reboot with 39 of 171 configs published, and `gea-esphome-refer` (C3) to 15 900 B. `ha_discovery_manager` paces its publishes to keep that in-flight state small (section 8.7 of `ha_discovery_manager.md`); the floor is the safety net behind it.
+
+While the phase is `kPhaseCleaning` or `kPhasePublishing`, every `loop()` reads total free internal heap through the `read_free_heap` hook (`heap_caps_get_free_size(MALLOC_CAP_INTERNAL)` on the device; the unit-test default never reports a low heap). Below `kRunFreeHeapFloorBytes` (12 KiB) it logs `HA discovery <cleanup|publish> stopped: free heap N B is below the 12288 B floor; aborting before the device runs out of memory`, confirms the firmware, and aborts through `abort_publish_run_()` — the same bounded reboot a failed run takes. While Cleaning it first destroys the cleanup module (unsubscribing it, as the cleanup idle timeout does); unlike that timeout it reboots, because the heap is what is short and only a reset re-coalesces it. The pending-publish marker armed before the first removal stays set, so the next boot cleans up and republishes. Exactly the floor is not below it. The check runs on the main loop only, never from the MQTT task, and is not consulted in any other phase.
+
+Why 12 KiB:
+
+- Above the ~5 KB at which haieridu died, with ~7 KB of margin for what a run consumes between two samples: the floor is sampled once per main-loop iteration (~29 ms, spikes to ~150 ms), and before pacing a run drew down ~76 KB in a few seconds.
+- Room for the abort path itself: `confirm_firmware()` and the reboot-count write are NVS writes that happen before the reboot, and while Cleaning the run's 53 KB of buffers do not yet exist to be freed first. While Publishing, `abort_publish_run_()` frees them before its own NVS write.
+- Below refer's 15 900 B, so a run that completed before pacing — measured with an API log session attached, which only lowers the reading — is not aborted by it. A false abort is not free: it spends one of `kMaxAbortReboots` and, after a cleanup, leaves Home Assistant without configs until the next boot republishes them.
+
+The value is to be revisited against `heap_min_free` measured with pacing on and no log session attached.
+
 ### 11.7 Integration with ha_discovery_manager
 
 The bridge owns a `ha_discovery_manager_t` instance (`ha_discovery_manager_`). The manager is driven by `DiscoveryLifecycleManager` from `loop()` via delegation:
 
 - **Configuration:** `ha_discovery_manager_configure()` is called when discovery starts (during any discovery path: initial publish, change-triggered cleanup, or Discovery Refresh), passing the device identity (ID, model, serial, appliance type), the `filter_config_topics_` flag, the ERD cache, and the MQTT client interface.
 - **Start:** `ha_discovery_manager_start()` transitions the manager from `IDLE` to `BUILDING`.
-- **Drive:** `ha_discovery_manager_run()` is called each `loop()` iteration while `ha_discovery_manager_is_processing()` returns `true`. This advances the manager through its state machine, decompressing JSONL chunks and publishing discovery payloads at a rate-limited interval (50 ms).
+- **Drive:** `ha_discovery_manager_run()` is called each `loop()` iteration while `ha_discovery_manager_is_processing()` returns `true`. This advances the manager through its state machine, decompressing JSONL chunks and publishing discovery payloads, at most one per `HA_DISCOVERY_PUBLISH_PACE_INTERVAL_MS` (50 ms) between successful publishes (section 8.7 of `ha_discovery_manager.md`). Each iteration first checks the run-local free-heap floor (section 11.6.1).
 - **Completion:** When the manager reaches `COMPLETE` or `FAILED` state, `ha_discovery_manager_is_processing()` returns `false`, signaling that discovery publishing is done.
 
 ### 11.8 Integration with ha_discovery_cleanup
@@ -345,7 +360,7 @@ The cleanup module is accessed via `ha_discovery_manager_.cleanup` and driven by
 
 - **Configuration:** `ha_discovery_cleanup_configure()` is called with the device ID, MQTT client interface, and time source.
 - **Start:** `ha_discovery_cleanup_start()` begins the cleanup process.
-- **Drive:** `ha_discovery_cleanup_run()` is called each `loop()` iteration while the phase is `kPhaseCleaning`.
+- **Drive:** `ha_discovery_cleanup_run()` is called each `loop()` iteration while the phase is `kPhaseCleaning`, after the cleanup idle timeout and the run-local free-heap floor (section 11.6.1) have been checked.
 - **Completion:** `ha_discovery_cleanup_is_done()` returns `true` when all phases are complete. `DiscoveryLifecycleManager` then destroys the cleanup module, resets the discovery manager, and proceeds to publish fresh discovery topics.
 
 ### 11.9 Reboot with safe_reboot()

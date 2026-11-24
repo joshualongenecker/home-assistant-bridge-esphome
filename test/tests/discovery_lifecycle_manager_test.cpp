@@ -81,6 +81,10 @@ struct HookRecorder {
   int pending_write_calls{0};
   uint32_t largest_block{0xFFFFFFFFu};
   int largest_block_calls{0};
+  /* Total free heap the run-local floor is told about (0xFFFFFFFF = never
+   * below it). */
+  uint32_t free_heap{0xFFFFFFFFu};
+  int free_heap_calls{0};
 
   /* Order of the two effects that have to stay in a specific order: the record
    * save and the pending-marker clear. Each records the sequence number of the
@@ -172,6 +176,12 @@ uint32_t hook_largest_block(void* context) {
   auto* recorder = static_cast<HookRecorder*>(context);
   recorder->largest_block_calls++;
   return recorder->largest_block;
+}
+
+uint32_t hook_free_heap(void* context) {
+  auto* recorder = static_cast<HookRecorder*>(context);
+  recorder->free_heap_calls++;
+  return recorder->free_heap;
 }
 
 void hook_availability(void* context, ha_discovery_manager_t*) {
@@ -269,6 +279,7 @@ TEST_GROUP(discovery_lifecycle_manager)
     hooks.read_publish_pending = &hook_pending_read;
     hooks.write_publish_pending = &hook_pending_write;
     hooks.read_largest_free_block = &hook_largest_block;
+    hooks.read_free_heap = &hook_free_heap;
     hooks.feed_watchdog = &hook_watchdog;
     hooks.reboot = &hook_reboot;
     hooks.context = &hooks_;
@@ -1055,6 +1066,139 @@ TEST(discovery_lifecycle_manager, publishing_progress_resets_the_idle_timeout)
   CHECK_EQUAL(1, (int) hooks_.abort_count);
   CHECK_EQUAL(0, hooks_.save_calls);
   CHECK_EQUAL(ha_discovery_state_idle, manager_.state);
+}
+
+/* ------------------------------------------------------------------ */
+/* run-local free-heap floor (issue #209)                              */
+/* ------------------------------------------------------------------ */
+
+TEST(discovery_lifecycle_manager, publishing_below_the_heap_floor_aborts_into_the_bounded_reboot)
+{
+  /* The haieridu failure: the entry gate passed with room to spare and the run
+   * still took the device to ~5 KB free. Crossing the floor mid-run takes the
+   * same path as a failed run instead of letting it reach out-of-memory. */
+  enter_publishing();
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhasePublishing, lifecycle_.phase());
+
+  hooks_.free_heap = DiscoveryLifecycleManager::kRunFreeHeapFloorBytes - 1;
+  lifecycle_.loop();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+  /* Bounded: one reboot from the budget, nothing recorded, the run's
+   * allocations released, and the firmware still confirmed. */
+  CHECK_EQUAL(1, (int) hooks_.abort_count);
+  CHECK_EQUAL(0, hooks_.save_calls);
+  CHECK_EQUAL(1, hooks_.confirm_calls);
+  CHECK_EQUAL(ha_discovery_state_idle, manager_.state);
+  CHECK_TRUE(manager_.payload_buf == nullptr);
+  CHECK(!lifecycle_.initial_publish_done());
+
+  esphome_hal_double_set_millis(DiscoveryLifecycleManager::kRebootDelayMs);
+  lifecycle_.loop();
+  CHECK_EQUAL(1, hooks_.reboot_calls);
+
+  /* Nothing was recorded, so the next boot's change check retries. */
+  lifecycle_.check_discovery_changes(identity_.get_device_id());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedInitial, lifecycle_.phase());
+}
+
+TEST(discovery_lifecycle_manager, publishing_at_the_heap_floor_keeps_running)
+{
+  /* Exactly the floor is not below it: this pins the comparison direction. */
+  hooks_.free_heap = DiscoveryLifecycleManager::kRunFreeHeapFloorBytes;
+  enter_publishing();
+  for (int i = 0; i < 10; i++) {
+    lifecycle_.loop();
+  }
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhasePublishing, lifecycle_.phase());
+  CHECK_EQUAL(0, (int) hooks_.abort_count);
+  CHECK_EQUAL(0, hooks_.confirm_calls);
+  /* Checked on every Publishing iteration, not once at entry. */
+  CHECK_EQUAL(10, hooks_.free_heap_calls);
+
+  /* And a run that stays above it completes normally. */
+  end_publish_run(ha_discovery_state_complete);
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
+  CHECK_EQUAL(1, hooks_.save_calls);
+  CHECK_EQUAL(0, (int) hooks_.abort_count);
+}
+
+TEST(discovery_lifecycle_manager, cleaning_below_the_heap_floor_aborts_into_the_bounded_reboot)
+{
+  /* The cleanup's own churn is the other half of a run: on refer a cleanup took
+   * free heap from 30 388 B to 15 172 B. Unlike the cleanup idle timeout, this
+   * reboots: the heap is what is short and only a reset gives it back. */
+  enter_cleaning();
+  manager_.cleanup.state = ha_cleanup_state_cleaning;
+  CHECK_TRUE(hooks_.publish_pending);
+
+  hooks_.free_heap = DiscoveryLifecycleManager::kRunFreeHeapFloorBytes - 1;
+  lifecycle_.loop();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseRebootPending, lifecycle_.phase());
+  CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
+  CHECK_EQUAL(1, (int) hooks_.abort_count);
+  CHECK_EQUAL(0, hooks_.save_calls);
+  /* Confirmed: an OTA's first boot is when this cleanup runs, and the reboot
+   * must not roll a good OTA back. */
+  CHECK_EQUAL(1, hooks_.confirm_calls);
+  /* The cleanup is torn down (destroy() memsets it back to idle) and its topic
+   * queue released. */
+  CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
+  CHECK_TRUE(manager_.cleanup.topic_buf == nullptr);
+  /* The marker armed before the first removal stays set, so the next boot
+   * cleans up and republishes even though the stored record still matches. */
+  CHECK_TRUE(hooks_.publish_pending);
+
+  esphome_hal_double_set_millis(DiscoveryLifecycleManager::kRebootDelayMs);
+  lifecycle_.loop();
+  CHECK_EQUAL(1, hooks_.reboot_calls);
+}
+
+TEST(discovery_lifecycle_manager, cleaning_at_the_heap_floor_keeps_running)
+{
+  hooks_.free_heap = DiscoveryLifecycleManager::kRunFreeHeapFloorBytes;
+  enter_cleaning();
+  manager_.cleanup.state = ha_cleanup_state_cleaning;
+  for (int i = 0; i < 10; i++) {
+    lifecycle_.loop();
+  }
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseCleaning, lifecycle_.phase());
+  CHECK_EQUAL(0, (int) hooks_.abort_count);
+  CHECK_EQUAL(10, hooks_.free_heap_calls);
+}
+
+TEST(discovery_lifecycle_manager, the_heap_floor_respects_a_spent_abort_budget)
+{
+  /* The floor aborts through abort_publish_run_(), so it inherits the bound:
+   * with the budget spent it stays up instead of rebooting again. */
+  hooks_.abort_count = DiscoveryLifecycleManager::kMaxAbortReboots;
+  enter_publishing();
+
+  hooks_.free_heap = DiscoveryLifecycleManager::kRunFreeHeapFloorBytes - 1;
+  lifecycle_.loop();
+
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
+  CHECK_EQUAL(ha_discovery_state_idle, manager_.state);
+  CHECK_EQUAL((int) DiscoveryLifecycleManager::kMaxAbortReboots, (int) hooks_.abort_count);
+  CHECK_EQUAL(0, hooks_.reboot_calls);
+}
+
+TEST(discovery_lifecycle_manager, the_heap_floor_is_not_read_outside_a_run)
+{
+  /* Low heap outside Cleaning/Publishing is not the run's doing and aborts
+   * nothing: idle, queued and reboot-pending loops never consult the floor. */
+  hooks_.free_heap = 0;
+  lifecycle_.loop();
+  bridge_ready = false;
+  lifecycle_.trigger_initial_discovery();
+  lifecycle_.loop();
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedInitial, lifecycle_.phase());
+  CHECK_EQUAL(0, hooks_.free_heap_calls);
 }
 
 /* ------------------------------------------------------------------ */

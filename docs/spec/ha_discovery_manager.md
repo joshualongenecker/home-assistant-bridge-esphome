@@ -75,8 +75,8 @@ void ha_discovery_manager_init(ha_discovery_manager_t* self);
 ```
 
 `init()` MUST:
-- Zero the struct with `memset` (which also clears the §8.6 publish-backoff window, so every run
-  starts with an immediate attempt)
+- Zero the struct with `memset` (which also clears the §8.6 publish-backoff window and the §8.7
+  pacing stamp `last_publish_ms`, so every run starts with an immediate attempt)
 - Install the default time source: `get_time_ms = esphome::millis` (see §3.2.2)
 - Set `state = ha_discovery_state_idle`
 - On ESP-IDF:
@@ -184,6 +184,8 @@ Returns immediately, doing no work, when:
 - `get_time_ms` is NULL — only after `cleanup()` zeroed the struct, whose `state` is then IDLE and
   rejected by the check above
 - A publish-backoff window (§8.6) is still open
+- Fewer than `HA_DISCOVERY_PUBLISH_PACE_INTERVAL_MS` (50 ms) have passed since the run's last
+  successful publish (§8.7)
 
 On non-ESP-IDF: no-op.
 
@@ -418,7 +420,66 @@ appliance, common + energy + range = 3605 entities — converges in about 3605 �
 against ≈ 17 min at 250 ms. A value below `L` buys nothing: the retry would fire on the next
 iteration anyway. An unreachable broker fails the run either way. `ha_discovery_cleanup` uses the same
 64 ms window for its removal publishes (§8.2 of `ha_discovery_cleanup.md`), so all three publish
-paths — cache values, discovery config, cleanup removals — now back off identically.
+paths — cache values, discovery config, cleanup removals — now back off identically. (The §8.7
+pacing gate adds to that per-entity cost: the attempt after a successful publish waits for the
+50 ms interval first, so a congested run of that size takes roughly 9 min — still well inside the
+idle timeout, which only needs one success per 5 min.)
+
+### 8.7 Publish Pacing
+
+A run publishes at most one config per `HA_DISCOVERY_PUBLISH_PACE_INTERVAL_MS` (50 ms, i.e. 20 per
+second), measured between **successful** publishes (issue #209).
+
+**Why.** The run's four buffers are allocated once by `start()` and never grow, but every config it
+publishes is copied again below it: ESPHome's `MQTTBackendESP32::enqueue_()` heap-copies the topic
+and payload of each queued publish into a 29-element pool, and lwIP and the Wi-Fi driver buffer
+whatever the backend task has sent but the link has not yet drained. Publishing one config per
+main-loop iteration (~34/s at `L ≈ 29 ms`) keeps that pool full — the §8.6 backoff only engages
+once it already is. On production bridges whose entry heap gate passed comfortably, a run took a
+C6 (`gea-esphome-haieridu`) to 4 836 B free and a reboot with 39 of 171 configs, and a C3
+(`gea-esphome-refer`) to 15 900 B. Pacing the producer below the drain rate keeps a handful of
+configs in flight instead of 29, bounding the backend copies, the network buffering and the
+interleaved log publishes at once without needing to know how the heap splits between them.
+
+**Why 50 ms.** A config is under ~1 KB, so 20 per second is ~20 KB/s, well below what a healthy
+link drains; a 129–171-config run takes 7–9 s, against the 10–11 s already observed with drops and
+retries. It is a starting point to tune against the device's `heap_min_free`, not a value derived
+from a measured drain rate. Filter-disabled runs pay the most: 3605 entities take ~3 min instead
+of ~2, still far inside the publish phase's idle timeout (one success per 5 min).
+
+**Gate.** `run()` checks the gate right after the §8.6 backoff and before any other work:
+
+```c
+if (self->last_publish_ms != 0 &&
+    (uint32_t)(self->get_time_ms() - self->last_publish_ms)
+        < HA_DISCOVERY_PUBLISH_PACE_INTERVAL_MS) {
+    return;
+}
+```
+
+- **Before any work, not just before the publish.** A gate at the publish would re-parse the line
+  and rebuild the payload on every suppressed call. The cost is that a chunk decompression or
+  category step falling inside the window waits too; only the first one does, because only a
+  publish moves the stamp.
+- **Stamped on success only**, from the attempt's timestamp (the same `t_publish` §8.6 arms its
+  window from). A dropped publish moves nothing, and the §8.6 backoff still governs the retry:
+  pacing adds a floor between successes, it does not replace the backoff.
+- **`0` means nothing has been published in this run yet** and disengages the gate, so a run's first
+  config is never held back however early in uptime the run starts. `init()` zeroes the stamp for
+  every run. A publish landing in a millisecond where `get_time_ms()` reads `0` (boot, or a 2^32 ms
+  wrap) stores `0` again and lets one more publish through unpaced; the next one stores a non-zero
+  stamp.
+- **The elapsed test is an unsigned modulo difference**, as in
+  `erd_cache_mqtt_publisher_signal_work()` (PR #184). The signed form reads any gap above 2^31 ms as
+  negative — inside the window — and since only a publish moves the stamp, a window that reads as
+  open could never be left. A run lasts minutes, so that gap is not reachable today; the unsigned
+  form makes the gate correct without relying on it. Its only false suppression is a stamp a whole
+  number of wraps plus < 50 ms old, which expires inside the window by itself.
+
+`DiscoveryLifecycleManager` adds a run-local free-heap floor on top of this
+(`kRunFreeHeapFloorBytes`, see `geappliances_bridge.md`): pacing bounds the in-flight publishes in
+the common case, and the floor aborts the run into the bounded reboot if something else — a stalled
+link, a large log burst — still drives the heap down.
 
 ---
 
@@ -479,7 +540,8 @@ There are no heap allocations during discovery. All buffers are pre-allocated wi
 
 ### 10.1 One Entity Per Call
 
-`run()` publishes exactly one entity per call, then returns to the main loop. This keeps main-loop iteration times low and allows other tasks (MQTT callbacks, WDT feeding, etc.) to run between publishes. Filtered entities (ERD not registered, paired ERD not registered, payload too large) are also processed within the same call and do not cause a return — the inner loop continues to the next line until a publish succeeds or the chunk is exhausted.
+`run()` publishes at most one entity per call, then returns to the main loop, and no more than one
+per `HA_DISCOVERY_PUBLISH_PACE_INTERVAL_MS` across calls (§8.7). This keeps main-loop iteration times low and allows other tasks (MQTT callbacks, WDT feeding, etc.) to run between publishes. Filtered entities (ERD not registered, paired ERD not registered, payload too large) are also processed within the same call and do not cause a return — the inner loop continues to the next line until a publish succeeds or the chunk is exhausted.
 
 ### 10.2 Chunk Boundaries
 
