@@ -179,8 +179,8 @@ class DiscoveryLifecycleManager {
   // 2 120-11 976 B and every run completed. So on the two nodes that
   // motivated #209 this floor is unreachable: a silent floor is not
   // evidence of a healthy run, and a trough below it is not evidence of
-  // danger (haieridu completed at 2 120 B free). Pacing is the fix; what
-  // protects the run's allocation is the largest-free-block gate.
+  // danger (haieridu completed at 2 120 B free). What protects the run's
+  // allocation is the largest-free-block gate in begin_publish_().
   //
   // What it is for: a drain that persists between publishes -- a stalled
   // link or broker leaving backend copies queued while the run keeps

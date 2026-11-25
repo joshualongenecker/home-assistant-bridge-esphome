@@ -448,8 +448,16 @@ validation (PR #215: 8 paced runs on refer and haieridu) completed every run wit
 set; the publish phase took ~38 s for refer's 137 configs and 13–16 s for haieridu's 171, longer
 than the 50 ms interval alone implies. Do not tune it against the `heap_min_free`
 sensor: it is monotone since boot and every run ends in a reboot, so the run's trough is never
-published. Use an in-firmware heap read instead. Filter-disabled runs pay the most: 3605 entities take ~3 min instead
-of ~2, still far inside the publish phase's idle timeout (one success per 5 min).
+published. Use an in-firmware heap read instead. Filter-disabled runs pay the most: 3605 entities take ~3 min
+instead of ~2, still far inside the publish phase's idle timeout (one success per 5 min).
+
+**Evidence: insurance, not a demonstrated fix.** An A/B on `gea-esphome-refer` (PR #215 review)
+ran 3 unpaced refreshes on the `develop` image and 8 paced runs across refer and haieridu on this
+change. All 11 completed with the full config set; the #209 failure did not reproduce in either
+configuration. Refer's publish phase took ~37 s unpaced and ~38 s paced, so pacing costs about 1 s
+there, and refer's main loop still measured 295 ms during a paced run. Pacing stays because it is
+cheap and bounds the backend pool by construction, but no run has yet shown it preventing a
+failure. What held in every run was the entry gate on the largest free block.
 
 **Gate.** `run()` checks the gate right after the §8.6 backoff and before any other work:
 
@@ -481,8 +489,7 @@ if (self->last_publish_ms != 0 &&
   number of wraps plus < 50 ms old, which expires inside the window by itself.
 
 `DiscoveryLifecycleManager` adds a run-local free-heap floor on top of this
-(`kRunFreeHeapFloorBytes`, see `geappliances_bridge.md` §11.6.1). Pacing is the fix; the floor is
-only a backstop for a drain that persists *between* publishes, such as a stalled link. It samples
+(`kRunFreeHeapFloorBytes`, see `geappliances_bridge.md` §11.6.1). The floor is only a backstop for a drain that persists *between* publishes, such as a stalled link. It samples
 between publishes, so it never sees the transient inside a publish call, and on the validation
 nodes it never came close to firing.
 

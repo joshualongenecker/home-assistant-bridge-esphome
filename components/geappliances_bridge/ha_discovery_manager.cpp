@@ -63,16 +63,21 @@ static const uint32_t HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS = 64;
  * Wi-Fi driver buffer whatever the backend task has sent but the link has not
  * drained. Publishing at loop rate keeps that pool full -- the drop backoff
  * above engages only once it already is -- which is how production
- * gea-esphome-haieridu hit 4 836 B free mid-run. Pacing the producer below the drain rate keeps a
- * handful of configs in flight instead of 29, and bounds all three terms at
- * once without having to know how the heap splits between them.
+ * gea-esphome-haieridu hit 4 836 B free mid-run. Pacing the producer below
+ * the drain rate keeps a handful of configs in flight instead of 29, and
+ * bounds all three terms at once without having to know how the heap splits
+ * between them.
  *
  * Why 50 ms: a config is under ~1 KB, so 20 per second is ~20 KB/s, far below
  * what a healthy Wi-Fi link drains, and the measured 129-171-config runs take
  * 7-9 s against the 10-11 s already observed with drops and retries. It is
  * the starting point issue #209 asked for; it is not derived from a measured
- * drain rate. Eight paced runs on refer and haieridu all completed (PR #215
- * hardware validation). Tune it with an in-firmware heap read, not the
+ * drain rate.
+ *
+ * It is insurance, not a demonstrated fix: in the PR #215 A/B, 3 unpaced and
+ * 8 paced runs on refer and haieridu all completed, the #209 failure did not
+ * reproduce either way, and pacing cost refer ~1 s per run (37 s -> 38 s).
+ * What held in every run was the largest-free-block entry gate. Tune it with an in-firmware heap read, not the
  * heap_min_free sensor: every run ends in a reboot that resets that sensor
  * before the run's trough is published.
  *
