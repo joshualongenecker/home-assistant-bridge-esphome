@@ -2143,6 +2143,10 @@ class RestartTestBridge : public GeappliancesBridge {
   using GeappliancesBridge::restart_requested_;
   using GeappliancesBridge::erd_registry_;
   using GeappliancesBridge::valid_erds_fingerprint_;
+  using GeappliancesBridge::discovery_lifecycle_manager_;
+  using GeappliancesBridge::ha_discovery_manager_;
+  using GeappliancesBridge::device_identity_manager_;
+  using GeappliancesBridge::mqtt_client_adapter_;
 };
 
 static size_t count_write_topic_subscriptions(esphome::mqtt::MqttTestDouble* mqtt)
@@ -2250,6 +2254,72 @@ TEST(startup_integration, restart_does_not_subscribe_the_write_topic_twice)
   delete b;
 }
 
+/* The stored record a previous boot's publish saved, for the change check in
+ * the issue #212 test below. */
+static DiscoveryLifecycleManager::DiscoveryRecord g_stored_record;
+
+TEST(startup_integration, a_configured_board_silent_at_boot_does_not_republish)
+{
+  // waterheaters3 (issue #212): twelve custom ERDs on board 0x62, which did
+  // not answer at one boot, so none of them reached the cache
+  RestartTestBridge* b = new RestartTestBridge();
+  b->set_gea3_uart(mock_uart);
+  const uint16_t board_erds[] = {0xF400, 0xF401};
+  const uint8_t board_addresses[] = {0x62, 0x62};
+  b->add_custom_erds_with_addresses(board_erds, board_addresses, 2);
+  b->setup();
+
+  tiny_erd_t valid[] = {0x0001, 0x0002, 0x0008, 0xF400, 0xF401};
+  b->erd_registry_.set_valid_erds(valid, 5);
+  uint8_t data[] = {0x01};
+  CHECK_TRUE(erd_cache_update(&b->erd_cache_, 0x0008, 0xC0, data, sizeof(data)));
+
+  // The boot the last publish ran on: board 0x62 answered
+  CHECK_TRUE(erd_cache_update(&b->erd_cache_, 0xF400, 0x62, data, sizeof(data)));
+  CHECK_TRUE(erd_cache_update(&b->erd_cache_, 0xF401, 0x62, data, sizeof(data)));
+  const uint32_t fp_alive = b->valid_erds_fingerprint_();
+  CHECK(fp_alive != 0u);
+
+  // This boot: it did not
+  erd_cache_clear(&b->erd_cache_);
+  CHECK_TRUE(erd_cache_update(&b->erd_cache_, 0x0008, 0xC0, data, sizeof(data)));
+  const uint32_t fp_silent = b->valid_erds_fingerprint_();
+  CHECK_EQUAL(fp_alive, fp_silent);
+
+  // The change check run with the record the last publish saved queues nothing
+  DiscoveryLifecycleManager::Hooks hooks{};
+  hooks.apply_mqtt_availability = +[](void*, ha_discovery_manager_t*) {};
+  hooks.load_discovery_record = +[](void*, DiscoveryLifecycleManager::DiscoveryRecord* out) {
+    *out = g_stored_record;
+    return true;
+  };
+  hooks.save_discovery_record = +[](void*, const DiscoveryLifecycleManager::DiscoveryRecord&) {};
+  b->discovery_lifecycle_manager_.init(
+      &b->ha_discovery_manager_, b->device_identity_manager_, b->mqtt_client_adapter_,
+      &b->erd_cache_, true, true, true, +[](void*) { return false; }, nullptr, hooks);
+
+  g_stored_record = DiscoveryLifecycleManager::DiscoveryRecord{};
+  g_stored_record.version = DiscoveryLifecycleManager::kRecordVersion;
+  g_stored_record.hash = ha_discovery_manager_data_hash(&b->ha_discovery_manager_);
+  g_stored_record.appliance_api_parsing = true;
+  g_stored_record.filter_config_topics = true;
+  g_stored_record.valid_erds_fingerprint = fp_alive;
+
+  b->discovery_lifecycle_manager_.set_valid_erds_fingerprint(fp_silent);
+  b->discovery_lifecycle_manager_.check_discovery_changes("WaterHeater_TEST");
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, b->discovery_lifecycle_manager_.phase());
+
+  // The same check does republish on a fingerprint that really changed, so
+  // the idle phase above is the fingerprint's doing, not the harness's
+  g_stored_record.valid_erds_fingerprint = fp_alive ^ 1u;
+  b->discovery_lifecycle_manager_.check_discovery_changes("WaterHeater_TEST");
+  CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedCleanup,
+              b->discovery_lifecycle_manager_.phase());
+
+  CHECK(b->teardown());
+  delete b;
+}
+
 TEST(startup_integration, valid_erds_fingerprint_follows_the_valid_erd_set)
 {
   RestartTestBridge* b = new RestartTestBridge();
@@ -2279,12 +2349,33 @@ TEST(startup_integration, valid_erds_fingerprint_follows_the_valid_erd_set)
   b->erd_registry_.set_valid_erds(set_a_shuffled, 4);
   CHECK_EQUAL(fp_a, b->valid_erds_fingerprint_());
 
-  // A secondary board showing up in the cache changes it too
+  // Boards answering at this boot do not change it (issue #212): the cache is
+  // not an input
   uint8_t data[] = {0x01};
   CHECK_TRUE(erd_cache_update(&b->erd_cache_, 0x7130, 0xC0, data, sizeof(data)));
-  const uint32_t fp_host_only = b->valid_erds_fingerprint_();
   CHECK_TRUE(erd_cache_update(&b->erd_cache_, 0x7130, 0xC1, data, sizeof(data)));
-  CHECK(b->valid_erds_fingerprint_() != fp_host_only);
+  CHECK_EQUAL(fp_a, b->valid_erds_fingerprint_());
+
+  // A primary-board custom ERD names no board, so it does not change it either
+  b->add_custom_erd(0xF093);
+  CHECK_EQUAL(fp_a, b->valid_erds_fingerprint_());
+
+  // A secondary board the configuration names does
+  const uint16_t board_erds[] = {0xF400};
+  const uint8_t board_addresses[] = {0x62};
+  b->add_custom_erds_with_addresses(board_erds, board_addresses, 1);
+  const uint32_t fp_board_62 = b->valid_erds_fingerprint_();
+  CHECK(fp_board_62 != fp_a);
+
+  // ... once per board: another ERD on the same board does not
+  const uint16_t more_board_erds[] = {0xF401};
+  b->add_custom_erds_with_addresses(more_board_erds, board_addresses, 1);
+  CHECK_EQUAL(fp_board_62, b->valid_erds_fingerprint_());
+
+  // ... and another board does
+  const uint8_t other_board[] = {0x63};
+  b->add_custom_erds_with_addresses(more_board_erds, other_board, 1);
+  CHECK(b->valid_erds_fingerprint_() != fp_board_62);
 
   CHECK(b->teardown());
   delete b;

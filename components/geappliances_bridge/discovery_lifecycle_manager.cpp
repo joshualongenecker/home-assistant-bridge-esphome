@@ -532,6 +532,8 @@ void DiscoveryLifecycleManager::begin_cleanup_() {
   } else {
     ESP_LOGI(TAG, "Starting OTA-triggered HA discovery cleanup...");
   }
+  this->cleanup_completed_ = false;
+  this->cleanup_removed_ = 0;
   this->phase_start_ms_ = this->get_time_ms_();
   // Idle timeout: measures silence from phase entry until the module removes
   // its first topic. The snapshot is seeded from the module instead of assumed
@@ -637,6 +639,27 @@ void DiscoveryLifecycleManager::finish_publish_() {
   const bool refresh_run = this->trigger_ == kTriggerDiscoveryRefresh;
   this->trigger_ = kTriggerNone;
 
+  // How many configs the republish put back against how many the cleanup took
+  // down. The cleanup removes every retained config under the device, i.e. the
+  // previous run's set, so a shortfall is entities Home Assistant is about to
+  // delete -- the loss in issue #212 was visible only to an external monitor.
+  if (this->cleanup_completed_) {
+    [[maybe_unused]] const uint32_t published =
+        ha_discovery_manager_total_published(this->ha_discovery_manager_);
+    [[maybe_unused]] const uint32_t removed = this->cleanup_removed_;
+    [[maybe_unused]] const char* reason = this->next_valid_erds_republishes_ != 0 ? "valid-ERD change" : trigger_kind;
+    if (published < removed) {
+      ESP_LOGI(TAG, "%s republish: %" PRIu32 " configs published, %" PRIu32
+                    " removed by the cleanup; %" PRIu32 " fewer than before",
+               reason, published, removed, removed - published);
+    } else {
+      ESP_LOGI(TAG, "%s republish: %" PRIu32 " configs published, %" PRIu32
+                    " removed by the cleanup",
+               reason, published, removed);
+    }
+  }
+  this->cleanup_completed_ = false;
+
   DiscoveryRecord record{};
   record.version = kRecordVersion;
   record.hash = ha_discovery_manager_data_hash(this->ha_discovery_manager_);
@@ -688,6 +711,7 @@ void DiscoveryLifecycleManager::finish_publish_() {
 void DiscoveryLifecycleManager::abort_publish_run_() {
   ha_discovery_manager_init(this->ha_discovery_manager_);
   this->trigger_ = kTriggerNone;
+  this->cleanup_completed_ = false;
 
   const uint8_t armed = this->hooks_.read_abort_reboot_count(this->hooks_.context);
   if (armed >= kMaxAbortReboots) {
@@ -763,6 +787,11 @@ void DiscoveryLifecycleManager::loop() {
         return;
       }
       ESP_LOGI(TAG, "HA discovery cleanup complete, publishing fresh discovery...");
+      // Kept for finish_publish_(): begin_publish_() re-inits the manager,
+      // which zeroes the cleanup module's count.
+      this->cleanup_removed_ =
+        ha_discovery_cleanup_total_removed(&this->ha_discovery_manager_->cleanup);
+      this->cleanup_completed_ = true;
       ha_discovery_cleanup_destroy(&this->ha_discovery_manager_->cleanup);
       this->begin_publish_();
       return;

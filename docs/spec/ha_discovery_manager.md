@@ -6,14 +6,14 @@
 
 The HA Discovery Manager generates and publishes Home Assistant MQTT discovery payloads for GE Appliances devices. It decompresses embedded JSONL entity definitions (stored as zlib-compressed data in `ha_discovery_data.h`), parses each line to extract entity metadata, builds a valid Home Assistant discovery payload, and publishes it to the appropriate `homeassistant/{domain}/{device_id}/{entity_id}/config` topic with `retain=true`.
 
-Discovery runs once at device startup. The manager processes categories relevant to the appliance type, filtering out entities whose ERDs are not registered in the device's ERD cache.
+Discovery runs once at device startup. The manager processes categories relevant to the appliance type, filtering out entities whose ERDs are not registered in the device's ERD cache. The one exception is a configured custom ERD on an explicit board (§3.2.3): its line is published even when the ERD is not cached, so a secondary board that is silent at one boot leaves stale entities in Home Assistant rather than deleted ones (issue #212).
 
 ### 1.2 Responsibilities
 
 - Build a sorted ERD list from the cache for binary-search filtering
 - Decompress embedded JSONL chunks sequentially (one at a time into a shared buffer)
 - Parse JSONL lines and extract entity fields (name, domain, ERD ID, templates, etc.)
-- Filter entities by checking ERD registration (binary search on sorted array)
+- Filter entities by checking ERD registration (binary search on sorted array), except configured custom ERDs on an explicit board (§3.2.3)
 - Build Home Assistant discovery payloads with proper JSON escaping
 - Publish discovery payloads to MQTT (one entity per `run()` call)
 - Track discovery progress (categories, chunks, lines) with cooperative yielding via early return
@@ -76,7 +76,10 @@ void ha_discovery_manager_init(ha_discovery_manager_t* self);
 
 `init()` MUST:
 - Zero the struct with `memset` (which also clears the §8.6 publish-backoff window, so every run
-  starts with an immediate attempt)
+  starts with an immediate attempt), preserving the custom profile set by
+  `ha_discovery_manager_set_custom_data()` and the configured board ERDs set by
+  `ha_discovery_manager_set_configured_board_erds()` (§3.2.3): both are set once by the bridge, and
+  the lifecycle re-inits the manager before every run
 - Install the default time source: `get_time_ms = esphome::millis` (see §3.2.2)
 - Set `state = ha_discovery_state_idle`
 - On ESP-IDF:
@@ -141,6 +144,38 @@ Test seam (rec 6; mirrors `erd_bridge_poll_set_time_fn`). `init()` installs `esp
 unconditionally, so this MUST be called **after** `init()`. It lets a test drive the §8.6 window
 against a deterministic clock instead of the HAL double's frozen counter. A NULL argument restores
 the default.
+
+### 3.2.3 Set Configured Board ERDs
+
+```c
+typedef struct {
+  uint16_t erd;
+  uint8_t board_address;
+} ha_discovery_board_erd_t;
+
+void ha_discovery_manager_set_configured_board_erds(ha_discovery_manager_t* self,
+  const ha_discovery_board_erd_t* erds, uint16_t count);
+```
+
+The custom ERDs the configuration names, as `GeappliancesBridge` holds them (`custom_erds_`, filled by
+`add_custom_erd()` / `add_custom_erds_with_addresses()`). The bridge lends its own array in `setup()`; the
+layout matches `custom_erd_entry_t` and `probe_entry_t`, pinned by `static_assert`s in `geappliances_bridge.h`.
+The array is borrowed, may be unsorted, and survives `init()`. `NULL` or a zero count turns the exemption off.
+
+A JSONL line is exempt from the cache filter (§5.4 step 3) when it carries an explicit board address (`a`)
+and its `(ERD, board)` pair is in the list; a paired ERD (`p`) on such a line passes when it is cached or
+when `(paired ERD, board)` is in the list too. A line without `a` is a primary-board line and always takes
+the cache filter, so the static category tables stay narrowed to what the appliance answers. An entry with
+the primary sentinel (`0xFF`, a custom ERD configured without an address) never matches, because an explicit
+`a` can never be `ff` (§5.4).
+
+Why: before a republish the lifecycle removes every retained config, so a line the run filters is an entity
+Home Assistant deletes, with its history and customisation. The cache only holds ERDs that answered at this
+boot, so on `gea-esphome-waterheaters3` one boot where board `0x62` was silent deleted its 12 entities. The
+exempt lines publish the same topics as when the board answers (`geappliances/{device_id}/erd/0x{addr}_0x{erd}/value`
+and `/write`), and their entities show the last retained value until the board answers again.
+
+Lookup is a linear scan: the list holds at most 128 entries and is consulted only for lines with `a`.
 
 ### 3.3 Start
 
@@ -292,8 +327,8 @@ When `current_decomp_size == 0`, the next chunk needs decompression. When `curre
 
 1. **Extract required fields**: `i` (ERD ID hex), `n` (entity name), `d` (domain)
 2. **Extract optional fields**: `fi` (field ID), `p` (paired ERD), `r` (role), `u` (unit), `dc` (device class), `sc` (state class), `o` (options), `dt` (data type), `sf` (scale factor), `m` (mode), `pon` (payload on), `poff` (payload off), `son` (state on), `soff` (state off), `mn` (min), `mx` (max), `st` (step)
-3. **ERD registration check**: Binary search the sorted ERD array; if not found, increment `total_filtered` and return `false`
-4. **Paired ERD check**: If a paired ERD is specified, verify it is also registered
+3. **ERD registration check**: Binary search the sorted ERD array; if not found, and the line is not a configured board ERD (§3.2.3), increment `total_filtered` and return `false`
+4. **Paired ERD check**: If a paired ERD is specified, verify it is also registered, or configured on the line's board (§3.2.3)
 5. **Build unique ID**: `{device_id}_erd_{erd_id_hex}[_{field_id}]`
 6. **Build topics**: state topic `geappliances/{device_id}/erd/0x{erd_id}/value`, command topic `geappliances/{device_id}/erd/0x{erd_id}/write`
 7. **Paired entity topic swap**: For paired entities with `role="request"`, swap state and command topics between the primary and paired ERDs
@@ -377,7 +412,7 @@ If the built payload exceeds `payload_buf` (8 KB):
 
 ### 8.4 ERD Not Registered
 
-If the ERD ID (or paired ERD ID) is not found in the sorted ERD array:
+If the ERD ID (or paired ERD ID) is not found in the sorted ERD array, and the line is not a configured board ERD (§3.2.3):
 - Increment `total_filtered`
 - Return `false` from `process_jsonl_line()` — the entity is skipped but discovery continues
 
@@ -494,8 +529,9 @@ After finishing all lines in a decompressed chunk, `run()` returns to the main l
 | `total_discovered` | `uint32_t` | Total entities that passed filtering (ERD registered). |
 | `total_published` | `uint32_t` | Total discovery payloads published to MQTT. |
 | `total_filtered` | `uint32_t` | Entities skipped (ERD not registered, paired ERD not registered, or payload too large). |
+| `total_uncached_configured` | `uint32_t` | Of `total_published`, the configured board ERDs published without a cached value (§3.2.3). |
 
-`total_discovered` and `total_published` are incremented together on each successful publish. `total_filtered` is incremented when an entity is skipped for any reason.
+`total_discovered` and `total_published` are incremented together on each successful publish. `total_filtered` is incremented when an entity is skipped for any reason. The completion log line (`HA discovery complete: N published, M filtered`) is followed by a second INFO line when `total_uncached_configured` is non-zero.
 
 ---
 

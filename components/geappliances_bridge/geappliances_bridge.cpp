@@ -93,6 +93,14 @@ void GeappliancesBridge::setup() {
   erd_cache_init(&this->erd_cache_);
   erd_set_init(&this->custom_erd_subscription_seen_erds_);
 
+  // Lend HA discovery the configured custom ERDs (codegen has added them all
+  // by now), so their lines are published even when a board is silent at
+  // this boot (issue #212). The manager keeps the pointer across init().
+  ha_discovery_manager_set_configured_board_erds(
+      &this->ha_discovery_manager_,
+      reinterpret_cast<const ha_discovery_board_erd_t*>(this->custom_erds_),
+      this->custom_erds_count_);
+
   // Route ERD client activity to the bridge (see handle_erd_client_activity_).
   // The GEA2 adapter client re-publishes GEA2 activity as GEA3-typed events,
   // so one handler serves both protocols.
@@ -719,11 +727,20 @@ bool GeappliancesBridge::check_steady_state()
   return steady;
 }
 
-// FNV-1a over what HA discovery is filtered by: the host address, the boards
-// that have ERDs in the cache (secondary boards reach it through the poll
-// list, not the registry), and the sorted valid-ERD set. 0 when there is no
-// filter (feature bits unreadable, appliance API parsing off), which the
-// change check ignores.
+// FNV-1a over what HA discovery is filtered by: the host address, the
+// secondary boards the configuration names (custom ERDs with an explicit
+// board address), and the sorted valid-ERD set. 0 when there is no filter
+// (feature bits unreadable, appliance API parsing off), which the change
+// check ignores.
+//
+// The boards come from the configuration, not from the cache: a board that is
+// silent at one boot never reaches the cache, and a fingerprint that followed
+// the cache turned that one boot into a cleanup + republish that deleted the
+// board's entities from Home Assistant (issue #212). Its configured ERDs are
+// published whether or not they are cached (see
+// ha_discovery_manager_set_configured_board_erds()), so the set of published
+// boards changes only when the configuration does -- and a configuration
+// change that adds or removes a board still changes this value.
 uint32_t GeappliancesBridge::valid_erds_fingerprint_()
 {
   if (!this->erd_registry_.has_valid_erds_filter()) {
@@ -736,15 +753,16 @@ uint32_t GeappliancesBridge::valid_erds_fingerprint_()
   };
   mix(this->autodiscovery_manager_.get_host_address());
 
-  // Distinct board addresses in the cache, in ascending order
-  bool board_present[256] = {false};
-  uint16_t iterator = 0;
-  const erd_cache_entry_t* entry;
-  while ((entry = erd_cache_get_next_entry(&this->erd_cache_, &iterator)) != nullptr) {
-    board_present[entry->board_address] = true;
+  // Distinct configured secondary-board addresses, in ascending order
+  bool board_configured[256] = {false};
+  for (uint16_t i = 0; i < this->custom_erds_count_; i++) {
+    const uint8_t address = this->custom_erds_[i].board_address;
+    if (address != PROBE_ENTRY_DEFAULT_ADDRESS) {
+      board_configured[address] = true;
+    }
   }
   for (uint16_t address = 0; address < 256; address++) {
-    if (board_present[address]) {
+    if (board_configured[address]) {
       mix(static_cast<uint8_t>(address));
     }
   }
