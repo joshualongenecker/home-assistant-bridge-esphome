@@ -36,14 +36,8 @@ TEST_GROUP(device_identity_manager)
 
   void setup()
   {
-    mock().clear();
     mock().strictOrder();
     tiny_gea3_erd_client_double_init(&erd_client);
-  }
-
-  void teardown()
-  {
-    mock().clear();
   }
 
   void init_with_configured_id(const std::string& id)

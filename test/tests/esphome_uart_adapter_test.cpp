@@ -116,11 +116,6 @@ TEST_GROUP(esphome_uart_adapter)
     esphome_hal_double_set_millis(0);
   }
 
-  void teardown()
-  {
-    mock().clear();
-  }
-
   void init_adapter()
   {
     esphome_uart_adapter_init(&adapter, &timer_group.timer_group, &mock_uart);

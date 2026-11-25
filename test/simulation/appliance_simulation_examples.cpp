@@ -76,7 +76,6 @@ TEST_GROUP(appliance_simulation_examples)
     erd_bridge_subscribe_destroy(&erd_bridge_subscribe);
     erd_bridge_poll_destroy(&erd_bridge_poll);
     erd_cache_destroy(&test_cache);
-    mock().clear();
   }
   
   void initialize_erd_bridge_subscription_mode()

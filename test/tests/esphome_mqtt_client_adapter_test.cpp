@@ -45,7 +45,6 @@ TEST_GROUP(esphome_mqtt_client_adapter)
      * otherwise leave the global pointing at this test's stack double. */
     esphome::mqtt::global_mqtt_client = nullptr;
     esphome_mqtt_client_adapter_destroy(&adapter);
-    mock().clear();
   }
 
   void init_adapter()

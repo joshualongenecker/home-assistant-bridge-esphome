@@ -137,13 +137,11 @@ TEST_GROUP(startup_hsm)
 
   void setup()
   {
-    mock().clear();
     mock().strictOrder();
   }
 
   void teardown()
   {
-    mock().clear();
     startup_hsm_wrapper_destroy(&wrapper);
   }
 

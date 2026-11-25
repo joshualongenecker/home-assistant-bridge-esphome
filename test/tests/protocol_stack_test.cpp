@@ -142,11 +142,6 @@ TEST_GROUP(protocol_stack)
   {
     esphome_hal_double_set_millis(0);
   }
-
-  void teardown()
-  {
-    mock().clear();
-  }
 };
 
 /* ------------------------------------------------------------------ */

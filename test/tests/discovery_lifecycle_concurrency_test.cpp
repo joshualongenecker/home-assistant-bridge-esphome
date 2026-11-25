@@ -109,7 +109,6 @@ TEST_GROUP(discovery_lifecycle_concurrency)
 
   void setup()
   {
-    mock().clear();
     esphome_hal_double_set_millis(0);
 
     memset(&manager_, 0, sizeof(manager_));
@@ -138,7 +137,6 @@ TEST_GROUP(discovery_lifecycle_concurrency)
     erd_cache_destroy(&cache_);
     esphome_mqtt_client_adapter_destroy(&adapter_);
     esphome::mqtt::global_mqtt_client = nullptr;
-    mock().clear();
   }
 
   void complete_device_identity()

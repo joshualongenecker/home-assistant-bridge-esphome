@@ -52,11 +52,6 @@ TEST_GROUP(autodiscovery_manager)
     tiny_timer_group_init(&timer_group, esphome_time_source_init());
   }
 
-  void teardown()
-  {
-    mock().clear();
-  }
-
   void init_both_uart()
   {
     manager.init(&timer_group,

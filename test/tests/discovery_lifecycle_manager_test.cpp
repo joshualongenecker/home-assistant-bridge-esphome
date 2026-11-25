@@ -196,7 +196,6 @@ TEST_GROUP(discovery_lifecycle_manager)
 
   void setup()
   {
-    mock().clear();
     esphome_hal_double_set_millis(0);
     hooks_.reset();
     bridge_ready = true;
@@ -220,7 +219,6 @@ TEST_GROUP(discovery_lifecycle_manager)
     erd_cache_destroy(&cache_);
     esphome_mqtt_client_adapter_destroy(&adapter_);
     esphome::mqtt::global_mqtt_client = nullptr;
-    mock().clear();
   }
 
   /* Reads the three identity ERDs so is_ready() can report a complete
