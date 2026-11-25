@@ -435,16 +435,20 @@ publishes is copied again below it: ESPHome's `MQTTBackendESP32::enqueue_()` hea
 and payload of each queued publish into a 29-element pool, and lwIP and the Wi-Fi driver buffer
 whatever the backend task has sent but the link has not yet drained. Publishing one config per
 main-loop iteration (~34/s at `L ≈ 29 ms`) keeps that pool full — the §8.6 backoff only engages
-once it already is. On production bridges whose entry heap gate passed comfortably, a run took a
-C6 (`gea-esphome-haieridu`) to 4 836 B free and a reboot with 39 of 171 configs, and a C3
-(`gea-esphome-refer`) to 15 900 B. Pacing the producer below the drain rate keeps a handful of
+once it already is. On production bridges whose entry heap gate passed comfortably, an unpaced run
+took `gea-esphome-haieridu` to 4 836 B free and a reboot with 39 of 171 configs, and
+`gea-esphome-refer` to 15 900 B. Pacing the producer below the drain rate keeps a handful of
 configs in flight instead of 29, bounding the backend copies, the network buffering and the
 interleaved log publishes at once without needing to know how the heap splits between them.
 
 **Why 50 ms.** A config is under ~1 KB, so 20 per second is ~20 KB/s, well below what a healthy
 link drains; a 129–171-config run takes 7–9 s, against the 10–11 s already observed with drops and
-retries. It is a starting point to tune against the device's `heap_min_free`, not a value derived
-from a measured drain rate. Filter-disabled runs pay the most: 3605 entities take ~3 min instead
+retries. It is a starting point, not a value derived from a measured drain rate. Hardware
+validation (PR #215: 8 paced runs on refer and haieridu) completed every run with the full config
+set; the publish phase took ~38 s for refer's 137 configs and 13–16 s for haieridu's 171, longer
+than the 50 ms interval alone implies. Do not tune it against the `heap_min_free`
+sensor: it is monotone since boot and every run ends in a reboot, so the run's trough is never
+published. Use an in-firmware heap read instead. Filter-disabled runs pay the most: 3605 entities take ~3 min instead
 of ~2, still far inside the publish phase's idle timeout (one success per 5 min).
 
 **Gate.** `run()` checks the gate right after the §8.6 backoff and before any other work:
@@ -477,9 +481,10 @@ if (self->last_publish_ms != 0 &&
   number of wraps plus < 50 ms old, which expires inside the window by itself.
 
 `DiscoveryLifecycleManager` adds a run-local free-heap floor on top of this
-(`kRunFreeHeapFloorBytes`, see `geappliances_bridge.md`): pacing bounds the in-flight publishes in
-the common case, and the floor aborts the run into the bounded reboot if something else — a stalled
-link, a large log burst — still drives the heap down.
+(`kRunFreeHeapFloorBytes`, see `geappliances_bridge.md` §11.6.1). Pacing is the fix; the floor is
+only a backstop for a drain that persists *between* publishes, such as a stalled link. It samples
+between publishes, so it never sees the transient inside a publish call, and on the validation
+nodes it never came close to firing.
 
 ---
 

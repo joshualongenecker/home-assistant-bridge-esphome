@@ -160,47 +160,41 @@ class DiscoveryLifecycleManager {
   // Run-local free-heap floor (issue #209). While Cleaning or Publishing, a
   // loop() that reads total free internal heap below this aborts the run
   // through abort_publish_run_() -- the bounded reboot -- instead of letting
-  // it drive the device out of memory.
+  // a sustained drain drive the device out of memory.
   //
   // The begin_publish_() gate cannot see this: the run's four buffers are
   // allocated once and do not grow, but the publishes it makes are copied
   // into ESPHome's MQTT backend queue and buffered by lwIP and the Wi-Fi
-  // driver while they drain. Measured on production bridges with the gate
-  // passing comfortably: gea-esphome-haieridu (C6, 114 688 B largest block
-  // against the 53 420 B the run needs) reached 4 836 B free mid-run and
-  // rebooted with 39 of its 171 configs published; gea-esphome-refer (C3)
-  // bottomed at 15 900 B and completed.
+  // driver while they drain. Before pacing, gea-esphome-haieridu reached
+  // 4 836 B free mid-run with its gate passing comfortably (114 688 B
+  // largest block against the 53 420 B the run needs) and rebooted with 39
+  // of its 171 configs published.
   //
-  // When it is read: at the top of every Cleaning/Publishing loop(), and
-  // again right after each successful publish. The real bound on reaction
-  // time is main-loop liveness, not a fixed period: heap drawn by the MQTT
-  // backend, lwIP and Wi-Fi tasks between iterations is seen only at the
-  // next loop(), and in this failure mode the loop has been sampled at
-  // 218-434 ms (refer, haieridu fleet CSVs). The overshoot past the floor is
-  // roughly what those tasks consume in one iteration plus one publish.
+  // What it does NOT catch: the transient inside a publish call. It is read
+  // at the top of every Cleaning/Publishing loop() and right after each
+  // successful publish -- between publishes, never during one. Hardware
+  // validation of e3a5f18 (8 paced runs on refer and haieridu, PR #215)
+  // found the floor's own samples bottoming at 26 208 B, while the same
+  // runs' true troughs (heap_caps_get_minimum_free_size at run end) were
+  // 2 120-11 976 B and every run completed. So on the two nodes that
+  // motivated #209 this floor is unreachable: a silent floor is not
+  // evidence of a healthy run, and a trough below it is not evidence of
+  // danger (haieridu completed at 2 120 B free). Pacing is the fix; what
+  // protects the run's allocation is the largest-free-block gate.
   //
-  // Why 12 KiB:
-  //   - Above the ~5 KB at which haieridu died. Its true trough was 1 188 B,
-  //     ~11 KB below a 12 KiB crossing inside a handful of ~400 ms
-  //     iterations before pacing, so the margin is the same order as the
-  //     unpaced overshoot. Pacing is what is expected to shrink that
-  //     overshoot; the floor alone does not guarantee it.
-  //   - Leaves room for the abort path itself. confirm_firmware() and the
-  //     reboot-count write are NVS writes before the reboot. While Cleaning
-  //     the run's 53 KB of buffers do not exist yet to be freed first, and
-  //     ha_discovery_cleanup_destroy() sends an unsubscribe through the same
-  //     MQTT backend and then waits 50 ms before releasing anything, during
-  //     which the heap can keep draining. While Publishing,
-  //     abort_publish_run_() frees the 53 KB before its own NVS write.
-  //   - A false abort is not free: it spends one of kMaxAbortReboots and,
-  //     after a cleanup, leaves Home Assistant without configs until the
-  //     next boot republishes them; three in a row end in a logged hold.
-  //     Bench refer bottomed at 15 900 B in a completed run, but production
-  //     refer has a recorded heap_min_free of 9 508 B whose phase is not yet
-  //     known. If that dip was a run that completed, an unpaced run on refer
-  //     would have been aborted by this floor.
-  // Hardware validation decides whether the value stands: heap_min_free on
-  // refer and haieridu during a paced run, with no log session attached.
+  // What it is for: a drain that persists between publishes -- a stalled
+  // link or broker leaving backend copies queued while the run keeps
+  // publishing -- which lowers the between-publish baseline itself. That
+  // baseline was 26 208-61 496 B in the validation runs, so 12 KiB stays
+  // clear of a healthy run (a false abort spends one of kMaxAbortReboots
+  // and, after a cleanup, leaves Home Assistant without configs until the
+  // next boot) while leaving room for the abort path's own NVS writes and,
+  // while Cleaning, the unsubscribe and 50 ms wait in
+  // ha_discovery_cleanup_destroy().
+  //
+  // Do not tune this from the heap_min_free sensor: it is monotone since
+  // boot and every run ends in a reboot, so the run's trough is never
+  // published. Any change needs an in-firmware read at the check point.
   static constexpr uint32_t kRunFreeHeapFloorBytes = 12u * 1024u;
 
   // Why the current phase was entered. Orthogonal to the phase: the same
@@ -284,7 +278,8 @@ class DiscoveryLifecycleManager {
     // Total free internal heap in bytes. Read on every loop() while Cleaning
     // or Publishing, and again after each successful publish, to enforce
     // kRunFreeHeapFloorBytes; the entry gate above only
-    // decides whether a run may start, this bounds what it then consumes.
+    // decides whether a run may start, this catches a drain that persists
+    // between publishes (not the transient inside one).
     // Called from the main loop only, never from the MQTT task.
     uint32_t (*read_free_heap)(void* context);
     // Feeds the task watchdog while waiting out the reboot delay.
