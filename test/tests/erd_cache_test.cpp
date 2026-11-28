@@ -17,7 +17,6 @@ extern "C" {
 #include "erd_cache.h"
 }
 
-// Helper: find an entry by iterating the cache (erd_cache_find is internal)
 static erd_cache_entry_t* find_entry(erd_cache_t* cache, tiny_erd_t erd, uint8_t board_address)
 {
   uint16_t iter = 0;
@@ -186,7 +185,6 @@ TEST(erd_cache, unchanged_data_returns_false)
   uint8_t data[] = { 0x01 };
   erd_cache_update(&cache, 0x0001, 0xFF, data, 1);
 
-  // Unchanged data returns false (early exit)
   bool result = erd_cache_update(&cache, 0x0001, 0xFF, data, 1);
   CHECK_FALSE(result);
 
@@ -474,7 +472,6 @@ TEST(erd_cache, rate_limit_first_entry_publishes_immediately)
   CHECK(entry != NULL);
   CHECK_EQUAL(0x0001, entry->erd);
 
-  /* After publish, cooldown is reloaded to max_cooldown. */
   erd_cache_mark_published(&cache, entry);
   iter = 0;
   entry = erd_cache_get_next_entry(&cache, &iter);
@@ -488,7 +485,6 @@ TEST(erd_cache, rate_limit_blocks_republish_until_cooldown_expires)
   uint8_t data[] = { 0x01 };
   erd_cache_update(&cache, 0x0001, 0xFF, data, 1);
 
-  /* First publish — immediate. */
   uint16_t iter = 0;
   erd_cache_entry_t* entry = next_updated(&cache, &iter);
   CHECK(entry != NULL);
@@ -558,7 +554,7 @@ TEST(erd_cache, rate_limit_tick_only_decrements_when_update_required)
   iter = 0;
   entry = erd_cache_get_next_entry(&cache, &iter);
   CHECK(entry != NULL);
-  CHECK_EQUAL(5, entry->publish_cooldown);  /* unchanged */
+  CHECK_EQUAL(5, entry->publish_cooldown);
 }
 
 TEST(erd_cache, rate_limit_multiple_erds_independent)
@@ -569,7 +565,6 @@ TEST(erd_cache, rate_limit_multiple_erds_independent)
   erd_cache_update(&cache, 0x0001, 0xFF, data1, 1);
   erd_cache_update(&cache, 0x0002, 0xFF, data2, 1);
 
-  /* Both publish immediately (first time). */
   uint16_t iter = 0;
   erd_cache_entry_t* e1 = next_updated(&cache, &iter);
   CHECK(e1 != NULL);
@@ -579,7 +574,6 @@ TEST(erd_cache, rate_limit_multiple_erds_independent)
   CHECK(e2 != NULL);
   erd_cache_mark_published(&cache, e2);
 
-  /* Update only ERD 0x0001. */
   uint8_t data3[] = { 0x03 };
   erd_cache_update(&cache, 0x0001, 0xFF, data3, 1);
 
@@ -653,7 +647,6 @@ TEST(erd_cache, rate_limit_unchanged_data_does_not_reset_cooldown)
   uint8_t data[] = { 0x01 };
   erd_cache_update(&cache, 0x0001, 0xFF, data, 1);
 
-  /* First publish — immediate (new entry). */
   uint16_t iter = 0;
   erd_cache_entry_t* entry = next_updated(&cache, &iter);
   CHECK(entry != NULL);
@@ -665,7 +658,7 @@ TEST(erd_cache, rate_limit_unchanged_data_does_not_reset_cooldown)
   iter = 0;
   entry = erd_cache_get_next_entry(&cache, &iter);
   CHECK(entry != NULL);
-  CHECK_EQUAL(5, entry->publish_cooldown);  /* still 5, unchanged */
+  CHECK_EQUAL(5, entry->publish_cooldown);
   CHECK(!entry->update_required);
 
   /* Tick 4 times — cooldown stays at 5 (update_required=false, tick skips). */
@@ -675,9 +668,8 @@ TEST(erd_cache, rate_limit_unchanged_data_does_not_reset_cooldown)
   iter = 0;
   entry = erd_cache_get_next_entry(&cache, &iter);
   CHECK(entry != NULL);
-  CHECK_EQUAL(5, entry->publish_cooldown);  /* unchanged — tick skips when !update_required */
+  CHECK_EQUAL(5, entry->publish_cooldown);
 
-  /* Now send different data — update_required is set, cooldown still 5, blocked. */
   uint8_t data2[] = { 0x02 };
   erd_cache_update(&cache, 0x0001, 0xFF, data2, 1);
   iter = 0;
@@ -719,7 +711,6 @@ TEST(erd_cache, insert_accepted_at_248_bytes)
   MEMCMP_EQUAL(data, stored, 248);
 }
 
-/* New test: Arena full rejects new ERD */
 TEST(erd_cache, arena_full_rejects_new_erd)
 {
   constexpr uint8_t entry_size = 248;
@@ -742,13 +733,11 @@ TEST(erd_cache, arena_full_rejects_new_erd)
   CHECK_EQUAL(entries_to_fill, erd_cache_get_count(&cache));
 }
 
-/* New test: Arena usage tracking */
 TEST(erd_cache, arena_usage_tracking)
 {
   CHECK_EQUAL(0, erd_cache_get_arena_usage(&cache));
   CHECK_EQUAL(0, erd_cache_get_arena_usage_percent(&cache));
 
-  /* Add 100 bytes */
   uint8_t data[100];
   memset(data, 0xAA, sizeof(data));
   erd_cache_update(&cache, 0x0001, 0xFF, data, 100);
@@ -756,7 +745,6 @@ TEST(erd_cache, arena_usage_tracking)
   CHECK_EQUAL(100, erd_cache_get_arena_usage(&cache));
   CHECK_EQUAL((100 * 100) / ERD_CACHE_ARENA_SIZE, erd_cache_get_arena_usage_percent(&cache));
 
-  /* Add another 50 bytes */
   uint8_t data2[50];
   memset(data2, 0xBB, sizeof(data2));
   erd_cache_update(&cache, 0x0002, 0xFF, data2, 50);
@@ -869,7 +857,6 @@ TEST(erd_cache, dirty_count_drops_when_snapshot_claims_an_entry)
   CHECK_TRUE(erd_cache_snapshot_next_updated(&cache, &iter, &entry, &erd, &addr, buf, &size));
   CHECK_EQUAL(0, erd_cache_get_dirty_count(&cache));
 
-  /* Nothing left to claim. */
   CHECK_FALSE(erd_cache_snapshot_next_updated(&cache, &iter, &entry, &erd, &addr, buf, &size));
   CHECK_EQUAL(0, erd_cache_get_dirty_count(&cache));
 }
@@ -904,7 +891,6 @@ TEST(erd_cache, mark_all_updated_sets_dirty_count_to_entry_count)
     erd_cache_update(&cache, (tiny_erd_t)(0x0100 + i), 0xFF, &d, 1);
   }
 
-  /* Drain the backlog through the production read path. */
   uint16_t iter = 0;
   erd_cache_entry_t* entry = NULL;
   tiny_erd_t erd = 0;

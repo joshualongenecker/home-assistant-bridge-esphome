@@ -1,11 +1,3 @@
-/*!
- * @file
- * @brief Feature bit manager for the GEA bridge.
- *
- * Parsing is incremental (one step per timer tick) to avoid triggering
- * the ESP32 Task Watchdog Timer.
- */
-
 #ifndef FEATURE_BIT_MANAGER_H
 #define FEATURE_BIT_MANAGER_H
 
@@ -29,16 +21,10 @@ enum FeatureBitState {
   FEATURE_BIT_STATE_COMPLETE,
 };
 
-/* Maximum number of ERDs the feature bit manager can track.
- * This covers all possible ERDs from common + appliance feature descriptors. */
 #define FEATURE_BIT_MAX_ERDS 645
 
 class FeatureBitManager {
  public:
-  /* How many common feature descriptors to process per parse tick.
-   * 17 total descriptors; processing 4 per tick spreads the work
-   * across ~5 timer callbacks instead of doing all at once, which
-   * avoids triggering the Task Watchdog Timer on ESP32-C3. */
   static constexpr uint16_t COMMON_PARSE_PER_CALL = 4;
 
   static constexpr uint32_t PARSE_TICK_MS = 5;
@@ -49,19 +35,15 @@ class FeatureBitManager {
             uint8_t host_address,
             tiny_timer_group_t* timer_group);
 
-  /// Idempotent: safe to call multiple times.
   void cleanup();
 
-  /// Idempotent if already past the first state.
   void start();
 
   uint16_t get_valid_erd_count() const;
-  /// Feature ERDs that were probed but skipped (unsupported or unreadable).
   uint16_t get_skipped_erd_count() const;
 
   tiny_erd_t get_valid_erd(uint16_t idx) const;
 
-  /// Returns a pointer to the valid ERD array (NULL if none).
   const tiny_erd_t* get_valid_erds() const { return valid_erds_count_ > 0 ? valid_erds_ : nullptr; }
 
   /// Mutable view of the valid-ERD array, handed to
@@ -83,9 +65,6 @@ class FeatureBitManager {
 
   FeatureBitState get_state() const { return state_; }
 
-  /// True once init() has installed an ERD client; cleanup() resets it.
-  /// The bridge's start_feature_bit_reading_() guard, replacing the
-  /// bridge-side feature_bit_reading_started_ flag.
   bool is_initialized() const { return this->erd_client_ != nullptr; }
 
  private:
@@ -93,7 +72,6 @@ class FeatureBitManager {
 
   void handle_read_completed_(tiny_erd_t erd, const void* data, uint8_t size);
 
-  /// Static for the tiny_timer API.
   static void parse_timer_callback_(void* context);
 
   void parse_next_step_();
@@ -106,7 +84,6 @@ class FeatureBitManager {
 
   void skip_to_next_erd_(tiny_erd_t failed_erd);
 
-  /// One-shot retry timer callback; static for the tiny_timer API.
   static void queue_retry_timer_callback_(void* context);
 
   void queue_retry_();
@@ -115,7 +92,7 @@ class FeatureBitManager {
 
   FeatureBitState state_{FEATURE_BIT_STATE_READING};
   uint8_t reading_idx_{0};
-  bool read_queued_{false};  /* true while a read is in-flight (guards idempotent start/queue) */
+  bool read_queued_{false};
 
   i_tiny_gea3_erd_client_t* erd_client_{nullptr};
   uint8_t host_address_{0};
@@ -128,7 +105,7 @@ class FeatureBitManager {
   tiny_timer_t queue_retry_timer_;
 
   struct FeatureBitErdData {
-    uint8_t data[11][8]{};  /* 11 feature ERDs, each up to 8 bytes */
+    uint8_t data[11][8]{};
     uint8_t sizes[11]{};
   };
 
@@ -143,7 +120,7 @@ class FeatureBitManager {
   bool parse_common_done_{false};
 };
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}
 
-#endif  // FEATURE_BIT_MANAGER_H
+#endif

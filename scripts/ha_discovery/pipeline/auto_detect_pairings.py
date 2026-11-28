@@ -20,8 +20,6 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pipeline_utils import SCRIPT_DIR, REPO_ROOT, load_json
 
-
-
 def strip_request_status(name):
     """Strip 'Request' or 'Status' suffix from an ERD name, handling trailing content.
 
@@ -32,16 +30,13 @@ def strip_request_status(name):
     n = re.sub(r'\s*[-–—:]?\s*(requested|request|status)\s*/\s*(desired|actual)\s*$',
                '', name, flags=re.IGNORECASE).strip()
     n = re.sub(r'\s*(request|status)\s*$', '', n, flags=re.IGNORECASE).strip()
-    # Also strip trailing numbers after Request/Status (e.g. "Request 0" -> base)
     n = re.sub(r'\s*(request|status)\s*\d+\s*$', '', n, flags=re.IGNORECASE).strip()
     return n
-
 
 def strip_requested_prefix(name):
     """Strip 'Requested ' prefix from an ERD name."""
     n = re.sub(r'^requested\s+', '', name, flags=re.IGNORECASE).strip()
     return n
-
 
 def normalize_field_name(name):
     """Normalize a field name for comparison.
@@ -51,23 +46,17 @@ def normalize_field_name(name):
     Preserves array indices [0], [1], etc. for matching.
     """
     n = name.lower()
-    # Strip parenthetical hints at end FIRST (so "Status (0-100)" -> "Status")
     n = re.sub(r'\s*\(.*?\)\s*$', '', n)
-    # Strip Request/Status suffixes
     n = re.sub(r'\s*(request|status)\s*$', '', n, flags=re.IGNORECASE)
-    # Take the last dot-qualified segment (leaf name)
     parts = n.split('.')
     n = parts[-1].strip()
-    # Normalize whitespace
     n = re.sub(r'\s+', ' ', n).strip()
     return n
-
 
 def extract_array_index(name):
     """Extract array index from field name, or None if not an array field."""
     m = re.search(r'\[(\d+)\]', name)
     return int(m.group(1)) if m else None
-
 
 def stem_word(w):
     """Simple stemming: remove common suffixes."""
@@ -75,7 +64,6 @@ def stem_word(w):
         if w.endswith(suffix) and len(w) - len(suffix) >= 2:
             return w[:-len(suffix)]
     return w
-
 
 def field_match_score(req_name, stat_name):
     """Score how well two field names match.
@@ -85,15 +73,12 @@ def field_match_score(req_name, stat_name):
     rn = normalize_field_name(req_name)
     sn = normalize_field_name(stat_name)
 
-    # Exact match
     if rn == sn:
         return 100
 
-    # One contains the other
     if rn in sn or sn in rn:
         return 70
 
-    # Word overlap with stemming
     rw = set(stem_word(w) for w in rn.replace('/', ' ').split())
     sw = set(stem_word(w) for w in sn.replace('/', ' ').split())
     common = rw & sw
@@ -101,7 +86,6 @@ def field_match_score(req_name, stat_name):
     if not common:
         return 0
 
-    # Require at least one meaningful common word (not single char)
     meaningful = {w for w in common if len(w) > 1}
     if not meaningful:
         return 0
@@ -116,7 +100,6 @@ def field_match_score(req_name, stat_name):
 
     return 0
 
-
 def match_fields(req_fields, stat_fields):
     """Match request fields to status fields.
 
@@ -128,7 +111,6 @@ def match_fields(req_fields, stat_fields):
     matches = []
     used_stat = set()
 
-    # Build index of status fields by normalized name
     stat_by_name = {}
     for sf in stat_fields:
         key = normalize_field_name(sf['field_name'])
@@ -136,7 +118,6 @@ def match_fields(req_fields, stat_fields):
             stat_by_name[key] = []
         stat_by_name[key].append(sf)
 
-    # Phase 1: exact structural match
     for rf in req_fields:
         key = normalize_field_name(rf['field_name'])
         if key not in stat_by_name:
@@ -145,22 +126,17 @@ def match_fields(req_fields, stat_fields):
         for sf in stat_by_name[key]:
             if id(sf) in used_stat:
                 continue
-            # Must have same type
             if rf['field_type'] != sf['field_type']:
                 continue
-            # Must have same byte offset
             if rf['field_offset'] != sf['field_offset']:
                 continue
-            # Must have same size
             if rf['field_size'] != sf['field_size']:
                 continue
-            # For bit-fields, must have same bit offset
             rb = rf.get('field_bits')
             sb = sf.get('field_bits')
             if rb is not None or sb is not None:
                 if rb != sb:
                     continue
-            # For array fields, must have same index
             ri = extract_array_index(rf['field_name'])
             si = extract_array_index(sf['field_name'])
             if ri is not None or si is not None:
@@ -169,11 +145,9 @@ def match_fields(req_fields, stat_fields):
 
             matches.append((rf, sf, 100))
             used_stat.add(id(sf))
-            break  # each request field matches at most one status field
+            break
 
-    # Phase 2: fuzzy match for unmatched request fields
     for rf in req_fields:
-        # Skip if already matched
         if any(m[0] is rf for m in matches):
             continue
 
@@ -210,7 +184,6 @@ def find_erd_pairs(erd_by_id, erd_ids):
     paired = set()
     n = len(erd_ids)
 
-    # Build a base-name -> erd_id index for ERDs without request/status keywords
     bare_by_base: dict = {}
     for erd_id in erd_ids:
         erd = erd_by_id[erd_id]
@@ -254,10 +227,8 @@ def find_erd_pairs(erd_by_id, erd_ids):
             pairs.append((req_id, stat_id))
             paired.add(req_id)
             paired.add(stat_id)
-            break  # each ERD can only be in one pair
+            break
 
-    # Second pass: pair unpaired request ERDs with bare counterparts.
-    # Handles "Requested X" ↔ "X" and "X Request" ↔ "X" patterns.
     for erd_id in erd_ids:
         if erd_id in paired:
             continue
@@ -266,12 +237,10 @@ def find_erd_pairs(erd_by_id, erd_ids):
         if 'request' not in nl:
             continue
 
-        # Compute the base name by stripping request-related keywords
         base = strip_request_status(erd['name'])
         base = strip_requested_prefix(base)
         base_lower = base.lower()
 
-        # Look for an unpaired bare ERD with the same base name
         if base_lower in bare_by_base:
             bare_id = bare_by_base[base_lower]
             if bare_id not in paired:
@@ -281,14 +250,12 @@ def find_erd_pairs(erd_by_id, erd_ids):
 
     return pairs
 
-
 def apply_pairings(entries, erd_by_id, erd_ids):
     """Find ERD pairs and match fields, setting paired_erd/pair_role.
 
     Clears any existing pairings first, then re-computes from scratch.
     Returns (num_pairs, num_field_matches) counts.
     """
-    # Clear existing pairings, using setdefault for entries without 'review'
     for e in entries:
         review = e.setdefault('review', {})
         review['paired_erd'] = None
@@ -314,7 +281,6 @@ def apply_pairings(entries, erd_by_id, erd_ids):
 
     return len(pairs), total_matches
 
-
 def main():
     parser = argparse.ArgumentParser(
         description='Auto-detect paired ERD (Request/Status) relationships at field level.'
@@ -338,7 +304,6 @@ def main():
 
     entries = load_json(args.input)
 
-    # Build ERD index
     erd_by_id = {}
     for e in entries:
         erd_id = e['erd_id']
@@ -358,7 +323,6 @@ def main():
     print(f"Found {num_pairs} Request/Status ERD pairs")
     print(f"Matched {num_matches} field entries ({num_matches // 2} field pairs)")
 
-    # Show summary
     paired_entries = [e for e in entries if e['review'].get('paired_erd')]
     roles = {}
     for e in paired_entries:
@@ -370,7 +334,6 @@ def main():
         json.dump(entries, f, indent=2, ensure_ascii=False)
 
     print(f"Output: {args.output}")
-
 
 if __name__ == '__main__':
     main()

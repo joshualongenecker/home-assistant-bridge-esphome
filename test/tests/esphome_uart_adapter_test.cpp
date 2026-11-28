@@ -279,14 +279,11 @@ TEST(esphome_uart_adapter, poll_publishes_receive_events_when_enabled)
   mock_uart.available_count = 2;
   mock_uart.read_buffer_size = 2;
 
-  // Expect both bytes to be published
   mock().expectOneCall("receive_event_published").withParameter("byte", 0xAA);
   mock().expectOneCall("receive_event_published").withParameter("byte", 0xBB);
 
-  // Trigger the poll callback by running the timer group once
   tiny_timer_group_run(&timer_group.timer_group);
 
-  // Unsubscribe to clean up
   tiny_event_unsubscribe(&adapter.receive_event.interface, &sub);
 }
 /* ------------------------------------------------------------------ */
@@ -297,7 +294,6 @@ TEST(esphome_uart_adapter, poll_breaks_on_read_byte_error)
 {
   init_adapter();
 
-  // Subscribe to the receive event
   tiny_event_subscription_t sub;
   tiny_event_subscription_init(&sub, nullptr, receive_event_callback);
   tiny_event_subscribe(&adapter.receive_event.interface, &sub);
@@ -322,10 +318,8 @@ TEST(esphome_uart_adapter, poll_does_not_publish_send_complete_when_disabled)
   init_adapter();
   esphome_uart_adapter_set_enabled(&adapter, false);
 
-  // Mark that a byte was sent
   adapter.sent = true;
 
-  // Trigger the poll callback by running the timer group once
   tiny_timer_group_run(&timer_group.timer_group);
 
   // No send_complete event should have been published
@@ -337,12 +331,10 @@ TEST(esphome_uart_adapter, poll_publishes_send_complete_when_enabled)
 {
   init_adapter();
 
-  // Subscribe to the send_complete event
   tiny_event_subscription_t sub;
   tiny_event_subscription_init(&sub, nullptr, send_complete_event_callback);
   tiny_event_subscribe(&adapter.send_complete_event.interface, &sub);
 
-  // Mark that a byte was sent
   adapter.sent = true;
 
   // Set available to 0 so poll only processes the send_complete
@@ -350,13 +342,10 @@ TEST(esphome_uart_adapter, poll_publishes_send_complete_when_enabled)
 
   mock().expectOneCall("send_complete_event_published");
 
-  // Trigger the poll callback by running the timer group once
   tiny_timer_group_run(&timer_group.timer_group);
 
-  // Verify sent flag was cleared
   CHECK_FALSE(adapter.sent);
 
-  // Unsubscribe to clean up
   tiny_event_unsubscribe(&adapter.send_complete_event.interface, &sub);
 }
 
@@ -374,8 +363,6 @@ TEST(esphome_uart_adapter, poll_skips_receive_but_still_checks_sent_when_disable
 
   tiny_timer_group_run(&timer_group.timer_group);
 
-  // Both receive processing AND sent clearing should be skipped
-  CHECK(adapter.sent);  // sent flag unchanged
-  CHECK(mock_uart.read_buffer_index == 0);  // no bytes read
+  CHECK(adapter.sent);
+  CHECK(mock_uart.read_buffer_index == 0);
 }
-

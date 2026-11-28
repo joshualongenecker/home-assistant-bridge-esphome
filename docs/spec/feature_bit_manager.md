@@ -234,3 +234,41 @@ When the manager enters `FEATURE_BIT_STATE_FAILED` (due to ERD 0x0092 failure):
 | `tiny_timer` | Periodic parse timer and one-shot retry timer |
 | `appliance_api_feature_lists.h` | Generated descriptor tables for feature bit parsing |
 | `geappliances_bridge_constants.h` | ERD constant definitions |
+
+---
+
+## 6. Notes
+
+Module-local decisions and hazards. The code carries no comments for these; they live here.
+
+1. **Both counters are per run.** `init()` resets `skipped_erds_count_` alongside `valid_erds_count_`. The members are default-initialized only at construction, and `init()` is where `valid_erds_count_` is reset, so a second `init()` would otherwise report a cumulative `get_skipped_erd_count()` next to a per-run valid count.
+
+2. **Re-init must unsubscribe first.** `init()` unsubscribes `erd_activity_subscription_` from the previous `erd_client_` before subscribing the new one; skipping that leaves a subscription against a client the manager no longer holds. `is_initialized()` (`erd_client_ != nullptr`, cleared by `cleanup()`) is the bridge's `start_feature_bit_reading_()` guard: `init()` subscribes activity and queues the first read, so a second `init()` while reads are in flight — or after PARSING/FAILED/COMPLETE — would double-queue, and `cleanup()` re-arms the guard. `cleanup()` is idempotent; `start()` is a no-op once past the first state (`state_ == FEATURE_BIT_STATE_READING && reading_idx_ == 0 && !read_queued_`).
+
+3. **`read_queued_` is the single-outstanding-read guard.** Set by `queue_erd_read_()`, cleared by `handle_read_completed_()` and `skip_to_next_erd_()`. `on_erd_activity_()` acts only on the ERD returned by `get_expected_erd_()`, so unrelated reads (e.g. from the polling bridge) cannot clear it and corrupt the sequence. It ignores every event in PARSING, COMPLETE, or FAILED: the PARSING phase is advanced by `parse_timer_`, not by activity events.
+
+4. **An out-of-order read is skipped, never stored.** `handle_read_completed_()` rejects an ERD that is not `feature_erd_list[reading_idx_]` and routes it to `skip_to_next_erd_()`. Storing it would write the payload into `erd_data_.data[reading_idx_]`, the slot belonging to a different ERD.
+
+5. **Queue-full recovery has two paths.** `queue_erd_read_()` arms the one-shot `queue_retry_timer_` (`QUEUE_RETRY_MS` = 50 ms) when `tiny_gea3_erd_client_read()` refuses, so the sequence does not stall indefinitely if no other ERD activity ever arrives. `on_erd_activity_()` retries the queue immediately whenever `read_queued_` is false. `queue_retry_()` then does nothing if the state has moved past READING (an event completed the read before the timer fired) or if `read_queued_` was already set by that intervening event.
+
+6. **A 0x0092 failure is terminal for filtering.** `skip_to_next_erd_()` sets `FEATURE_BIT_STATE_FAILED` instead of advancing when the failed ERD is `ERD_COMMON_FEATURE_API` (0x0092): every feature filter derives from that bitmap, so the bridge falls back to full polling.
+
+7. **`erd_data_` index map.** `FeatureBitErdData` is `data[11][8]` plus `sizes[11]`: index 0 is the common feature API (0x0092), indices 1–10 are the appliance feature ERDs. `parse_erd_idx_` (0–9) maps to `erd_data_` index `idx + 1`, and `erd_names[]` is indexed by `parse_erd_idx_`. Payloads are capped at 8 bytes (`copy_size = size <= 8u ? size : 8u`; `APPLIANCE_FEATURE_ERD_SIZE` = 8), the `[2B type][2B version][4B bitmap]` layout.
+
+8. **The tick budget exists for the Task Watchdog Timer.** Parsing is one step per timer tick: `PARSE_TICK_MS` = 5 ms, `COMMON_PARSE_PER_CALL` = 4 against `common_feature_descriptor_count` = 17 descriptors (~5 callbacks), one appliance ERD per tick (10 ticks), and `parse_next_step_()` returns as soon as the current batch is done. Parsing in a single call triggers the ESP32 Task Watchdog Timer. `(void)common_bits;` MUST stay in the first-tick block: `common_bits` is otherwise referenced only by an `ESP_LOGI` that the configured log level can compile out.
+
+9. **`FEATURE_BIT_MAX_ERDS` = 645 is a capacity, not the size of the descriptor union.** `valid_erds_` is a fixed 645-entry array; `add_valid_erd_()` deduplicates by linear scan and silently drops additions once the count reaches the cap. 645 is sized for the largest set a real appliance produces — 30 ERDs across the 17 common feature descriptors, plus the ERDs of the descriptors matching each appliance feature ERD's type+version (largest such group: 160 ERD slots, 153 distinct) — not for the whole generated table set (868 appliance descriptors in 71 type/version groups, 2201 distinct ERDs), which no single appliance can reach. `erd_registry.h` pins the pair with `static_assert(ERD_REGISTRY_MAX_VALID >= FEATURE_BIT_MAX_ERDS)` and `ERD_REGISTRY_MAX_VALID` is also 645, so the two caps move together.
+
+10. **Mandatory ERDs bypass the feature bits.** The 14 ERDs in `mandatory_erds[]` (0x0001, 0x0002, 0x0008, 0x0092, 0x0093–0x0097, 0x0109–0x010D) are added on the finalization tick regardless of the parsed bits, so identity and feature-API ERDs always pass the registry filter.
+
+11. **`skipped` never means "unsupported".** The completion line reads `skipped (unsupported or unreadable)` because `skip_to_next_erd_()` is also reached from a read failure whose reason is never inspected — a bus or queue timeout counts the same as an absent feature — and from an out-of-order or empty read. "unsupported" tells an operator the appliance lacks those features and to stop looking, which the counter does not support. An unsupported feature ERD is the normal case: up to `FEATURE_ERD_COUNT` (11) per boot, one per entry in `feature_erd_list`, so the per-ERD line stays at `ESP_LOGV` and the total is reported once by the completion summary.
+
+12. **The valid set is handed out by pointer, and filtering happens at list-build time.** `ErdPollListConfig::feature_bit_valid_erds` / `feature_bit_valid_erds_count` (`erd_poll_list_builder.h`) carry a raw pointer into the manager's fixed `valid_erds_` array, NULL when the set is not available. `build_erd_poll_list()` consumes it through `append_standard_erds(result.erds, 0, config.feature_bit_valid_erds, config.feature_bit_valid_erds_count)` (`erd_poll_list_builder.cpp:89-91`) when `appliance_api_parsing` is enabled; with parsing off it falls back to the generated `commonErds` / `energyErds` / `applianceApiFeatureErds` lists, and in subscription mode the poll list is custom ERDs only. Neither the probe phase nor the poll loop does feature-bit filtering of its own.
+
+13. **The subscription path filters before any bookkeeping.** `erd_bridge_subscribe.cpp` drops a publication whose ERD fails `erd_registry->is_valid(erd)` before it is inserted into `erd_set`. The filter is static — installed once at bridge init — so a filtered ERD is never cached and never affects the subscription HSM state. Because the check precedes the `erd_set` insertion, filtered ERDs do not count toward the quiet-period decision: if only invalid ERDs are published, the bridge correctly falls through to `state_failed`.
+
+14. **The bridge does not route feature-bit activity to the manager.** `FeatureBitManager::init()` subscribes `erd_activity_subscription_` directly to `tiny_gea3_erd_client_on_activity()`, so `GeappliancesBridge::handle_erd_client_activity_()` MUST NOT forward feature-bit ERDs to the manager — doing so would queue reads twice.
+
+15. **Feature ERD protocol facts.** `ERD_COMMON_FEATURE_API` (0x0092) reports the common-feature flags; `0x0093`–`0x0097` and `0x0109`–`0x010D` each report one appliance-specific API group (`geappliances_bridge_constants.h`). Each appliance feature API ERD is laid out `[2B type][2B version][4B bitmap]`, which is why `APPLIANCE_FEATURE_ERD_SIZE` = 8 and why `parse_next_step_()` requires `erd_data_.sizes[data_idx] >= APPLIANCE_FEATURE_ERD_SIZE`. `is_feature_bit_erd()` is the single predicate for the 11 feature ERDs.
+
+16. **`start_feature_bit_reading()` is self-driving.** `i_bridge_services.h` declares it as beginning a sequence that needs no further polling: the startup HSM calls it once and afterwards only checks `is_feature_bits_complete()`. Nothing may advance the sequence with per-`loop()` calls (see Requirement 1.2 and the Prohibited list).

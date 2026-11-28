@@ -42,7 +42,7 @@ bool accepts_anything_else(uint8_t appliance_type)
   return false;
 }
 
-}  // namespace
+}
 
 TEST_GROUP(ha_discovery_category)
 {

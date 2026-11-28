@@ -1,20 +1,3 @@
-/*!
- * @file
- * @brief ESPHome HAL test double.
- *
- * Provides mock implementations of esphome::millis() and ESP_LOG* macros
- * so that code depending on ESPHome HAL can be unit tested.
- *
- * Usage:
- *   #include "double/esphome_hal_double.hpp"
- *
- *   // Set the simulated time.
- *   esphome_hal_double_set_millis(1000);
- *
- *   // Expect a log call.
- *   mock().expectOneCall("ESP_LOGI").withStringParameter("tag", "my_tag");
- */
-
 #ifndef esphome_hal_double_hpp
 #define esphome_hal_double_hpp
 
@@ -25,21 +8,14 @@
 extern "C" {
 #endif
 
-/*!
- * Set the simulated millis() value.
- */
 void esphome_hal_double_set_millis(uint32_t ms);
 
-/*!
- * Get the current simulated millis() value.
- */
 uint32_t esphome_hal_double_get_millis(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-/* Override the esphome::millis() function. */
 namespace esphome {
 inline uint32_t millis() {
   return esphome_hal_double_get_millis();
@@ -60,4 +36,4 @@ inline uint32_t millis() {
 #define ESP_LOGV(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_get_())
 #define ESP_LOGCONFIG(tag, ...) esp_test_log_record_((tag), esp_test_critical_depth_get_())
 
-#endif  // esphome_hal_double_hpp
+#endif

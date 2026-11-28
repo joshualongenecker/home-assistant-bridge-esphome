@@ -5,7 +5,6 @@
 #include "ha_discovery_manager.h"
 #include "ha_discovery_data.h"
 
-
 #include "CppUTest/TestHarness.h"
 
 /* The publish-backoff tests drive the real publish path through the ESPHome
@@ -457,7 +456,6 @@ TEST(ha_discovery_manager_publish_backoff, armed_window_survives_the_millis_roll
 
     mqtt_double.publish_should_fail_ = true;
     CHECK_TRUE(attempts_one_more_publish(1));
-    /* 0xFFFFFFF0 + 64 wraps to 48. */
     UNSIGNED_LONGS_EQUAL(48, manager.retry_backoff_until_ms);
 
     /* 32 ms after the wrap only 32 of the 64 ms have passed: no attempt. */

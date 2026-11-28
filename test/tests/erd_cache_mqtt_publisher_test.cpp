@@ -158,7 +158,7 @@ TEST(erd_cache_mqtt_publisher, init_handles_null_mqtt_client_gracefully)
   /* Should not crash; fields set before the null guard are still valid. */
   CHECK(publisher.cache != nullptr);
   CHECK_EQUAL(0u, publisher.publish_index);
-  CHECK(!publisher.mqtt_connected);  // Initially disconnected
+  CHECK(!publisher.mqtt_connected);
 }
 
 TEST(erd_cache_mqtt_publisher, destroy_after_init_with_null_mqtt_client)
@@ -220,7 +220,6 @@ TEST(erd_cache_mqtt_publisher, publish_publishes_one_per_call)
     0xE0);
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
-  // Insert 20 ERDs with update_required=true
   for (uint16_t i = 0; i < 20; i++) {
     uint8_t data = (uint8_t)i;
     erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
@@ -244,7 +243,6 @@ TEST(erd_cache_mqtt_publisher, publish_skips_when_mqtt_disconnected)
   uint8_t data = 0x01;
   erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
-  // Disconnect so publishing is skipped
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
 
   bool published = erd_cache_mqtt_publisher_publish_one(&publisher);
@@ -263,12 +261,10 @@ TEST(erd_cache_mqtt_publisher, publish_resumes_after_reconnect)
   uint8_t data = 0x01;
   erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
-  // Disconnect — should not publish
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
   bool published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_FALSE(published);
 
-  // Reconnect — should publish
   erd_cache_mqtt_publisher_on_connected(&publisher);
   published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_TRUE(published);
@@ -424,7 +420,6 @@ TEST(erd_cache_mqtt_publisher, armed_backoff_survives_the_millis_roll_over)
 
   mqtt_double.publish_should_fail_ = true;
   CHECK_FALSE(erd_cache_mqtt_publisher_publish_one(&publisher));
-  /* 0xFFFFFFF0 + 250 wraps to 234. */
   CHECK_EQUAL(234u, publisher.retry_backoff_until_ms);
 
   /* 100 ms after the wrap only 100 of the 250 ms have passed: no attempt. */
@@ -433,8 +428,6 @@ TEST(erd_cache_mqtt_publisher, armed_backoff_survives_the_millis_roll_over)
   CHECK_FALSE(erd_cache_mqtt_publisher_publish_one(&publisher));
   CHECK_EQUAL(1, mqtt_double.publish_calls_);
 
-  /* Past the window the entry is retried (one scan wraps the iterator, the
-   * next finds the entry). */
   esphome_hal_double_set_millis(0xFFFFFFF0u + 300u);
   CHECK_FALSE(erd_cache_mqtt_publisher_publish_one(&publisher));
   CHECK_TRUE(erd_cache_mqtt_publisher_publish_one(&publisher));
@@ -500,7 +493,6 @@ TEST(erd_cache_mqtt_publisher, on_disconnected_sets_flag)
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
   CHECK(!publisher.mqtt_connected);
 
-  // Disconnect, then reconnect
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
   CHECK(!publisher.mqtt_connected);
   erd_cache_mqtt_publisher_on_connected(&publisher);
@@ -538,7 +530,6 @@ TEST(erd_cache_mqtt_publisher, disconnect_event_is_noop_when_already_disconnecte
 
   // Start disconnected; disconnect event is a no-op, flag stays false
 
-  // Trigger disconnect through the adapter
   esphome_mqtt_client_adapter_notify_disconnected(&adapter);
 
   CHECK(!publisher.mqtt_connected);
@@ -555,7 +546,6 @@ TEST(erd_cache_mqtt_publisher, connect_event_triggers_callback)
 
   publisher.mqtt_connected = false;
 
-  // Trigger connect through the adapter
   esphome_mqtt_client_adapter_notify_connected(&adapter);
 
   CHECK(publisher.mqtt_connected);
@@ -575,21 +565,17 @@ TEST(erd_cache_mqtt_publisher, publish_advances_publish_index)
     0xE0);
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
-  // Insert 10 ERDs
   for (uint16_t i = 0; i < 10; i++) {
     uint8_t data = (uint8_t)i;
     erd_cache_update(&cache, (tiny_erd_t)(0x2000 + i), 0xFF, &data, sizeof(data));
   }
 
-  // Each call publishes one ERD and advances the index
   CHECK_TRUE(erd_cache_mqtt_publisher_publish_one(&publisher));
   CHECK_EQUAL(1u, publisher.total_published);
 
-  // Next call publishes the next ERD
   CHECK_TRUE(erd_cache_mqtt_publisher_publish_one(&publisher));
   CHECK_EQUAL(2u, publisher.total_published);
 }
-
 
 TEST(erd_cache_mqtt_publisher, publish_returns_zero_with_null_cache)
 {
@@ -640,7 +626,6 @@ TEST(erd_cache_mqtt_publisher, publish_publishes_one_per_call_with_multiple_pend
   erd_cache_update(&cache, 0x4002, 0xFF, &data_b, sizeof(data_b));
   erd_cache_update(&cache, 0x4003, 0xFF, &data_c, sizeof(data_c));
 
-  // Each call publishes exactly one ERD
   CHECK_TRUE(erd_cache_mqtt_publisher_publish_one(&publisher));
   CHECK_EQUAL(1u, publisher.total_published);
 
@@ -650,7 +635,6 @@ TEST(erd_cache_mqtt_publisher, publish_publishes_one_per_call_with_multiple_pend
   CHECK_TRUE(erd_cache_mqtt_publisher_publish_one(&publisher));
   CHECK_EQUAL(3u, publisher.total_published);
 
-  // No more pending — returns false
   CHECK_FALSE(erd_cache_mqtt_publisher_publish_one(&publisher));
 }
 
@@ -696,16 +680,13 @@ TEST_GROUP(erd_cache_change_detection)
   }
 };
 
-/* same-size, same data → no change */
 TEST(erd_cache_change_detection, same_size_same_data_no_change)
 {
   uint8_t data[] = { 0x01, 0x02, 0x03 };
   erd_cache_update(&cache, 0x1001, 0xFF, data, sizeof(data));
-  /* update with identical data */
   CHECK_FALSE(erd_cache_update(&cache, 0x1001, 0xFF, data, sizeof(data)));
 }
 
-/* same-size, different data → change detected */
 TEST(erd_cache_change_detection, same_size_different_data_change_detected)
 {
   uint8_t data1[] = { 0x01, 0x02, 0x03 };
@@ -757,7 +738,6 @@ TEST(erd_cache_change_detection, size_change_shrink_rejected)
   CHECK_FALSE(erd_cache_update(&cache, 0x1001, 0xFF, data_small, sizeof(data_small)));
 }
 
-/* New entry with data stored in arena */
 TEST(erd_cache_change_detection, arena_path_new_entry_stored)
 {
   uint8_t data[20];
@@ -778,7 +758,6 @@ TEST(erd_cache_change_detection, arena_path_new_entry_stored)
   }
 }
 
-/* Update existing arena entry with different data */
 TEST(erd_cache_change_detection, arena_path_update_existing_entry)
 {
   uint8_t data1[20];
@@ -814,12 +793,10 @@ TEST(erd_cache_change_detection, cache_overflow_rejects_new_erd)
   }
   CHECK_EQUAL(ERD_CACHE_CAPACITY, erd_cache_get_count(&cache));
 
-  /* 201st ERD should be rejected */
   uint8_t data = 0xFF;
   CHECK_FALSE(erd_cache_update(&cache, 0xFFFF, 0xFF, &data, sizeof(data)));
   CHECK_EQUAL(ERD_CACHE_CAPACITY, erd_cache_get_count(&cache));
 }
-
 
 /* #23: MQTT reconnect — ERD still published after disconnect/reconnect cycle */
 TEST(erd_cache_mqtt_publisher, publish_publishes_after_disconnect_reconnect)
@@ -834,13 +811,11 @@ TEST(erd_cache_mqtt_publisher, publish_publishes_after_disconnect_reconnect)
   uint8_t data = 0x42;
   erd_cache_update(&cache, 0x1001, 0xFF, &data, sizeof(data));
 
-  /* Simulate disconnect — publishing is skipped */
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
   bool published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_FALSE(published);
   CHECK(publisher.missed_loops > 0);
 
-  /* Simulate reconnect — the pending ERD should publish */
   erd_cache_mqtt_publisher_on_connected(&publisher);
   published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_TRUE(published);
@@ -859,15 +834,12 @@ TEST(erd_cache_mqtt_publisher, publish_no_publish_after_reconnect_when_no_change
   uint8_t data = 0x42;
   erd_cache_update(&cache, 0x1001, 0xFF, &data, sizeof(data));
 
-  /* Publish the ERD first to clear update_required */
   bool published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_TRUE(published);
 
-  /* Disconnect and reconnect */
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
-  /* No new data — nothing should be published */
   published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_FALSE(published);
 }
@@ -887,24 +859,19 @@ TEST(erd_cache_mqtt_publisher, short_disconnect_no_republish)
   uint8_t data = 0x42;
   erd_cache_update(&cache, 0x1001, 0xFF, &data, sizeof(data));
 
-  /* Publish to clear update_required */
   bool published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_TRUE(published);
 
-  /* Disconnect at t=1000 (non-zero so disconnect_start_ms != 0) */
   esphome_hal_double_set_millis(1000);
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
 
-  /* Reconnect at t=31000 (30s gap, short disconnect) */
   esphome_hal_double_set_millis(31000);
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
-  /* Should NOT republish — disconnect was too short */
   published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_FALSE(published);
 }
 
-/* Long disconnect republish: disconnect >=60s triggers full republish */
 TEST(erd_cache_mqtt_publisher, long_disconnect_republish_all)
 {
   erd_cache_mqtt_publisher_init(
@@ -916,26 +883,21 @@ TEST(erd_cache_mqtt_publisher, long_disconnect_republish_all)
   erd_cache_mqtt_publisher_set_time_fn(&publisher, esphome_hal_double_get_millis);
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
-  /* Insert 3 ERDs and publish them to clear update_required */
   uint8_t data1 = 0x01, data2 = 0x02, data3 = 0x03;
   erd_cache_update(&cache, 0x1001, 0xFF, &data1, sizeof(data1));
   erd_cache_update(&cache, 0x1002, 0xFF, &data2, sizeof(data2));
   erd_cache_update(&cache, 0x1003, 0xFF, &data3, sizeof(data3));
-  /* Publish all 3 to clear update_required */
   erd_cache_mqtt_publisher_publish_one(&publisher);
   erd_cache_mqtt_publisher_publish_one(&publisher);
   erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_EQUAL(3u, publisher.total_published);
 
-  /* Disconnect at t=1000 (non-zero so disconnect_start_ms != 0) */
   esphome_hal_double_set_millis(1000);
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
 
-  /* Reconnect at t=71000 (70s gap, exceeds 60s threshold) */
   esphome_hal_double_set_millis(71000);
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
-  /* All 3 entries should be republished — publish 3 times */
   CHECK_TRUE(erd_cache_mqtt_publisher_publish_one(&publisher));
   CHECK_TRUE(erd_cache_mqtt_publisher_publish_one(&publisher));
   CHECK_TRUE(erd_cache_mqtt_publisher_publish_one(&publisher));
@@ -960,12 +922,10 @@ TEST(erd_cache_mqtt_publisher, long_disconnect_empty_cache_safe)
   esphome_hal_double_set_millis(71000);
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
-  /* Should publish nothing, no crash */
   bool published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_FALSE(published);
 }
 
-/* Long disconnect republish: exactly 60s threshold triggers republish */
 TEST(erd_cache_mqtt_publisher, exact_threshold_republish)
 {
   erd_cache_mqtt_publisher_init(
@@ -982,7 +942,6 @@ TEST(erd_cache_mqtt_publisher, exact_threshold_republish)
   bool published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_TRUE(published);
 
-  /* Disconnect at t=1000, reconnect at exactly t=61000 (60s gap) */
   esphome_hal_double_set_millis(1000);
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
   esphome_hal_double_set_millis(61000);
@@ -1016,12 +975,10 @@ TEST(erd_cache_mqtt_publisher, just_under_threshold_no_republish)
   esphome_hal_double_set_millis(60999);
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
-  /* Just under threshold — should NOT republish */
   published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_FALSE(published);
 }
 
-/* Rate limiting: publisher reloads cooldown after successful publish */
 TEST(erd_cache_mqtt_publisher, publish_reloads_cooldown_after_publish)
 {
   erd_cache_set_throttle_rate_seconds(&cache, 5);
@@ -1040,7 +997,6 @@ TEST(erd_cache_mqtt_publisher, publish_reloads_cooldown_after_publish)
   bool published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_TRUE(published);
 
-  /* Verify cooldown was reloaded to max_cooldown. */
   uint16_t iter = 0;
   erd_cache_entry_t* entry = erd_cache_get_next_entry(&cache, &iter);
   CHECK(entry != NULL);
@@ -1062,7 +1018,6 @@ TEST(erd_cache_mqtt_publisher, publish_skips_rate_limited_entries)
   uint8_t data = 0x42;
   erd_cache_update(&cache, 0x1001, 0xFF, &data, sizeof(data));
 
-  /* First publish — immediate. */
   bool published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_TRUE(published);
 
@@ -1074,12 +1029,10 @@ TEST(erd_cache_mqtt_publisher, publish_skips_rate_limited_entries)
   published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_FALSE(published);
 
-  /* Tick cooldown to 0. */
   for (int i = 0; i < 5; i++) {
     erd_cache_tick_cooldowns(&cache);
   }
 
-  /* Now publishing should work. */
   published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_TRUE(published);
 }
@@ -1140,11 +1093,9 @@ TEST(erd_cache_mqtt_publisher, last_disconnect_duration_set_on_reconnect)
     "device",
     0xE0);
 
-  /* Simulate disconnect at time 0 (default time source returns 0). */
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
   CHECK_EQUAL(0u, erd_cache_mqtt_publisher_get_last_disconnect_duration_ms(&publisher));
 
-  /* Simulate reconnect — duration is now - 0 = 0 since time hasn't advanced. */
   erd_cache_mqtt_publisher_on_connected(&publisher);
   CHECK_EQUAL(0u, erd_cache_mqtt_publisher_get_last_disconnect_duration_ms(&publisher));
 }
@@ -1161,10 +1112,8 @@ TEST(erd_cache_mqtt_publisher, last_disconnect_duration_reflects_gap)
     0xE0);
   erd_cache_mqtt_publisher_set_time_fn(&publisher, +[]() -> uint32_t { return fake_time; });
 
-  /* Disconnect at t=2000. */
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
 
-  /* Advance time to t=6000 (4 second gap). */
   fake_time = 6000;
   erd_cache_mqtt_publisher_on_connected(&publisher);
 
@@ -1203,7 +1152,6 @@ TEST(erd_cache_mqtt_publisher, last_disconnect_duration_overwritten_on_subsequen
   fake_time = 1000;
 }
 
-/* Cumulative disconnect duration across multiple ESPHome reconnect attempts */
 TEST(erd_cache_mqtt_publisher, cumulative_disconnect_duration_across_reconnect_attempts)
 {
   static uint32_t fake_time = 1000;
@@ -1215,8 +1163,6 @@ TEST(erd_cache_mqtt_publisher, cumulative_disconnect_duration_across_reconnect_a
     0xE0);
   erd_cache_mqtt_publisher_set_time_fn(&publisher, +[]() -> uint32_t { return fake_time; });
 
-  /* Simulate a prolonged outage with ESPHome reconnect attempts every ~15s.
-   * Disconnect at t=1000, then rapid connect/disconnect cycles. */
   erd_cache_mqtt_publisher_on_disconnected(&publisher);
 
   /* First reconnect attempt at t=1015000 (15s later). */
@@ -1373,8 +1319,6 @@ TEST(erd_cache_mqtt_publisher, signal_work_ignores_clean_entries_in_a_large_cach
     erd_cache_update(&cache, (tiny_erd_t)(0x1000 + i), 0xFF, &data, sizeof(data));
   }
 
-  /* Drain through the same read path the publish task uses: entries stay valid and
-   * keep their payloads, only the dirty flags clear. */
   uint16_t iter = 0;
   while (erd_cache_snapshot_next_updated(&cache, &iter, NULL, NULL, NULL, NULL, NULL)) {
   }
@@ -1396,7 +1340,6 @@ TEST(erd_cache_mqtt_publisher, signal_work_ignores_clean_entries_in_a_large_cach
   CHECK_EQUAL(2, (int) xSemaphoreGive_double_count);
   CHECK_EQUAL(0, (int) publisher.last_work_signal_ms);
 }
-
 
 /* The threshold is exclusive, so 11 is the first backlog that gets paced.  Pinning
  * both sides is what catches the gate being written with >= instead of >, or the
@@ -1481,7 +1424,6 @@ TEST(erd_cache_mqtt_publisher, signal_work_never_suppresses_the_first_wake)
   CHECK_EQUAL(1, (int) xSemaphoreGive_double_count);
   CHECK_EQUAL(50, (int) publisher.last_work_signal_ms);
 
-  /* Paced from then on. */
   xSemaphoreGive_double_count = 0;
   esphome_hal_double_set_millis(60);
   erd_cache_mqtt_publisher_signal_work(&publisher);
@@ -1512,7 +1454,7 @@ TEST(erd_cache_mqtt_publisher, pacing_never_locks_out_after_a_long_idle_period)
   }
 
   publisher.last_work_signal_ms = 5000;
-  const uint32_t much_later = 5000u + 2147485648u;  // 2^31 + 2000 ms of idle time
+  const uint32_t much_later = 5000u + 2147485648u;
 
   xSemaphoreGive_double_count = 0;
   esphome_hal_double_set_millis(much_later);

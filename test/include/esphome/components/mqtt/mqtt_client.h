@@ -1,8 +1,3 @@
-/*!
- * @file
- * @brief Stub for esphome/components/mqtt/mqtt_client.h — provides MQTTClientComponent for tests.
- */
-
 #ifndef esphome_components_mqtt_mqtt_client_h
 #define esphome_components_mqtt_mqtt_client_h
 
@@ -12,7 +7,6 @@
 
 namespace esphome {
 namespace mqtt {
-
 
 enum class MQTTClientDisconnectReason : int8_t {
   TCP_DISCONNECTED = 0,
@@ -43,10 +37,9 @@ class MQTTClientComponent {
   static MQTTClientComponent* global_mqtt_client;
 };
 
-/* Namespace-level global for code that accesses esphome::mqtt::global_mqtt_client directly */
 inline MQTTClientComponent* global_mqtt_client = nullptr;
 
-}  // namespace mqtt
-}  // namespace esphome
+}
+}
 
-#endif  // esphome_components_mqtt_mqtt_client_h
+#endif

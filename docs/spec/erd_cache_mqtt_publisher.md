@@ -288,7 +288,9 @@ Override the time source (defaults to `esphome::millis`). Used for testing to co
 
 ## 11. Pause / Resume / First Round Done
 
-The publisher supports temporarily pausing and resuming publishing, with a mechanism to detect when a full cache round has completed after resuming. These functions are primarily used to reduce MQTT queue contention during Home Assistant discovery cleanup.
+The publisher supports temporarily pausing and resuming publishing, with a mechanism to detect when a full cache
+round has completed after resuming. The bridge drives both automatically while a Home Assistant discovery run is
+generating and publishing its config payloads; see §11.5 and §12.2 for the exact gating condition.
 
 ### 11.1 Pause
 
@@ -307,7 +309,11 @@ void erd_cache_mqtt_publisher_resume(erd_cache_mqtt_publisher_t* self);
 ```
 
 - Sets `paused = false`
-- **Thread-safe**: acquires `state_mutex` (100 ms timeout) before modifying state; falls back to unprotected write if mutex creation failed. If the mutex exists but the take times out, `resume()` does nothing at all — `paused` stays set and no wake is signalled (`erd_cache_mqtt_publisher.cpp:512-523`). Nothing retries inside the call; recovery comes from the main loop, which calls `resume()` on every iteration while a cache is attached and discovery is idle (`geappliances_bridge.cpp:331`)
+- **Thread-safe**: acquires `state_mutex` (100 ms timeout) before modifying state; falls back to unprotected write
+  if mutex creation failed. If the mutex exists but the take times out, `resume()` does nothing at all — `paused`
+  stays set and no wake is signalled (`erd_cache_mqtt_publisher_resume()` in `erd_cache_mqtt_publisher.cpp`).
+  Nothing retries inside the call; recovery comes from `GeappliancesBridge::update_publisher_state_()`, which calls
+  `resume()` on every `loop()` iteration while a cache is attached and HA discovery is not processing
 - After clearing `paused`, calls `erd_cache_mqtt_publisher_signal_work()` so the background task can resume draining. That call is gated: while more than `PUBLISH_PACE_BACKLOG_THRESHOLD` entries are dirty the wake can be deferred by up to `PUBLISH_PACE_INTERVAL_MS` (see §2.5), so `resume()` does not guarantee a give — the main loop calls `signal_work()` again on its next iteration
 - Does **not** reset `first_round_done` — the flag is set by the publish loop itself when a full round completes
 
@@ -332,13 +338,87 @@ bool erd_cache_mqtt_publisher_first_round_done(erd_cache_mqtt_publisher_t* self)
 - When `resume()` is called, it clears `paused` and calls `signal_work()`, which normally wakes the task immediately; while a large backlog is queued that wake can be deferred by up to `PUBLISH_PACE_INTERVAL_MS` (§2.5). The deferral is bounded by one interval plus one main-loop iteration, because the loop re-signals every pass
 - The task publishes one entry per wake; when the snapshot finds no entry and `first_round_done` is not yet set, it is set to `true`
 
-### 11.5 Use Case: Pausing During HA Discovery
+### 11.5 Use Case: Pausing During a Home Assistant Discovery Run
 
-The primary use case for pause/resume is to avoid MQTT config storms during Home Assistant discovery cleanup:
+The bridge drives pause/resume automatically; no other module calls them.
+`GeappliancesBridge::update_publisher_state_()` runs once per `loop()` and tracks the transition with
+`PublisherPausePhase` (`kIdle`, `kPaused`, `kResuming`):
 
-1. Before starting HA discovery cleanup, call `erd_cache_mqtt_publisher_pause()` to stop the background task from publishing cache updates
-2. Perform discovery cleanup (which may generate a burst of MQTT config messages)
-3. Call `erd_cache_mqtt_publisher_resume()` to restart the background task
-4. Optionally poll `erd_cache_mqtt_publisher_first_round_done()` to confirm the publisher has drained all accumulated cache updates before proceeding
+1. While `ha_discovery_manager_is_processing()` is true, call `erd_cache_mqtt_publisher_pause()` so the ERD drain
+   stays out of the MQTT outbound queue while the discovery run generates and publishes its config payloads
+2. When it goes false, call `erd_cache_mqtt_publisher_resume()` and move `kPaused` to `kResuming`
+3. Once `erd_cache_mqtt_publisher_first_round_done()` confirms the post-resume drain, log "Device is in steady
+   state" and move `kResuming` to `kIdle`
+4. Call `erd_cache_mqtt_publisher_signal_work()` on the same condition as `resume()` — only while HA discovery is not
+   processing
 
-This prevents the background task from competing for MQTT queue space with discovery messages, reducing the risk of queue overflow or dropped messages during the transition.
+The calls are level-driven, not edge-driven: whichever branch matches runs its call on every `loop()` iteration, so a
+timed-out mutex take inside either one is retried by the next iteration (§12.5).
+
+This keeps the ERD drain from competing for MQTT queue space with the discovery config burst — the queue pressure
+ADR-0010 measures.
+
+---
+
+## 12. Notes
+
+Cross-cutting decisions live in ADR-0004 (cache arena and snapshot read path), ADR-0005 (pinned task, state mutex,
+task stack, shutdown handshake), ADR-0010 (backoff, pacing, reconnect re-drain), ADR-0011 and ADR-0012 (board
+address and topic grammar), and ADR-0016 (value-init and guarded destroy). Only module-local decisions and
+tradeoffs are listed here.
+
+1. **The 60-second rate windows are set by the sampler, not by the publisher.**
+   `erd_cache_mqtt_publisher_get_publish_rate()` returns `publish_count_window` and resets it; the window's length
+   is the interval at which `DiagnosticSensorPublisher::loop()` samples, `ERD_PUBLISH_RATE_INTERVAL_MS` (60 000 ms)
+   in `diagnostic_sensor_publisher.h`. The same sampler drives the cache-side windows
+   `erd_cache_get_update_rate()` (the "ERD Publish Rate" sensor) and `erd_cache_get_required_update_rate()`.
+   Changing the sampler interval therefore changes the denominator of every rate sensor without touching the modules
+   that produce them.
+   Each of these getters is read-and-reset, so it has exactly one consumer: a second reader would steal counts from the
+   first, not observe the same window.
+
+2. **Pause covers discovery payload generation, not the cleanup phase.**
+   `ha_discovery_manager_is_processing()` is true only for `ha_discovery_state_building` and
+   `ha_discovery_state_discovering`, and the manager enters `building` in
+   `DiscoveryLifecycleManager::begin_publish_()`. The cleanup phase (`kPhaseCleaning`, driven by
+   `ha_discovery_cleanup_run()`) runs before `begin_publish_()`, so the ERD publisher keeps publishing while topics are
+   being removed. Do not "restore" a pause around cleanup: it would idle the data path for the wrong window.
+
+3. **`first_round_done` is a scan-completion signal, not a delivery proof.** `publish_one()` sets it when
+   `erd_cache_snapshot_next_updated()` returns no entry, which means the scan from `publish_index` to the end of
+   the entry array found nothing pending and the iterator wrapped to 0. Entries re-marked dirty at indices the
+   scan has already
+   passed wait for the next pass. The bridge's `kResuming` to `kIdle` transition ("Device is in steady state") therefore
+   reports an empty backlog at the scan end, not a confirmed broker state. `resume()` deliberately does not reset it;
+   `pause()` and `on_connected()` do.
+
+4. **The steady-state read comes before the loop's own `signal_work()`.** `update_publisher_state_()` reads
+   `first_round_done()` before the `signal_work()` at the end of the same function, because the background task sets the
+   flag during the drain that this give can start: pacing can defer a wake, but it can never advance one past the read.
+   The read is not ordered against every wake — `resume()` in the same function signals work on the same iteration
+   whenever a cache is attached, whether or not HA discovery had paused the publisher.
+
+5. **A timed-out `state_mutex` take drops the update instead of blocking.** Every acquisition uses a 100 ms timeout.
+   On timeout the task loop keeps `mqtt_connected`/`paused`/dependency checks false and skips the iteration;
+   `publish_one()` skips its stats block, so `total_published` and `publish_count_window` can under-count;
+   `resume()` leaves `paused` set and gives no wake. Nothing retries inside the call — the main loop re-drives
+   `resume()` and `signal_work()` every iteration, and the value itself is protected by the cache lock
+   (ADR-0004), so only diagnostics can lose an update.
+
+6. **Every time-based window in this module needs the injected clock.** `retry_backoff_until_ms`, the pacing window
+   (`last_work_signal_ms`), and the disconnect duration all read `self->get_time_ms()`, which `init()` sets to
+   `esphome::millis`. A test that exercises backoff or pacing MUST install a clock through
+   `erd_cache_mqtt_publisher_set_time_fn()`: the host harness `millis()` double is frozen unless the test advances
+   it, so the windows never open and the branches under test never run. The same seam exists for the polling bridge
+   (`erd_bridge_poll_set_time_fn()`) and the discovery manager (`ha_discovery_manager_set_time_fn()`).
+
+7. **`disconnect_count` counts disconnect events, not outages.** `on_disconnected()` increments it on every event, so a
+   flapping broker inflates it, while `disconnect_start_ms` keeps the cumulative outage anchor across reconnect
+   attempts (ADR-0010). The two diagnostic sensors — disconnect count and last disconnect duration — answer
+   different questions and must not be compared.
+
+8. **The board-address argument in `publish_one()` is not this module's decision.** The publisher stores the primary
+   host's detected physical address and passes
+   `snap_addr == self->primary_board_address ? ERD_TOPIC_PRIMARY : snap_addr` to `erd_topic_format()`. Why the
+   cache holds only physical addresses, why `0xFF` can never be one, and why the primary board keeps the legacy
+   no-prefix topic are decided in ADR-0011 and ADR-0012.

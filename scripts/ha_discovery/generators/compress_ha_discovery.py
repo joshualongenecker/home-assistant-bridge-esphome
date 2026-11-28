@@ -17,11 +17,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from pipeline.ha_constants import CATEGORIES_LIST as CATEGORIES
 
-
-# FNV-1a 32-bit hash constants
 FNV1A_32_PRIME = 0x01000193
 FNV1A_32_OFFSET = 0x811c9dc5
-
 
 def fnv1a_32(data: bytes) -> int:
     """Compute FNV-1a 32-bit hash."""
@@ -31,18 +28,14 @@ def fnv1a_32(data: bytes) -> int:
         h = (h * FNV1A_32_PRIME) & 0xFFFFFFFF
     return h
 
-
 # Target decompressed chunk size (must fit in decompress_buf: 18KB).
 CHUNK_TARGET_DECOMPRESSED = 4000
-
 
 def category_to_cpp_name(category: str) -> str:
     return category.lower()
 
-
 def compress_chunk(data: bytes) -> bytes:
     return zlib.compress(data, level=9)
-
 
 def split_into_chunks(raw_data: bytes) -> list:
     """Split raw data into chunks, each decompressing to <= CHUNK_TARGET_DECOMPRESSED.
@@ -77,7 +70,6 @@ def split_into_chunks(raw_data: bytes) -> list:
     
     return chunks
 
-
 def bytes_to_c_array(data: bytes, indent: int = 2) -> str:
     lines = []
     indent_str = ' ' * indent
@@ -87,7 +79,6 @@ def bytes_to_c_array(data: bytes, indent: int = 2) -> str:
         comma = ',' if i + 16 < len(data) else ''
         lines.append(f'{indent_str}{hex_values}{comma}')
     return '\n'.join(lines)
-
 
 def generate_header(input_dir: Path, header_name: str = "ha_discovery_data") -> str:
     lines = []
@@ -125,7 +116,6 @@ def generate_header(input_dir: Path, header_name: str = "ha_discovery_data") -> 
     lines.append('} ha_discovery_category_t;')
     lines.append('')
     
-    # Process all categories
     category_data = {}
     for category in CATEGORIES:
         jsonl_path = input_dir / f'{category}.jsonl'
@@ -158,7 +148,6 @@ def generate_header(input_dir: Path, header_name: str = "ha_discovery_data") -> 
             'raw_size': len(raw_data),
         }
     
-    # Generate chunk tables and data arrays (extern declarations only)
     for cpp_name, info in category_data.items():
         lines.append(f'// {info["category"]}.jsonl chunks')
         lines.append(f'extern const ha_discovery_chunk_t ha_discovery_chunk_{cpp_name}[];')
@@ -168,14 +157,10 @@ def generate_header(input_dir: Path, header_name: str = "ha_discovery_data") -> 
         lines.append(f'extern const uint8_t ha_discovery_data_{cpp_name}[];')
         lines.append('')
 
-    # Compute FNV-1a hash of all discovery data for change detection.
-    # Hash is computed over all compressed data in category order,
-    # so any change to discovery definitions changes the hash.
     hash_input = b''.join(info['all_compressed'] for info in category_data.values())
     discovery_hash = fnv1a_32(hash_input)
     print(f"  Discovery data hash: 0x{discovery_hash:08x}", file=sys.stderr)
 
-    # Generate category array (extern declaration)
     lines.append('/* Category table */')
     lines.append('extern const ha_discovery_category_t ha_discovery_categories[];')
     lines.append('')
@@ -199,7 +184,6 @@ def generate_cpp(input_dir: Path, header_name: str = "ha_discovery_data") -> str
     lines.append(f'#include "{header_name}.h"')
     lines.append('')
 
-    # Process all categories
     category_data = {}
     for category in CATEGORIES:
         jsonl_path = input_dir / f'{category}.jsonl'
@@ -231,7 +215,6 @@ def generate_cpp(input_dir: Path, header_name: str = "ha_discovery_data") -> str
             'raw_size': len(raw_data),
         }
 
-    # Generate chunk tables and data arrays (definitions)
     for cpp_name, info in category_data.items():
         lines.append(f'// {info["category"]}.jsonl chunks')
         lines.append(f'const ha_discovery_chunk_t ha_discovery_chunk_{cpp_name}[] = {{')
@@ -247,7 +230,6 @@ def generate_cpp(input_dir: Path, header_name: str = "ha_discovery_data") -> str
         lines.append('};')
         lines.append('')
 
-    # Generate category array (definition)
     lines.append('/* Category table */')
     lines.append('const ha_discovery_category_t ha_discovery_categories[] = {')
     for cpp_name, info in category_data.items():
@@ -274,13 +256,11 @@ def generate_header_to_file(input_dir: Path, output_dir: Path, header_name: str 
     with open(output_file, 'w') as f:
         f.write(header)
 
-    # Also generate .cpp companion
     cpp_content = generate_cpp(input_dir, header_name)
     cpp_file = output_dir / 'components' / 'geappliances_bridge' / f'{header_name}.cpp'
     print(f"Writing compressed source to {cpp_file}")
     with open(cpp_file, 'w') as f:
         f.write(cpp_content)
-
 
 def main():
     import argparse
@@ -316,14 +296,12 @@ def main():
     with open(output_file, 'w') as f:
         f.write(header)
 
-    # Also generate .cpp companion
     cpp_content = generate_cpp(input_dir, args.header_name)
     cpp_file = repo_root / 'components' / 'geappliances_bridge' / f'{args.header_name}.cpp'
     print(f"Writing compressed source to {cpp_file}")
     with open(cpp_file, 'w') as f:
         f.write(cpp_content)
 
-    # Print summary
     total_compressed = 0
     total_uncompressed = 0
     total_chunks = 0
@@ -348,7 +326,6 @@ def main():
     print(f"  Max decompressed:   {max_decompressed:,} bytes")
     print(f"  Ratio: {ratio:.1f}%")
     print("Done!")
-
 
 if __name__ == '__main__':
     main()

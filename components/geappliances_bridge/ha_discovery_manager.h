@@ -1,16 +1,3 @@
-/*!
- * Main-loop design: start() builds the sorted ERD list and device JSON
- * inline; run() is called from the main loop and publishes one entity per
- * call, keeping loop times low.
- *
- * States: IDLE -> BUILDING -> DISCOVERING -> COMPLETE / FAILED
- *
- * The three large buffers (decomp ~18 KB, line ~18 KB, payload ~8 KB) and the
- * ~8 KB tinfl decompressor state are heap-allocated only for the duration of a
- * discovery run; on non-discovery boots they are never allocated. Peak memory
- * during discovery: those four allocations + the sorted ERD array (~1.3 KB).
- */
-
 #ifndef ha_discovery_manager_h
 #define ha_discovery_manager_h
 
@@ -44,16 +31,12 @@ typedef enum {
   ha_discovery_state_failed
 } ha_discovery_state_t;
 
-/* Uses POLLING_LIST_MAX_SIZE from erd_lists.h as the single source of truth. */
 #define HA_DISCOVERY_MAX_ERDS POLLING_LIST_MAX_SIZE
 
-/* Must be >= max decompressed chunk size (range category has 17770 bytes). */
 #define HA_DISCOVERY_DECOMP_BUF_SIZE 18432
 
-/* Matches the decomp buffer size. */
 #define HA_DISCOVERY_LINE_BUF_SIZE 18432
 
-/* Topic buffer size for HA discovery topics (must fit worst-case topic + null). */
 #define HA_DISCOVERY_TOPIC_BUF_SIZE 192
 #define HA_DISCOVERY_FIELD_ID_BUF_SIZE 72
 #define HA_DISCOVERY_UNIQUE_ID_BUF_SIZE 160
@@ -61,24 +44,13 @@ typedef enum {
 #define HA_DISCOVERY_AVAILABILITY_TOPIC_BUF_SIZE 128
 #define HA_DISCOVERY_AVAILABILITY_PAYLOAD_BUF_SIZE 32
 
-/*!
- * A configured custom ERD on an explicitly addressed board: what
- * GeappliancesBridge::add_custom_erds_with_addresses() received. The layout
- * matches probe_entry_t and the bridge's custom_erd_entry_t, so the bridge
- * lends its own array (see ha_discovery_manager_set_configured_board_erds()).
- */
 typedef struct {
   uint16_t erd;
   uint8_t board_address;
 } ha_discovery_board_erd_t;
 
-/*!
- * Peak memory: payload buffer (~8 KB) + decompress buffer (~18 KB) +
- * line buffer (~18 KB) + tinfl decompressor state (~8 KB) + sorted ERD
- * array (~1.3 KB).
- */
 typedef struct {
-  erd_cache_t* cache;              // Shared ERD cache (owned by GeappliancesBridge)
+  erd_cache_t* cache;
   i_mqtt_client_t* mqtt_client;
   const char* device_id;
   const char* model_number;
@@ -90,47 +62,28 @@ typedef struct {
 
   uint32_t total_discovered;
   uint32_t total_published;
-  uint32_t total_filtered;         // Entities filtered out (ERD not registered)
-  /* Entities published for a configured board ERD that was not in the cache
-   * (its board did not answer at this boot; issue #212). Counted in
-   * total_published too. */
+  uint32_t total_filtered;
   uint32_t total_uncached_configured;
 
-  /* Not a statistic: a one-line channel from process_jsonl_line() to the
-   * publish site in run(). Valid only between a process_jsonl_line() call
-   * that returned true and the publish of that line; every call resets it. */
   bool line_uncached_configured;
 
   uint16_t sorted_erds[HA_DISCOVERY_MAX_ERDS];
   uint16_t sorted_erds_count;
 
-  /* tinfl state. Heap-allocated only while a discovery run is active, like the
-   * buffers below: it is ~8 KB of huffman-table scratch that is re-initialized
-   * for every chunk, so it earns no space outside a run. */
   tinfl_decompressor* decomp_state;
-  /* Heap-allocated only while a discovery run is active; NULL otherwise, so
-   * non-discovery boots don't carry the ~52 KB of run allocations in the object. */
   uint8_t* decomp_buf;
 
-  /* Line parsing buffer. Heap-allocated only while a discovery run is active. */
   char* line_buf;
 
-  /* Topic buffer (small; stays a static member). */
   char topic_buf[HA_DISCOVERY_TOPIC_BUF_SIZE];
-  /* Heap-allocated only while a discovery run is active. */
   char* payload_buf;
 
   char device_json_buf[512];
 
-  /* ESPHome birth/LWT availability, copied by set_availability(). An empty
-   * topic omits availability from every discovery payload. */
   char availability_topic_buf[HA_DISCOVERY_AVAILABILITY_TOPIC_BUF_SIZE];
   char payload_available_buf[HA_DISCOVERY_AVAILABILITY_PAYLOAD_BUF_SIZE];
   char payload_not_available_buf[HA_DISCOVERY_AVAILABILITY_PAYLOAD_BUF_SIZE];
 
-  /* Entity field buffers (avoid stack overflow in process_jsonl_line).
-   * Templates are NOT stored here — they are embedded directly from the raw
-   * JSONL line into the payload buffer with proper re-escaping. */
   char entity_name_buf[160];
   char erd_id_hex_buf[8];
   char domain_buf[32];
@@ -167,9 +120,6 @@ typedef struct {
   uint16_t custom_num_chunks;
   uint16_t custom_max_decompressed_chunk;
   uint32_t custom_data_hash;
-  /* Borrowed from the bridge and preserved across init(), like the custom
-   * data above: the configured (erd, board) pairs whose lines are published
-   * even when the ERD is not in the cache. NULL/0 = none. */
   const ha_discovery_board_erd_t* configured_board_erds;
   uint16_t configured_board_erds_count;
   ha_discovery_cleanup_t cleanup;
@@ -183,43 +133,20 @@ typedef struct {
    * happens after ha_discovery_manager_cleanup() zeroed the struct. */
   uint32_t (*get_time_ms)(void);
 
-  /* Config publish attempts are suppressed until this timestamp after one was
-   * dropped by the MQTT backend. 0 means no window is armed;
-   * ha_discovery_manager_init() zeroes it, so every run starts with an
-   * immediate attempt. */
   uint32_t retry_backoff_until_ms;
 
-  /* Pre-computed "homeassistant/{domain}/{device_id}/" prefix to avoid
-   * repeated snprintf during discovery publish. */
   char domain_topic_prefix[128];
   char current_domain_prefix_buf[32];
 
 } ha_discovery_manager_t;
 
-/*!
- * Call once before configure().
- */
 void ha_discovery_manager_init(ha_discovery_manager_t* self);
 void ha_discovery_manager_set_custom_data(ha_discovery_manager_t* self,
   const uint8_t* data, const void* chunks, uint16_t num_chunks, uint16_t max_chunk, uint32_t data_hash);
 
-/*!
- * The configured custom ERDs (issue #212). A JSONL line that names an explicit
- * board address ("a") and whose (ERD, board) pair -- and paired ERD, if any --
- * is in this list is published even when the ERD is not in the cache, so a
- * secondary board that is silent at one boot leaves its entities stale in Home
- * Assistant instead of deleted. Every other line keeps the cache filter. An
- * entry whose board_address is the primary sentinel (0xFF) never matches: a
- * line's explicit address can never be 0xFF. The array is borrowed (it must
- * outlive the manager), may be unsorted, and survives init() like the custom
- * data. NULL or a zero count turns the exemption off.
- */
 void ha_discovery_manager_set_configured_board_erds(ha_discovery_manager_t* self,
   const ha_discovery_board_erd_t* erds, uint16_t count);
 
-/*!
- * Call after init(), before start().
- */
 void ha_discovery_manager_configure(
   ha_discovery_manager_t* self,
   const char* device_id,
@@ -230,41 +157,18 @@ void ha_discovery_manager_configure(
   erd_cache_t* cache,
   i_mqtt_client_t* mqtt_client);
 
-/*!
- * Call after configure(), before start(). Adds an availability topic to
- * every discovery payload so HA marks entities unavailable when the bridge's
- * MQTT last will fires. payload_available / payload_not_available are only
- * emitted when they differ from HA's defaults ("online" / "offline"); NULL
- * means the default. A NULL/empty topic, or a value that is too long or not
- * JSON-safe, leaves availability disabled.
- */
 void ha_discovery_manager_set_availability(
   ha_discovery_manager_t* self,
   const char* topic,
   const char* payload_available,
   const char* payload_not_available);
 
-/*!
- * Fingerprint of everything that determines the published discovery payloads:
- * the generated data (HA_DISCOVERY_DATA_HASH), the optional custom profile,
- * and the runtime-injected availability topic/payloads. Used by
- * DiscoveryLifecycleManager for change detection: any change to these inputs must
- * change this value so a cleanup/republish is triggered. With availability
- * unset the value is identical to pre-availability firmware, so those
- * installs do not get a spurious republish.
- */
 uint32_t ha_discovery_manager_data_hash(const ha_discovery_manager_t* self);
 
 void ha_discovery_manager_start(ha_discovery_manager_t* self);
 
 void ha_discovery_manager_run(ha_discovery_manager_t* self);
 
-/* Total heap a run needs for its four temporary allocations: the decompress
- * buffer, the line buffer, the payload buffer and the tinfl state. They are
- * allocated by ha_discovery_manager_start() and released when the run ends.
- * DiscoveryLifecycleManager gates a run on this so a run that cannot fit is
- * not started (issue #203): a run that dies part-way through a cleanup leaves
- * Home Assistant with no discovery configs. */
 uint32_t ha_discovery_manager_run_allocation_size(void);
 
 /* Override the time source after init (test seam; mirrors
@@ -283,13 +187,8 @@ bool ha_discovery_manager_is_processing(ha_discovery_manager_t* self);
 
 ha_discovery_state_t ha_discovery_manager_get_state(ha_discovery_manager_t* self);
 
-/* Entities published successfully so far in the current run. Survives
- * cleanup_resources(), so a caller can tell a slow-but-progressing run from a
- * stalled one -- the lifecycle phase machine uses it as its publish-progress
- * signal. Only ha_discovery_manager_init()/cleanup() reset it. */
 uint32_t ha_discovery_manager_total_published(const ha_discovery_manager_t* self);
 
-/* Test-only exports. */
 #ifdef HA_DISCOVERY_TEST_EXPORT
 void cleanup_topic_callback(const char* topic, const char* payload, size_t payload_len, void* arg);
 void cleanup_start(ha_discovery_cleanup_t* self);

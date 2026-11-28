@@ -34,12 +34,10 @@ from ha_constants import (
     PROTOCOL_MARKERS,
 )
 
-
 def _is_writable(entry):
     """Check if field is writable based on ERD operations."""
     operations = entry.get('erd_operations', [])
     return 'write' in operations
-
 
 def _is_enum(entry):
     """Check if field has enum values."""
@@ -57,7 +55,6 @@ def _enum_value_count(entry):
         count += 1
     return count
 
-
 def _functional_labels(entry):
     """Get enum labels excluding protocol markers, lowercased."""
     values = entry.get('field_values', {})
@@ -65,8 +62,6 @@ def _functional_labels(entry):
         return set()
     return {v.lower() for v in values.values() if v not in PROTOCOL_MARKERS}
 
-
-# Comprehensive set of binary-like labels.
 BINARY_LABELS = {
     'on', 'off',
     'true', 'false',
@@ -99,12 +94,10 @@ BINARY_LABELS = {
     'add 30 seconds', 'no action',
 }
 
-# Labels that indicate a descriptive command, NOT a binary toggle
 DESCRIPTIVE_COMMANDS = {
     'no action required', 'reset filter',
     'go to agitate', 'go to spin',
 }
-
 
 def _is_binary_enum(entry):
     """Check if enum values form a binary pair (on/off-like semantics).
@@ -116,15 +109,12 @@ def _is_binary_enum(entry):
     if len(labels) != 2:
         return False
 
-    # If both labels are in the binary set, it's binary
     if labels.issubset(BINARY_LABELS):
-        # But if both are in descriptive commands, it's NOT binary
         if labels.issubset(DESCRIPTIVE_COMMANDS):
             return False
         return True
 
     return False
-
 
 def _binary_enum_keyed_zero_one(entry):
     """Check that a binary enum's functional values are exactly 0 and 1.
@@ -144,18 +134,15 @@ def _binary_enum_keyed_zero_one(entry):
             return False
     return keys == {0, 1}
 
-
 def _is_bit_field(entry):
     """Check if field is a bit-field (field_bits is a dict)."""
     bits = entry.get('field_bits')
     return isinstance(bits, dict)
 
-
 def _bit_field_size(entry):
     """Get bit-field size in bits."""
     bits = entry.get('field_bits', {})
     return bits.get('size', 0)
-
 
 def infer_ha_domain(entry):
     """Infer ha_domain from field type, device_class, and operations.
@@ -176,17 +163,14 @@ def infer_ha_domain(entry):
 
         if count == 2:
             if _is_binary_enum(entry) and _binary_enum_keyed_zero_one(entry):
-                # Binary enum: on/off-like semantics
                 if writable:
                     return 'switch', 0.9
                 return 'binary_sensor', 0.9
             else:
-                # Descriptive 2-value enum
                 if writable:
                     return 'select', 0.85
                 return 'sensor', 0.85
         else:
-            # Multi-value enum (3+)
             if writable:
                 return 'select', 0.9
             return 'sensor', 0.9
@@ -209,11 +193,9 @@ def infer_ha_domain(entry):
             if writable:
                 return 'switch', 0.9
             return 'binary_sensor', 0.9
-        # Multi-bit fields: writable -> number, read-only -> sensor
         if writable:
             return 'number', 0.85
         return 'sensor', 0.85
-
 
     # --- String type ---
     if field_type == 'string':
@@ -226,7 +208,6 @@ def infer_ha_domain(entry):
         return 'sensor', 0.9
 
     return None, None
-
 
 def apply_detection(entries):
     """Walk all entries, detect ha_domain, and overwrite review field.
@@ -246,7 +227,6 @@ def apply_detection(entries):
         if domain is None:
             continue
 
-        # Only write when not already set, preserving manual overrides.
         if review.get('ha_domain'):
             continue
 
@@ -256,9 +236,6 @@ def apply_detection(entries):
         total_applied += 1
 
     return total_checked, total_matched, total_applied
-
-
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -291,7 +268,6 @@ def main():
         with open(args.input, 'w', encoding='utf-8') as f:
             json.dump(entries, f, indent=2, ensure_ascii=False)
         print(f"Output: {args.input}")
-
 
 if __name__ == '__main__':
     main()

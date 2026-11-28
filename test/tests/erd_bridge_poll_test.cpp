@@ -74,7 +74,6 @@ TEST_GROUP_BASE(erd_bridge_poll, simulation_test_base)
       .andReturnValue(true);
   }
 
-
   template <typename T>
   void when_a_poll_read_completes(uint8_t address, tiny_erd_t erd, T value)
   {
@@ -98,13 +97,11 @@ TEST(erd_bridge_poll, should_preserve_cache_data_on_reprobe_after_appliance_lost
   trigger_read_completed(0xC0, polled_erd, &initial_value, sizeof(initial_value));
   mock().enable();
 
-  // Bridge should now be in polling state with 1 ERD in the cache.
   CHECK_EQUAL(1u, erd_cache_get_count(&test_cache));
 
   // Set up mock for re-probe after appliance lost.
   should_request_read(0xC0, polled_erd);
 
-  // Trigger appliance lost signal.
   tiny_hsm_send_signal(&self.hsm, signal_appliance_lost, nullptr);
 
   // Re-probe: the ERD responds with a new value.
@@ -114,7 +111,6 @@ TEST(erd_bridge_poll, should_preserve_cache_data_on_reprobe_after_appliance_lost
   // The cache should still have 1 entry with the updated value.
   CHECK_EQUAL(1u, erd_cache_get_count(&test_cache));
 
-  // Verify the ERD has the updated value.
   uint16_t iter = 0;
   erd_cache_entry_t* entry = erd_cache_get_next_entry(&test_cache, &iter);
   CHECK(entry != nullptr);
@@ -208,7 +204,6 @@ TEST(erd_bridge_poll, should_register_and_poll_erd_whose_discovery_response_arri
   // the next cycle (all reads for this cycle were already fired).
   when_a_poll_read_completes(0xC0, late_erd, uint8_t(0xAB));
 
-  // polled_erd arrives next
   when_a_poll_read_completes(0xC0, polled_erd, uint8_t(0x01));
 
   // Cycle 2: late_erd is now in the polling list alongside polled_erd,
@@ -222,7 +217,6 @@ TEST(erd_bridge_poll, should_register_and_poll_erd_whose_discovery_response_arri
   when_a_poll_read_completes(0xC0, late_erd, uint8_t(0xAB));
 }
 
-// Same late-response scenario, default on-change behavior.
 TEST(erd_bridge_poll, should_register_and_poll_late_erd)
 {
   enum { late_erd = 0x7b05 };
@@ -311,7 +305,6 @@ TEST_GROUP_BASE(erd_bridge_poll_probe_list, simulation_test_base)
       .andReturnValue(true);
   }
 
-
   template <typename T>
   void when_a_poll_read_completes(uint8_t address, tiny_erd_t erd, T value)
   {
@@ -320,20 +313,16 @@ TEST_GROUP_BASE(erd_bridge_poll_probe_list, simulation_test_base)
 
 };
 
-// When probe list is provided with a known host, the bridge skips broadcast
-// and goes straight to probing the list.
 TEST(erd_bridge_poll_probe_list, should_probe_list_and_poll_successfully)
 {
   mock().disable();
   when_the_bridge_is_initialized_with_probe_list();
 
-  // Probe phase: both ERDs respond successfully.
   uint8_t probe_val = 0x01;
   trigger_read_completed(0xC0, probe_erd_1, &probe_val, sizeof(probe_val));
   trigger_read_completed(0xC0, probe_erd_2, &probe_val, sizeof(probe_val));
   mock().enable();
 
-  // Polling timer fires: both ERDs read
   should_request_read(0xC0, probe_erd_1);
   should_request_read(0xC0, probe_erd_2);
   after(polling_interval);
@@ -362,14 +351,11 @@ TEST(erd_bridge_poll_probe_list, should_exclude_failed_erd_from_polling_list)
   when_a_poll_read_completes(0xC0, probe_erd_1, uint8_t(0xAA));
 }
 
-// When all ERDs in the probe list fail, the bridge enters polling with an
-// empty list.
 TEST(erd_bridge_poll_probe_list, should_handle_all_probe_failures)
 {
   mock().disable();
   when_the_bridge_is_initialized_with_probe_list();
 
-  // Probe phase: both ERDs fail.
   trigger_read_failed(probe_erd_1);
   trigger_read_failed(probe_erd_2);
   mock().enable();
@@ -379,19 +365,16 @@ TEST(erd_bridge_poll_probe_list, should_handle_all_probe_failures)
   after(polling_interval);
 }
 
-// Polling timer restarts the cycle.
 TEST(erd_bridge_poll_probe_list, should_restart_poll_cycle_on_polling_timer)
 {
   mock().disable();
   when_the_bridge_is_initialized_with_probe_list();
 
-  // Probe phase: both ERDs respond.
   uint8_t probe_val = 0x01;
   trigger_read_completed(0xC0, probe_erd_1, &probe_val, sizeof(probe_val));
   trigger_read_completed(0xC0, probe_erd_2, &probe_val, sizeof(probe_val));
   mock().enable();
 
-  // First poll cycle
   should_request_read(0xC0, probe_erd_1);
   should_request_read(0xC0, probe_erd_2);
   after(polling_interval);
@@ -399,7 +382,6 @@ TEST(erd_bridge_poll_probe_list, should_restart_poll_cycle_on_polling_timer)
   when_a_poll_read_completes(0xC0, probe_erd_1, uint8_t(0xAA));
   when_a_poll_read_completes(0xC0, probe_erd_2, uint8_t(0xBB));
 
-  // Second poll cycle
   should_request_read(0xC0, probe_erd_1);
   should_request_read(0xC0, probe_erd_2);
   after(polling_interval);
@@ -433,8 +415,6 @@ TEST_GROUP_BASE(erd_bridge_poll_empty_list, simulation_test_base)
 
 };
 
-// When probe list is empty, the bridge transitions directly to polling
-// without sending any read requests.
 TEST(erd_bridge_poll_empty_list, should_skip_probe_and_enter_polling_with_empty_list)
 {
   mock().disable();
@@ -446,8 +426,6 @@ TEST(erd_bridge_poll_empty_list, should_skip_probe_and_enter_polling_with_empty_
     0xC0, nullptr, 0,
     &test_cache);
 
-  // Bridge should be in polling state with empty list.
-  // No ERDs in cache.
   CHECK_EQUAL(0u, erd_cache_get_count(&test_cache));
   mock().enable();
 }
@@ -514,7 +492,6 @@ TEST_GROUP_BASE(erd_bridge_poll_probe_failures, simulation_test_base)
       .ignoreOtherParameters()
       .andReturnValue(true);
   }
-
 
   template <typename T>
   void when_a_poll_read_completes(uint8_t address, tiny_erd_t erd, T value)
@@ -584,17 +561,12 @@ static uint32_t s_budgeted_yield_calls = 0;
  * The hardcoded expectations fail loudly (unexpected read calls / CHECK
  * failures) if any of these drifts, but they will not self-adjust. */
 
-/* Advances 10 ms per call. send_next_poll_read_request calls it twice per
- * read, so the 50 ms batch budget breaks after exactly 10 reads and the
- * 100 ms cycle-send budget trips immediately after the first batch. */
 static uint32_t budgeted_clock_advance_10(void)
 {
   s_budgeted_clock_ms += 10;
   return s_budgeted_clock_ms;
 }
 
-/* Counting fake: send_cycle_reads yields once per send pass, so the call
- * count pins the yield_fn() call site — deleting that call fails the test. */
 static void budgeted_yield_count(void)
 {
   s_budgeted_yield_calls++;

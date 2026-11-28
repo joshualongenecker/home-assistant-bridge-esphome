@@ -80,30 +80,19 @@ void GeappliancesBridge::add_custom_erds_with_addresses(const uint16_t* erds, co
   }
 }
 
-
-
 void GeappliancesBridge::setup() {
   ESP_LOGCONFIG(TAG, "Setting up GE Appliances Bridge...");
 
-  // Initialize the wire-level protocol stack: UART adapters, GEA2/GEA3
-  // interfaces, both ERD clients, the GEA2→GEA3 adapter, and the shared
-  // timer group every data-path component registers timers on.
   this->protocol_stack_.init(this->client_address_, this->uart_, this->gea2_uart_);
 
   erd_cache_init(&this->erd_cache_);
   erd_set_init(&this->custom_erd_subscription_seen_erds_);
 
-  // Lend HA discovery the configured custom ERDs (codegen has added them all
-  // by now), so their lines are published even when a board is silent at
-  // this boot (issue #212). The manager keeps the pointer across init().
   ha_discovery_manager_set_configured_board_erds(
       &this->ha_discovery_manager_,
       reinterpret_cast<const ha_discovery_board_erd_t*>(this->custom_erds_),
       this->custom_erds_count_);
 
-  // Route ERD client activity to the bridge (see handle_erd_client_activity_).
-  // The GEA2 adapter client re-publishes GEA2 activity as GEA3-typed events,
-  // so one handler serves both protocols.
   if (this->protocol_stack_.has_gea3_uart()) {
     tiny_event_subscription_init(
       &this->erd_client_activity_subscription_,
@@ -131,8 +120,6 @@ void GeappliancesBridge::setup() {
       &this->gea2_activity_subscription_);
   }
 
-  // Initialize autodiscovery manager (timer-driven, self-driving)
-  // Must be called AFTER ERD clients and UART adapters are initialized.
   this->init_autodiscovery_manager_();
 
   if (this->configured_device_id_[0] != '\0') {
@@ -140,8 +127,6 @@ void GeappliancesBridge::setup() {
   } else {
     ESP_LOGI(TAG, "No device_id configured, will auto-generate after autodiscovery");
   }
-  // NOTE: Discovery change detection (hash + device ID) is now done in
-  // check_steady_state() where the device identity is available.
 
   ESP_LOGI(TAG, "Waiting %lu seconds before starting autodiscovery...",
            (unsigned long)(AUTODISCOVERY_STARTUP_DELAY_MS / 1000));
@@ -193,10 +178,6 @@ void GeappliancesBridge::loop() {
              this->data_plane_phase_ != DataPlanePhase::kIdle ? "yes" : "no");
   }
 
-  /* Tick ERD publish cooldowns once per second.
-   * Uses a member variable (not static) so it resets on re-init and
-   * avoids the first-tick race on cold start. Unsigned subtraction
-   * handles millis() wrap correctly. */
   if (this->throttle_rate_seconds_ > 0) {
     uint32_t now = esphome::millis();
     if (now - this->last_cooldown_tick_ >= 1000) {
@@ -205,8 +186,6 @@ void GeappliancesBridge::loop() {
     }
   }
 #ifdef USE_ESP32
-  // Feed the task watchdog after the protocol stack — the GEA2 tight loop
-  // can run for 200 ms wall-clock time, exceeding the default TWDT timeout.
   esp_task_wdt_reset();
 #endif
 
@@ -227,9 +206,6 @@ void GeappliancesBridge::loop() {
     ESP_LOGW(TAG, "Long HSM run_loop: %lums", (unsigned long)hsm_elapsed);
   }
 #ifdef USE_ESP32
-  // Feed the task watchdog after the HSM run_loop signal — in steady-state
-  // this drains pending MQTT updates (each acquiring the IDF MQTT mutex)
-  // and can block for hundreds of milliseconds.
   esp_task_wdt_reset();
 #endif
 
@@ -240,12 +216,6 @@ void GeappliancesBridge::loop() {
   this->diagnostic_sensor_publisher_.loop();
 }
 
-  /* ERD cache publisher state machine:
-   *   kIdle     — publisher active; HA discovery not processing.
-   *   kPaused   — publisher paused while ha_discovery_manager_is_processing()
-   *               is true.
-   *   kResuming — resumed after a pause; cleared once first_round_done()
-   *               confirms the post-resume drain finished. */
 void GeappliancesBridge::update_publisher_state_()
 {
   bool ha_discovery_active = ha_discovery_manager_is_processing(&this->ha_discovery_manager_);
@@ -268,12 +238,6 @@ void GeappliancesBridge::update_publisher_state_()
     }
   }
 
-  /* Check steady state BEFORE this function's own signal_work() below - the
-   * background task sets first_round_done during its drain, and this read wants
-   * the value from before that give can wake it again.  Pacing may defer a wake;
-   * it can never advance one past this read.  The read is NOT ordered against
-   * every wake: resume() above signals work on this same iteration whenever the
-   * cache is attached, whether or not discovery had paused the publisher. */
   if (this->publisher_pause_phase_ == PublisherPausePhase::kResuming &&
       erd_cache_mqtt_publisher_first_round_done(&this->erd_cache_publisher_)) {
     ESP_LOGI(TAG, "Device is in steady state");
@@ -284,7 +248,6 @@ void GeappliancesBridge::update_publisher_state_()
     erd_cache_mqtt_publisher_signal_work(&this->erd_cache_publisher_);
   }
 }
-
 
 void GeappliancesBridge::log_poll_state_transitions_()
 {
@@ -318,9 +281,6 @@ void GeappliancesBridge::handle_erd_client_activity_(const tiny_gea3_erd_client_
     erd_set_insert(&this->custom_erd_subscription_seen_erds_, args->subscription_publication_received.erd);
   }
 
-  // Device ID reads (after discovery, before bridge init)
-  // Note: FeatureBitManager subscribes directly to ERD client activity events,
-  // so the bridge no longer routes feature bit ERDs to it.
   if (this->data_plane_phase_ == DataPlanePhase::kIdle && args->address == this->autodiscovery_manager_.get_host_address()) {
     if (args->type == tiny_gea3_erd_client_activity_type_read_completed) {
       tiny_erd_t erd = args->read_completed.erd;
@@ -424,18 +384,13 @@ void GeappliancesBridge::dump_config() {
   ESP_LOGCONFIG(TAG, "  Startup State: %s", phase_str);
 }
 
-  // Run after MQTT (priority 50), same priority as UART (priority 600)
 float GeappliancesBridge::get_setup_priority() const {
   return setup_priority::DATA;
 }
 
 bool GeappliancesBridge::teardown() {
-  // Reset protocol-stack per-run state (GEA2 tick tracking, the GEA2-active
-  // latch) so re-init starts fresh.
   this->protocol_stack_.teardown();
-  // Clear the seen ERDs set for symmetry with erd_set_init() in setup().
   erd_set_clear(&this->custom_erd_subscription_seen_erds_);
-  // Reset the feature bit failure log flag for correct behavior after re-init.
   this->feature_bit_failure_logged_ = false;
   startup_hsm_wrapper_destroy(&this->startup_hsm_wrapper_);
   this->feature_bit_manager_.cleanup();
@@ -443,22 +398,15 @@ bool GeappliancesBridge::teardown() {
   this->device_identity_manager_.cleanup();
   this->destroy_data_plane_();
   this->restart_requested_ = false;
-  // The MQTT adapter (and its subscriptions) is destroyed below
   this->write_topic_subscribed_ = false;
 
-  // Clean up the HA discovery manager before the ERD cache publisher.
-  // The discovery manager holds pointers to erd_cache_ and mqtt_client_adapter_
-  // which are destroyed later in the teardown sequence.
   ha_discovery_manager_cleanup(&this->ha_discovery_manager_);
 
-  // Destroy the ERD cache publisher before the adapter is destroyed.
   if (this->erd_cache_publisher_.cache) {
     erd_cache_mqtt_publisher_destroy(&this->erd_cache_publisher_);
   }
   erd_cache_destroy(&this->erd_cache_);
 
-  // Free heap-allocated members of the MQTT client adapter to prevent
-  // memory leaks (device_id string, pending_updates map, etc.).
   if (this->mqtt_client_adapter_.initialized) {
     esphome_mqtt_client_adapter_destroy(&this->mqtt_client_adapter_);
   }
@@ -468,7 +416,6 @@ bool GeappliancesBridge::teardown() {
 
 void GeappliancesBridge::init_autodiscovery_manager_()
 {
-  // Must be called AFTER ERD clients and UART adapters are initialized.
   this->autodiscovery_manager_.init(
       this->protocol_stack_.timer_group(),
       this->protocol_stack_.has_gea3_uart() ? this->protocol_stack_.get_gea3_client() : nullptr,
@@ -481,8 +428,6 @@ void GeappliancesBridge::init_autodiscovery_manager_()
       this->client_address_);
 }
 
-// Destroy whichever bridge(s) the data-plane phase says exist, so there is no
-// double-free or missed cleanup, and return the phase to kIdle.
 void GeappliancesBridge::destroy_data_plane_()
 {
   if (phase_has_subscription_bridge(this->data_plane_phase_)) {
@@ -505,12 +450,10 @@ void GeappliancesBridge::restart_appliance_connection()
 void GeappliancesBridge::restart_appliance_connection_now_()
 {
   if (this->startup_hsm_wrapper_.hsm.current == nullptr) {
-    // Startup hasn't begun yet: it will discover the appliance anyway
     return;
   }
   ESP_LOGI(TAG, "Appliance treated as lost: restarting discovery and the appliance startup");
 
-  // Data path down: subscription, polling and write bridges
   this->destroy_data_plane_();
   this->data_plane_readiness_ = DataPlaneReadiness::kNotSteady;
   this->last_logged_poll_state_ = polling_state_none;
@@ -519,20 +462,14 @@ void GeappliancesBridge::restart_appliance_connection_now_()
   this->subscription_unseen_custom_erds_count_ = 0;
   this->poll_probe_list_count_ = 0;
 
-  // The boards may run different firmware now: forget what they reported.
-  // The ERD set, sizes and feature bits are read again from scratch.
   erd_cache_clear(&this->erd_cache_);
   this->erd_registry_.clear_valid_erds();
   this->feature_bit_manager_.cleanup();
   this->feature_bit_failure_logged_ = false;
 
-  // Rediscover the boards
   this->autodiscovery_manager_.cleanup();
   this->init_autodiscovery_manager_();
 
-  // Kept: the MQTT client, the ERD cache publisher, the device ID (so the
-  // MQTT topics and the HA device stay the same) and the HA discovery state.
-  // Run the startup HSM again from the stabilization delay.
   startup_hsm_wrapper_destroy(&this->startup_hsm_wrapper_);
   startup_hsm_wrapper_init(&this->startup_hsm_wrapper_, this, startup_state_startup_delay);
 }
@@ -679,11 +616,6 @@ bool GeappliancesBridge::check_steady_state()
              ERD_CACHE_ARENA_SIZE,
              erd_cache_get_arena_usage_percent(&this->erd_cache_));
 
-    /* One line per section, at DEBUG. The per-entry detail that used to
-     * accompany this (per-ERD config dump, per-cache-add, per-skipped feature
-     * ERD) is at VERBOSE now: ~200 boot lines of it overflowed the 30-slot
-     * MQTT log queue on the busier appliances, which is what the "Dropped N
-     * messages" warning was reporting. */
     if (phase_has_subscription_bridge(this->data_plane_phase_)) {
       ESP_LOGD(TAG, "  Subscription: %u ERDs (host board 0x%02X)",
                this->erd_bridge_subscribe_.erd_set.count,
@@ -695,15 +627,6 @@ bool GeappliancesBridge::check_steady_state()
       polled.custom_erds_count = this->custom_erds_count_;
       polled.unseen_custom_count = this->subscription_unseen_custom_erds_count_;
 
-      /* The wording, the "the bridge already printed the count" suppression and the
-       * reason clauses live in board_polled_summary_format (erd_bridge_common.h),
-       * where the unit tests can see them.  The per-board split is read out of the
-       * running bridge's own list rather than subscription_unseen_custom_erds_:
-       * the probe phase drops unresponsive ERDs, so the built list is larger than
-       * what is polled and its split would not sum to the count printed beside it.
-       * The label stays "Polled ERDs" rather than "Poll list:" or "Polling bridge:"
-       * because bridge_init logs the list as built and erd_bridge_poll logs the
-       * list handed to the bridge, and those counts differ by design. */
       char polled_line[BOARD_POLLED_SUMMARY_BUF_SIZE];
       if (board_polled_summary_format(&polled, this->erd_bridge_poll_.erd_polling_addresses,
                                       this->erd_bridge_poll_.polling_list_count,
@@ -753,7 +676,6 @@ uint32_t GeappliancesBridge::valid_erds_fingerprint_()
   };
   mix(this->autodiscovery_manager_.get_host_address());
 
-  // Distinct configured secondary-board addresses, in ascending order
   bool board_configured[256] = {false};
   for (uint16_t i = 0; i < this->custom_erds_count_; i++) {
     const uint8_t address = this->custom_erds_[i].board_address;
@@ -766,7 +688,7 @@ uint32_t GeappliancesBridge::valid_erds_fingerprint_()
       mix(static_cast<uint8_t>(address));
     }
   }
-  mix(0xFF);  // separator before the ERD list
+  mix(0xFF);
 
   for (uint16_t i = 0; i < this->erd_registry_.valid_erd_count(); i++) {
     tiny_erd_t erd = this->erd_registry_.valid_erd(i);
@@ -783,11 +705,8 @@ bool GeappliancesBridge::is_erd_cache_publisher_initialized() const
 
 void GeappliancesBridge::init_erd_cache_publisher_()
 {
-  if (this->erd_cache_publisher_.cache) return; // already initialized
+  if (this->erd_cache_publisher_.cache) return;
 
-  /* Apply rate limit configuration before starting the publisher.
-   * With the ESP-IDF framework the background task starts immediately in init() and
-   * could drain cache entries before the rate limit takes effect. */
   erd_cache_set_throttle_rate_seconds(&this->erd_cache_, this->throttle_rate_seconds_);
 
   erd_cache_mqtt_publisher_init(
@@ -802,8 +721,6 @@ void GeappliancesBridge::init_erd_cache_publisher_()
   ha_discovery_manager_init(&this->ha_discovery_manager_);
 }
 
-// Steady state and MQTT initialization are the bridge's own state; the
-// discovery lifecycle asks instead of holding a reference to either.
 bool GeappliancesBridge::discovery_is_ready_(void* context) {
   auto* self = static_cast<GeappliancesBridge*>(context);
   return self->data_plane_readiness_ == DataPlaneReadiness::kSteady && self->mqtt_client_adapter_.initialized;
@@ -829,5 +746,5 @@ void GeappliancesBridge::initialize_erd_cache_publisher()
   init_erd_cache_publisher_();
 }
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}

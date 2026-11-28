@@ -1,8 +1,3 @@
-/*!
- * @file
- * @brief
- */
-
 #ifndef mqtt_client_double_hpp
 #define mqtt_client_double_hpp
 
@@ -18,19 +13,11 @@ typedef struct {
   tiny_event_t on_mqtt_disconnect;
   tiny_event_t on_mqtt_connect;
 
-  /* Reported by the is_connected vtable slot; set with
-   * mqtt_client_double_set_connected(). */
   bool connected;
 } mqtt_client_double_t;
 
-/*!
- * Initialize an MQTT client test double.
- */
 void mqtt_client_double_init(mqtt_client_double_t* self);
 
-/*!
- * Trigger publication via the on_write_request event.
- */
 void mqtt_client_double_trigger_write_request(
   mqtt_client_double_t* self,
   tiny_erd_t erd,
@@ -38,29 +25,16 @@ void mqtt_client_double_trigger_write_request(
   uint8_t size,
   const void* value);
 
-/*!
- * Trigger publication via the on_mqtt_disconnect event.
- */
 void mqtt_client_double_trigger_mqtt_disconnect(
   mqtt_client_double_t* self);
 
-/*!
- * Trigger publication via the on_mqtt_connect event.
- */
 void mqtt_client_double_trigger_mqtt_connect(
   mqtt_client_double_t* self);
 
-/*!
- * Set the connection state reported by is_connected().
- */
 void mqtt_client_double_set_connected(
   mqtt_client_double_t* self,
   bool connected);
 
-/*!
- * Implement the publish_raw vtable slot for the test double.
- * Returns true (simulates successful publish).
- */
 bool mqtt_client_double_publish_raw(
   i_mqtt_client_t* self,
   const char* topic,

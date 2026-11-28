@@ -1,11 +1,3 @@
-/*!
- * @file
- * @brief ESP-IDF zlib stubs for test/simulation builds.
- *
- * Provides minimal zlib definitions so that ESP-IDF-gated code
- * using zlib compiles in test builds.
- */
-
 #ifndef ESP_ZLIB_STUB_H
 #define ESP_ZLIB_STUB_H
 
@@ -50,4 +42,4 @@ static inline void inflateEnd(z_stream *strm) {
 }
 #endif
 
-#endif /* ESP_ZLIB_STUB_H */
+#endif

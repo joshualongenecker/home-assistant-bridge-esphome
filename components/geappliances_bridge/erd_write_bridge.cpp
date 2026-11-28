@@ -1,4 +1,3 @@
-
 #include "erd_write_bridge.h"
 #include "geappliances_bridge_log.h"
 #include "esphome/core/log.h"
@@ -33,23 +32,11 @@ static void report_write_failure(erd_write_bridge_t* self, tiny_erd_t erd, uint8
   mqtt_client_update_erd_write_result(self->mqtt_client, erd, board_address, false, reason);
 }
 
-/*!
- * Pop the head of the queue and put it on the bus, then stay in
- * state_writing until the ERD client reports the result. Requests the ERD
- * client cannot accept are reported here (they never become in-flight), and
- * the next queued request is tried so one bad request cannot stall the queue.
- *
- * Does nothing while the queue is empty; the bridge is then idle in
- * state_ready.
- */
 static void start_next_write(erd_write_bridge_t* self)
 {
   while(self->queue_count > 0) {
     erd_write_request_t* request = &self->queue[self->queue_head];
 
-    // Primary-board topics (board_address == 0xFF, the broadcast sentinel)
-    // route to the detected host address; secondary-board topics route to
-    // the parsed address.
     uint8_t target_address = (request->board_address != tiny_gea_broadcast_address)
       ? request->board_address
       : self->erd_host_address;
@@ -68,8 +55,6 @@ static void start_next_write(erd_write_bridge_t* self)
       return;
     }
 
-    // Copy the identity out before popping: popping only moves the head, but
-    // the next iteration may overwrite this slot.
     tiny_erd_t failed_erd = request->erd;
     uint8_t failed_board_address = request->board_address;
 
@@ -82,15 +67,6 @@ static void start_next_write(erd_write_bridge_t* self)
   }
 }
 
-/*!
- * Queue a write request, or reject it with a write_result if it cannot be
- * honored. Whether the new request goes straight onto the bus is the caller's
- * decision: only `state_ready` pumps the queue, so a request that arrives
- * while a write is in flight always waits its turn.
- *
- * The payload has to be copied: the event args point at the MQTT client's
- * stack buffer, which is only valid for the duration of the event.
- */
 static void enqueue_write_request(erd_write_bridge_t* self, const mqtt_client_on_write_request_args_t* args)
 {
   if(self->erd_host_address == tiny_gea_broadcast_address) {
@@ -133,8 +109,6 @@ static tiny_hsm_result_t state_ready(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, 
 
   switch(signal) {
     case signal_write_requested:
-      // Nothing is in flight, so the queue holds only this request: it goes
-      // out immediately.
       enqueue_write_request(self, reinterpret_cast<const mqtt_client_on_write_request_args_t*>(data));
       start_next_write(self);
       break;
@@ -153,9 +127,6 @@ static tiny_hsm_result_t state_writing(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
   switch(signal) {
     case signal_write_requested: {
       auto args = reinterpret_cast<const mqtt_client_on_write_request_args_t*>(data);
-      // The bus is busy with the previous write; this one waits its turn
-      // unless the queue is already full, in which case it is rejected with a
-      // write_result rather than dropped silently.
       enqueue_write_request(self, args);
     } break;
 
@@ -225,7 +196,6 @@ void erd_write_bridge_init(
     });
   tiny_event_subscribe(mqtt_client_on_write_request(mqtt_client), &self->mqtt_write_request_subscription);
 
-  // Subscribe to ERD client activity for write results
   tiny_event_subscription_init(
     &self->erd_client_activity_subscription, self, +[](void* context, const void* _args) {
       auto self = reinterpret_cast<erd_write_bridge_t*>(context);
@@ -249,12 +219,10 @@ void erd_write_bridge_init(
 
 void erd_write_bridge_destroy(erd_write_bridge_t* self)
 {
-  // Guard against destroy() being called on a never-initialized struct.
   if(!self->timer_group) {
     return;
   }
 
-  // Guard against partial init where mqtt_client or erd_client may be null.
   if (self->mqtt_client) {
     tiny_event_unsubscribe(mqtt_client_on_write_request(self->mqtt_client),
       &self->mqtt_write_request_subscription);

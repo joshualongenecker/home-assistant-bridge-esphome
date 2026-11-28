@@ -1,10 +1,3 @@
-/*!
- * @file
- * @brief ESP-IDF esp_log stubs for test/simulation builds.
- *
- * Maps ESP_LOG* macros to the existing esphome log stubs.
- */
-
 #ifndef ESP_LOG_STUB_H
 #define ESP_LOG_STUB_H
 
@@ -18,4 +11,4 @@
 #define ESP_LOGV(tag, ...) ESP_LOGV(tag, __VA_ARGS__)
 #endif
 
-#endif /* ESP_LOG_STUB_H */
+#endif

@@ -48,7 +48,6 @@ TEST_GROUP(autodiscovery_manager)
     tiny_gea3_erd_client_double_init(&gea2_adapter);
     esphome_hal_double_set_millis(0);
 
-    // Initialize a minimal time source for the timer group.
     tiny_timer_group_init(&timer_group, esphome_time_source_init());
   }
 
@@ -91,7 +90,6 @@ TEST_GROUP(autodiscovery_manager)
                  0xE4);     /* client_address */
   }
 
-  /* Expect the GEA3 client to accept a broadcast read. */
   void expect_gea3_broadcast_read()
   {
     mock().expectOneCall("read")
@@ -102,7 +100,6 @@ TEST_GROUP(autodiscovery_manager)
       .andReturnValue(true);
   }
 
-  /* Expect the GEA2 client to accept a broadcast read. */
   void expect_gea2_broadcast_read()
   {
     mock().expectOneCall("read")
@@ -125,27 +122,26 @@ TEST_GROUP(autodiscovery_manager)
    */
   void simulate_broadcast_response(uint8_t address, uint8_t appliance_type, bool is_gea3, uint8_t destination = 0xE4)
   {
-    // Build the application payload
     uint8_t payload[16];
     int payload_len;
 
     if (is_gea3) {
       // GEA3 read response: cmd | request_id | result | erd(2) | data_size | data
       payload[0] = tiny_gea3_erd_api_command_read_response;
-      payload[1] = 0;  // request_id
+      payload[1] = 0;
       payload[2] = tiny_gea3_erd_api_read_result_success;
       payload[3] = (ERD_APPLIANCE_TYPE >> 8) & 0xFF;
       payload[4] = ERD_APPLIANCE_TYPE & 0xFF;
-      payload[5] = 1;  // data_size
+      payload[5] = 1;
       payload[6] = appliance_type;
       payload_len = 7;
     } else {
       // GEA2 read response: cmd | erd_count | erd(2) | data_size | data
       payload[0] = tiny_gea2_erd_api_command_read_response;
-      payload[1] = 1;  // erd_count
+      payload[1] = 1;
       payload[2] = (ERD_APPLIANCE_TYPE >> 8) & 0xFF;
       payload[3] = ERD_APPLIANCE_TYPE & 0xFF;
-      payload[4] = 1;  // data_size
+      payload[4] = 1;
       payload[5] = appliance_type;
       payload_len = 6;
     }
@@ -154,10 +150,10 @@ TEST_GROUP(autodiscovery_manager)
     // destination | payload_length_on_wire | source | payload
     uint8_t frame[256];
     int frame_idx = 0;
-    frame[frame_idx++] = destination;  // destination (bridge address)
+    frame[frame_idx++] = destination;
     int payload_length_on_wire = tiny_gea_packet_transmission_overhead + payload_len;
     frame[frame_idx++] = payload_length_on_wire;
-    frame[frame_idx++] = address;  // source (board address)
+    frame[frame_idx++] = address;
     for (int i = 0; i < payload_len; i++) {
       frame[frame_idx++] = payload[i];
     }
@@ -176,12 +172,11 @@ TEST_GROUP(autodiscovery_manager)
     for (int i = 0; i < frame_len; i++) {
       manager.feed_byte(frame[i], is_gea3);
     }
-    manager.feed_byte((crc >> 8) & 0xFF, is_gea3); // CRC MSB
-    manager.feed_byte(crc & 0xFF, is_gea3);       // CRC LSB
+    manager.feed_byte((crc >> 8) & 0xFF, is_gea3);
+    manager.feed_byte(crc & 0xFF, is_gea3);
     manager.feed_byte(tiny_gea_etx, is_gea3);
   }
 
-  /* Advance timers by running the timer group (services expired timers). */
   void advance_timers()
   {
     // tiny_timer_group_run services at most one timer per call.
@@ -250,12 +245,10 @@ TEST(autodiscovery_manager, gea3_discovery_completes_on_broadcast_response)
 {
   init_both_uart();
   expect_gea3_broadcast_read();
-  manager.start();  /* -> GEA3_BROADCAST_WAITING */
+  manager.start();
 
-  // Simulate a broadcast response arriving via byte-level UART.
   simulate_broadcast_response(0xB8, 0x03, true);
 
-  // Advance timers to trigger the broadcast window expiry.
   esphome_hal_double_set_millis(AUTODISCOVERY_BROADCAST_WINDOW_MS + 100);
   advance_timers();
 
@@ -273,22 +266,18 @@ TEST(autodiscovery_manager, gea2_discovery_after_gea3_timeout)
 {
   init_both_uart();
 
-  // GEA3 broadcast.
   expect_gea3_broadcast_read();
-  manager.start();  /* -> GEA3_BROADCAST_WAITING */
+  manager.start();
 
   // GEA3 times out with no response -> retries GEA2.
   expect_gea2_broadcast_read();  // GEA2 broadcast after GEA3 timeout.
   esphome_hal_double_set_millis(AUTODISCOVERY_BROADCAST_WINDOW_MS + 100);
   advance_timers();
 
-  // Now we should be in GEA2_BROADCAST_WAITING.
   CHECK(manager.get_state() == AUTODISCOVERY_GEA2_BROADCAST_WAITING);
 
-  // Simulate a GEA2 broadcast response.
   simulate_broadcast_response(0xB8, 0x03, false);
 
-  // Advance timers to trigger the broadcast window expiry.
   esphome_hal_double_set_millis(esphome_hal_double_get_millis() + AUTODISCOVERY_BROADCAST_WINDOW_MS + 100);
   advance_timers();
 
@@ -306,7 +295,7 @@ TEST(autodiscovery_manager, wrong_protocol_response_ignored)
 {
   init_both_uart();
   expect_gea3_broadcast_read();
-  manager.start();  /* -> GEA3_BROADCAST_WAITING */
+  manager.start();
 
   // A GEA2 response during GEA3 window should be ignored.
   simulate_broadcast_response(0xB8, 0x03, false);
@@ -324,16 +313,14 @@ TEST(autodiscovery_manager, gea3_only_retries_gea3)
 {
   init_gea3_only();
 
-  // First GEA3 broadcast.
   expect_gea3_broadcast_read();
-  manager.start();  /* -> GEA3_BROADCAST_WAITING */
+  manager.start();
 
   // Timeout -> retry GEA3 (timer callback calls run() which sends another read).
   expect_gea3_broadcast_read();  // Second broadcast after retry.
   esphome_hal_double_set_millis(AUTODISCOVERY_BROADCAST_WINDOW_MS + 100);
   advance_timers();
 
-  // Should be back in GEA3_BROADCAST_WAITING (after sending another read).
   CHECK(manager.get_state() == AUTODISCOVERY_GEA3_BROADCAST_WAITING);
   CHECK(manager.get_active_erd_client() == nullptr);
 }
@@ -351,7 +338,7 @@ TEST(autodiscovery_manager, gea3_completes_with_both_uart_adapters_configured)
                nullptr,  /* gea3_uart_adapter (not mocked) */
                nullptr,  /* gea2_uart_adapter (not mocked) */
                true, true,
-               0xE4);     /* client_address */
+               0xE4);
 
   expect_gea3_broadcast_read();
   manager.start();
@@ -379,7 +366,6 @@ TEST(autodiscovery_manager, complete_state_is_terminal)
 
   CHECK_EQUAL(AUTODISCOVERY_COMPLETE, manager.get_state());
 
-  // Further timer advances should not change state.
   esphome_hal_double_set_millis(esphome_hal_double_get_millis() + 100000);
   advance_timers();
   CHECK_EQUAL(AUTODISCOVERY_COMPLETE, manager.get_state());
@@ -406,14 +392,12 @@ TEST(autodiscovery_manager, is_gea2_protocol_true_for_gea2_discovery)
 {
   init_both_uart();
 
-  // GEA3 times out.
   expect_gea3_broadcast_read();
   manager.start();
   expect_gea2_broadcast_read();  // GEA2 broadcast after GEA3 timeout.
   esphome_hal_double_set_millis(AUTODISCOVERY_BROADCAST_WINDOW_MS + 100);
   advance_timers();
 
-  // GEA2 succeeds.
   simulate_broadcast_response(0xB8, 0x03, false);
   esphome_hal_double_set_millis(esphome_hal_double_get_millis() + AUTODISCOVERY_BROADCAST_WINDOW_MS + 100);
   advance_timers();
@@ -436,7 +420,7 @@ TEST(autodiscovery_manager, non_default_client_address_accepts_response)
                &gea2_adapter.interface,
                nullptr, nullptr,
                true, true,
-               0xE5);     /* client_address — non-default */
+               0xE5);
 
   expect_gea3_broadcast_read();
   manager.start();
@@ -460,7 +444,7 @@ TEST(autodiscovery_manager, non_default_client_address_rejects_wrong_destination
                &gea2_adapter.interface,
                nullptr, nullptr,
                true, true,
-               0xE5);     /* client_address */
+               0xE5);
 
   expect_gea3_broadcast_read();
   manager.start();
@@ -496,7 +480,6 @@ TEST(autodiscovery_manager, targeted_gea3_probe_sends_to_configured_address)
   init_both_uart();
   manager.set_target_address(0xC0);
 
-  // Expect the GEA3 client to read from the configured address, not broadcast.
   mock().expectOneCall("read")
     .onObject(&gea3_client.interface)
     .withParameter("address", 0xC0)
@@ -520,12 +503,10 @@ TEST(autodiscovery_manager, targeted_probe_completes_on_response)
     .ignoreOtherParameters()
     .andReturnValue(true);
 
-  manager.start();  /* -> GEA3_BROADCAST_WAITING */
+  manager.start();
 
-  // Simulate a response from the configured address.
   simulate_broadcast_response(0xC0, 0x03, true);
 
-  // Advance timers to trigger the broadcast window expiry.
   esphome_hal_double_set_millis(AUTODISCOVERY_BROADCAST_WINDOW_MS + 100);
   advance_timers();
 
@@ -540,7 +521,6 @@ TEST(autodiscovery_manager, targeted_probe_falls_back_to_gea2)
   init_both_uart();
   manager.set_target_address(0xC0);
 
-  // GEA3 probe — no response.
   mock().expectOneCall("read")
     .onObject(&gea3_client.interface)
     .withParameter("address", 0xC0)
@@ -548,7 +528,7 @@ TEST(autodiscovery_manager, targeted_probe_falls_back_to_gea2)
     .ignoreOtherParameters()
     .andReturnValue(true);
 
-  manager.start();  /* -> GEA3_BROADCAST_WAITING */
+  manager.start();
 
   // After GEA3 timeout, schedule_next_broadcast_ transitions to GEA2_PENDING
   // and calls run() synchronously, which does the GEA2 read immediately.
@@ -610,7 +590,6 @@ TEST(autodiscovery_manager, targeted_probe_rejects_wrong_source_address)
 
   manager.start();
 
-  // Simulate a response from a different address (0xB8, not 0xC0).
   simulate_broadcast_response(0xB8, 0x03, true);
 
   // After timeout, the manager retries GEA3. Mock the retry.

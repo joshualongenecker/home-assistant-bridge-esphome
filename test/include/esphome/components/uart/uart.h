@@ -1,8 +1,3 @@
-/*!
- * @file
- * @brief Stub for esphome/components/uart/uart.h — provides UARTComponent for tests.
- */
-
 #ifndef esphome_components_uart_uart_h
 #define esphome_components_uart_uart_h
 
@@ -23,7 +18,7 @@ class UARTComponent {
   virtual void write_byte(uint8_t byte) = 0;
 };
 
-}  // namespace uart
-}  // namespace esphome
+}
+}
 
-#endif  // esphome_components_uart_uart_h
+#endif

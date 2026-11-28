@@ -26,7 +26,7 @@ extern "C" {
  * it is only reachable through these mutex-guarded accessors (ThreadSanitizer
  * flagged the raw global). */
 int esp_test_critical_depth_get_(void);
-void esp_test_critical_depth_add_(int delta);  /* +1 on enter, -1 on exit */
+void esp_test_critical_depth_add_(int delta);
 void esp_test_critical_depth_reset_(void);
 
 /* Log-call recording. The ESP_LOGx stubs in double/esphome_hal_double.hpp call
@@ -40,12 +40,12 @@ void esp_test_critical_depth_reset_(void);
  * last wins for that TU -- keep esphome_hal_double.hpp last so logs record. */
 void esp_test_log_record_(const char* tag, int depth);
 void esp_test_log_reset_(void);
-int esp_test_log_count_(const char* tag);   /* calls recorded for tag; 0 if none */
-int esp_test_log_count_at_depth_(const char* tag, int depth);  /* calls for tag at that depth */
-int esp_test_log_depth_(const char* tag);   /* depth of the last call for tag; -1 if none */
+int esp_test_log_count_(const char* tag);
+int esp_test_log_count_at_depth_(const char* tag, int depth);
+int esp_test_log_depth_(const char* tag);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* critical_depth_shim_hpp */
+#endif

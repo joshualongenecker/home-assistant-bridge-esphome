@@ -1,4 +1,3 @@
-
 #ifndef i_mqtt_client_h
 #define i_mqtt_client_h
 
@@ -10,11 +9,6 @@
 
 typedef struct {
   tiny_erd_t erd;
-  /* 0xFF (broadcast) = primary board (the bridge resolves it to the
-   * detected host address); any other value = the secondary board address
-   * parsed from the 0x{addr}_0x{erd} topic form. 0xFF is used because it
-   * can never be a physical board address, keeping a 0x00 secondary board
-   * unambiguous. */
   uint8_t board_address;
   uint8_t size;
   const void* value;
@@ -35,9 +29,6 @@ typedef struct i_mqtt_client_api_t {
 
   i_tiny_event_t* (*on_mqtt_connect)(i_mqtt_client_t* self);
 
-  /* Current connection state. Lets a data-path module ask "may I publish?"
-   * through the injected client instead of reaching for ESPHome's global
-   * MQTT client, which the host tests cannot substitute. */
   bool (*is_connected)(i_mqtt_client_t* self);
 
   bool (*publish_raw)(i_mqtt_client_t* self, const char* topic, const char* payload, size_t payload_len, bool retain);

@@ -25,6 +25,9 @@ docs/
     ├── mqtt-topics.md         # MQTT topic schema, payloads, QoS
     ├── erd-protocol.md        # GEA2/GEA3 protocol overview
     └── interfaces.md          # Key C interface documentation
+├── adr/
+│   ├── README.md              # ADR format and index
+│   └── 0001-<slug>.md         # One decision per numbered file
 ```
 
 ## Document Types
@@ -132,6 +135,13 @@ Diagrams (mermaid) with supporting text. C4 model: context → container → com
 - No inline HTML — use Markdown.
 - No trailing whitespace.
 - No lines longer than 120 characters (wrap prose, not code blocks).
+
+### Source Comments
+
+First-party source carries no prose comments; see
+[Comment Policy](./comment-policy.md). Rationale that used to be a comment goes
+to `adr/NNNN-<slug>.md` (cross-cutting) or the module spec's Notes section
+(module-local), never back into the file.
 
 ## Spec Template
 

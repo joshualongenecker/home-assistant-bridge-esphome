@@ -1,8 +1,5 @@
 #pragma once
 
-// All constants are static constexpr so each translation unit gets its own
-// copy without ODR violations; inline helpers follow the same rule.
-
 #include <cstdint>
 
 #include "geappliances_bridge_log.h"
@@ -15,8 +12,6 @@ static constexpr tiny_erd_t ERD_MODEL_NUMBER    = 0x0001;
 static constexpr tiny_erd_t ERD_SERIAL_NUMBER   = 0x0002;
 static constexpr tiny_erd_t ERD_APPLIANCE_TYPE  = 0x0008;
 
-// ERD 0x0092 reports common-feature flags; 0x0093–0x0097 and 0x0109–0x010D
-// each report one appliance-specific API group.
 static constexpr tiny_erd_t ERD_COMMON_FEATURE_API      = 0x0092;
 static constexpr tiny_erd_t ERD_APPLIANCE_FEATURE_API_0 = 0x0093;
 static constexpr tiny_erd_t ERD_APPLIANCE_FEATURE_API_1 = 0x0094;
@@ -33,7 +28,6 @@ static constexpr uint8_t GEA_BROADCAST_ADDRESS = 0xFF;
 
 static constexpr uint32_t AUTODISCOVERY_STARTUP_DELAY_MS = 10000;
 
-// Each appliance feature API ERD has the layout [2B type][2B version][4B bitmap]
 static constexpr uint8_t APPLIANCE_FEATURE_ERD_SIZE = 8;
 
 static inline bool is_feature_bit_erd(tiny_erd_t erd)
@@ -51,8 +45,6 @@ static inline bool is_feature_bit_erd(tiny_erd_t erd)
          erd == ERD_APPLIANCE_FEATURE_API_9;
 }
 
-// Reads up to 8 bytes from a big-endian byte buffer as a 64-bit integer.
-// GEA protocol transmits ERD values MSB-first (big-endian).
 static inline uint64_t read_be64(const uint8_t* buf, uint8_t size)
 {
   if (!buf || size == 0) return 0;

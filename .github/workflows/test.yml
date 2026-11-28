@@ -80,3 +80,6 @@ jobs:
 
     - name: Check generated files are in sync
       run: bash scripts/check_generated_sync.sh
+
+    - name: Check comment ratchet
+      run: python3 scripts/comment_policy.py check

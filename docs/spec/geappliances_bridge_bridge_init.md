@@ -207,7 +207,7 @@ Regardless of mode, the method MUST:
 2. Call `erd_write_bridge_init()` with the write bridge struct, the protocol stack's timer group, active ERD client, the MQTT adapter's interface, and the host address.
 3. Subscribe to the wildcard write topic via `esphome_mqtt_client_adapter_subscribe_write_topic()`.
 
-The write bridge has no flag of its own: the phase never returns to `kIdle` before teardown, and `teardown()` destroys the write bridge whenever the phase is not `kIdle`.
+The write bridge has no flag of its own: `destroy_data_plane_()` destroys it whenever `data_plane_phase_` is not `kIdle`, and that same call is what returns the phase to `kIdle` on teardown or an appliance restart (ADR-0006).
 
 **Rationale:** The write bridge is always needed (it handles Home Assistant write commands). Autodiscovery is complete by this point, so the real host address is available.
 
@@ -267,3 +267,21 @@ The write bridge has no flag of its own: the phase never returns to `kIdle` befo
 4. **Write bridge is always initialized.** Unlike the data-path bridges (poll/subscribe), the write bridge is initialized regardless of mode. It is needed to relay Home Assistant write commands to the appliance, and it depends on the MQTT adapter's interface being available.
 
 5. **No destroy for normal paths.** Bridges are only destroyed on failure (subscription fallback destroys the subscription bridge; polling failure alongside subscription destroys the polling bridge). In normal operation, bridges live for the lifetime of the component.
+
+6. **Each one-time init consumes the previous one's output.** The startup HSM enforces the sequence (ADR-0007); the dependencies in this file are: `start_feature_bit_reading_()` needs the active ERD client and host address that autodiscovery produces (ADR-0017) and the protocol stack's shared timer group; `initialize_mqtt_client_()` MUST precede `initialize_erd_bridge_()`, because the write bridge is handed `mqtt_client_adapter_.interface` and the adapter's `initialized` field is the guard that keeps `initialize_erd_bridge_()` from running too early; `erd_write_bridge_init()` MUST follow autodiscovery so it receives the real host address rather than the broadcast sentinel (ADR-0011). The ERD cache publisher is started outside this file, after its throttle is applied — see ADR-0006 and ADR-0010.
+
+7. **The feature-bit "already started" guard is the manager's own state, not a bridge flag.** `start_feature_bit_reading_()` is entered from the HSM on every loop iteration. `is_initialized()` becomes true when `init()` installs the ERD client, so a second entry cannot re-subscribe activity or double-queue the first read, and `cleanup()` re-arms the guard for a legitimate re-init (appliance restart). A null ERD client leaves the guard untouched so the next `loop()` retries: a bridge-side flag set on a transient null would stall feature-bit reading for the rest of the boot and leave the valid-ERD filter empty.
+
+8. **A manual `device_id` configuration with only a GEA2 UART has to latch GEA2 active by hand.** When autodiscovery is skipped (no active ERD client) and no GEA3 UART is configured, `initialize_mqtt_client_()` calls `protocol_stack_.set_gea2_active(true)` so the protocol stack runs the GEA2 tight loop even though autodiscovery never will (ADR-0017, `docs/spec/protocol_stack.md`).
+
+9. **`erd_bridge_subscribe_init()` clears the registry pointer, so the filter wiring must follow every subscribe init.** `erd_bridge_subscribe_set_erd_registry()` is called once, in `initialize_erd_bridge_()`; `erd_bridge_subscribe_init()` sets `erd_registry` to `nullptr` (ADR-0008 states the re-attach contract for any path that re-initializes the subscribe bridge). **Current deviation:** in this file the wiring call runs *before* the subscribe init in the same function, so on the subscription path the filter is dropped; the wiring call belongs after `erd_bridge_subscribe_init()`.
+
+10. **Custom ERDs are merged into the valid-ERD filter so they survive it.** `add_valid_erds()` adds the configured custom ERDs after the feature-bit set is borrowed; past the merged cap (`ERD_REGISTRY_MAX_VALID`) they are dropped rather than silently suppressing the base set (ADR-0008). An empty feature-bit set is ignored by the registry, which leaves filtering disabled and publishes everything.
+
+11. **The poll list the polling bridge uses is bridge-owned storage.** `init_polling_bridge_()` copies the builder's result into the bridge's fixed `poll_probe_list_` array and passes that array to `erd_bridge_poll_init()`, because the polling bridge keeps the pointer for its whole lifetime while the builder's result is a temporary.
+
+12. **Mode-dependent wiring.** GEA2 forces polling regardless of the configured `mode_` (GEA2 has no subscriptions); `BRIDGE_MODE_POLL` polls; `BRIDGE_MODE_SUBSCRIBE` and `BRIDGE_MODE_AUTO` subscribe; only AUTO later adds a custom-ERD polling bridge alongside it (§3.5.3, §3.6). No subscription bridge is initialized in the polling paths at all — custom ERDs are polled there, not subscribed. When neither UART is configured, `initialize_erd_bridge_()` returns before creating any bridge, so `data_plane_phase_` stays `kIdle` (ADR-0006).
+
+13. **Subscription coverage never extends across boards.** A custom ERD observed as a subscription publication on the primary host does not cover the same ERD on another board, so every entry with an explicit non-primary board address goes into `subscription_unseen_custom_erds_` and is polled regardless of subscription state (ADR-0011).
+
+14. **Log-only locals are cast to void.** `mode_name` and similar locals are computed and then cast to `(void)` after the log call, so the helpers still run and the host build stays warning-clean when the log macro is stubbed to `((void)0)` in the test harness.

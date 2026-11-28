@@ -1,4 +1,3 @@
-
 #include "device_identity_manager.h"
 #include "geappliances_bridge_constants.h"
 #include "esphome/core/log.h"
@@ -70,7 +69,6 @@ void DeviceIdentityManager::on_erd_read_completed(tiny_erd_t erd, const uint8_t*
     this->bytes_to_string_(data, size, this->serial_number_, sizeof(this->serial_number_));
     ESP_LOGI(TAG, "Read serial number: %s", this->serial_number_);
 
-    /* Build generated_device_id: applianceType_model_serial */
     const char* type_str = appliance_type_to_string(this->appliance_type_);
     const std::string sanitized_model = this->sanitize_for_mqtt_topic_(this->model_number_);
     const std::string sanitized_serial = this->sanitize_for_mqtt_topic_(this->serial_number_);
@@ -86,7 +84,6 @@ void DeviceIdentityManager::on_erd_read_completed(tiny_erd_t erd, const uint8_t*
 
 void DeviceIdentityManager::on_erd_read_failed(tiny_erd_t erd)
 {
-  // Retries indefinitely -- never give up.
   ESP_LOGW(TAG, "Failed to read ERD 0x%04X for device ID generation, retrying", erd);
   if (!this->try_queue_read_(erd)) {
     ESP_LOGD(TAG, "Could not re-queue ERD 0x%04X read (client unavailable)", erd);
@@ -118,8 +115,6 @@ void DeviceIdentityManager::bytes_to_string_(const uint8_t* data, size_t size,
     out[0] = '\0';
     return;
   }
-  // GE API model/serial are plain ASCII, null-terminated or padded with 0x00.
-  // Some appliances pad trailing bytes with '_' (underscore); strip it.
   size_t i = 0;
   for (; i < size && i < out_size - 1; i++) {
     uint8_t raw = data[i];
@@ -148,5 +143,5 @@ std::string DeviceIdentityManager::sanitize_for_mqtt_topic_(const char* input)
   return result.empty() ? "Unknown" : result;
 }
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}

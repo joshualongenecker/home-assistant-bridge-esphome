@@ -1,11 +1,3 @@
-/*
- * @file
- * @brief Device identity manager for the GEA bridge.
- *
- * Retries each identity ERD read indefinitely on failure — the manager
- * never moves on until all three read successfully.
- */
-
 #ifndef DEVICE_IDENTITY_MANAGER_H
 #define DEVICE_IDENTITY_MANAGER_H
 
@@ -28,27 +20,20 @@ enum DeviceIdState {
 
 class DeviceIdentityManager {
  public:
-  /* Always starts reading ERDs regardless of whether a configured ID exists. */
   void init(const char* configured_id,
             i_tiny_gea3_erd_client_t* erd_client,
             uint8_t host_address);
 
   void on_erd_read_completed(tiny_erd_t erd, const uint8_t* data, uint8_t size);
 
-  /* On read failure: re-queues the same ERD read. Retries indefinitely. */
   void on_erd_read_failed(tiny_erd_t erd);
 
   DeviceIdState get_state() const { return state_; }
-  /* Idempotent: safe to call multiple times. */
   void cleanup();
 
-  /* Returns the preconfigured ID if one was provided, otherwise the auto-generated ID. */
   const char* get_device_id() const;
 
   const char* get_model_number() const { return model_number_; }
-  /*
-   * Get the appliance type byte (from ERD 0x0008).
-   */
   uint8_t get_appliance_type() const { return appliance_type_; }
 
   const char* get_serial_number() const { return serial_number_; }
@@ -71,7 +56,7 @@ class DeviceIdentityManager {
   uint8_t host_address_{0};
 };
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}
 
-#endif  // DEVICE_IDENTITY_MANAGER_H
+#endif

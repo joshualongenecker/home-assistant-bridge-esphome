@@ -134,11 +134,9 @@ TEST(ha_discovery_cleanup, pack_valid_topic)
     CHECK_EQUAL(0, cl.dropped_count);
     CHECK(cl.pass_found_topics);
 
-    /* Verify full topic stored in buffer. */
     STRCMP_EQUAL("homeassistant/binary_sensor/Dishwasher_PDT715/3218_washzones/config",
                  cl.topic_buf);
 }
-
 
 /* ------------------------------------------------------------------ */
 /* Buffer full behavior                                                 */
@@ -168,7 +166,6 @@ TEST(ha_discovery_cleanup, drain_and_refill)
 {
     ha_discovery_cleanup_t cl = make_cleanup("Dishwasher_PDT715");
 
-    /* Pack 5 topics. */
     for (uint32_t i = 0; i < 5; i++) {
         char topic[128];
         snprintf(topic, sizeof(topic),
@@ -179,7 +176,6 @@ TEST(ha_discovery_cleanup, drain_and_refill)
     uint16_t initial_count = cl.queue_count;
     CHECK(initial_count > 0);
 
-    /* Simulate drain: read topic from position 0 and compact. */
     while (cl.queue_count > 0) {
         size_t consumed = strlen(cl.topic_buf) + 1;
         if (consumed > cl.queue_write_pos) consumed = cl.queue_write_pos;
@@ -218,7 +214,6 @@ TEST(ha_discovery_cleanup, missing_config_suffix_skipped)
     CHECK_EQUAL(0, cl.dropped_count);
 }
 
-
 TEST(ha_discovery_cleanup, too_short_topic_skipped)
 {
     ha_discovery_cleanup_t cl = make_cleanup("Dishwasher_PDT715");
@@ -248,7 +243,6 @@ TEST(ha_discovery_cleanup, cleanup_start_resets_fields)
     CHECK_EQUAL(0, cl.dropped_count);
 }
 
-/* Flush stores and republishes the original topic unchanged               */
 TEST(ha_discovery_cleanup, flush_stores_topic_unchanged)
 {
     ha_discovery_cleanup_t cl = make_cleanup("Dishwasher_PDT715");
@@ -268,7 +262,6 @@ TEST(ha_discovery_cleanup, flush_drains_one_at_a_time)
 {
     ha_discovery_cleanup_t cl = make_cleanup("Dishwasher_PDT715");
 
-    /* Pack several topics. */
     for (uint32_t i = 0; i < 5; i++) {
         char topic[128];
         snprintf(topic, sizeof(topic),
@@ -279,7 +272,6 @@ TEST(ha_discovery_cleanup, flush_drains_one_at_a_time)
     uint16_t initial_count = cl.queue_count;
     CHECK_EQUAL(5, initial_count);
 
-    /* Drain one at a time, verifying each topic. */
     for (uint32_t i = 0; i < 5; i++) {
         char expected[128];
         snprintf(expected, sizeof(expected),
@@ -303,7 +295,6 @@ TEST(ha_discovery_cleanup, compacting_buffer_drain_and_refill)
 {
     ha_discovery_cleanup_t cl = make_cleanup("Dishwasher_PDT715");
 
-    /* Pack several topics. */
     for (uint32_t i = 0; i < 5; i++) {
         char topic[128];
         snprintf(topic, sizeof(topic),
@@ -314,7 +305,6 @@ TEST(ha_discovery_cleanup, compacting_buffer_drain_and_refill)
     uint16_t write_pos_before = cl.queue_write_pos;
     CHECK(write_pos_before > 0);
 
-    /* Drain all but the last entry via compacting. */
     while (cl.queue_count > 1) {
         size_t consumed = strlen(cl.topic_buf) + 1;
         if (consumed > cl.queue_write_pos) consumed = cl.queue_write_pos;
@@ -323,7 +313,6 @@ TEST(ha_discovery_cleanup, compacting_buffer_drain_and_refill)
         cl.queue_count--;
     }
 
-    /* After compaction, write_pos should be much lower than before. */
     CHECK(cl.queue_write_pos < write_pos_before);
     CHECK(cl.queue_count == 1);
 
@@ -337,7 +326,6 @@ TEST(ha_discovery_cleanup, compacting_buffer_drain_and_refill)
 
     CHECK(cl.queue_count > 1);
 
-    /* Verify all entries are readable from position 0. */
     while (cl.queue_count > 0) {
         CHECK(strlen(cl.topic_buf) > 0);
 
@@ -380,8 +368,7 @@ TEST_GROUP(ha_discovery_cleanup_publish_backoff)
     void setup()
     {
         test_time_ms = 1000;
-        ha_discovery_cleanup_init(&cl);  /* also portMUX_INITIALIZEs cl.mux: the
-                                         * spinlock paths under test are valid on hardware */
+        ha_discovery_cleanup_init(&cl);
         esphome_mqtt_client_adapter_init(&adapter, kDeviceId);
         esphome::mqtt::global_mqtt_client = &mqtt_double;
         mqtt_double.connected_ = true;
@@ -473,7 +460,6 @@ TEST(ha_discovery_cleanup_publish_backoff, armed_window_survives_the_millis_roll
     mqtt_double.publish_should_fail_ = true;
     cleanup_flush_queue(&cl);
     LONGS_EQUAL(1, mqtt_double.publish_calls_);
-    /* 0xFFFFFFF0 + 64 wraps to 48. */
     UNSIGNED_LONGS_EQUAL(48, cl.retry_backoff_until_ms);
 
     /* 32 ms after the wrap only 32 of the 64 ms have passed: no attempt. */
@@ -569,7 +555,7 @@ TEST_GROUP(ha_discovery_cleanup_critical_section)
         ha_discovery_cleanup_configure(&cl, kDeviceId, &adapter.interface,
                                        test_get_time_ms);
         CHECK_TRUE(ha_discovery_cleanup_start(&cl));
-        esp_test_log_reset_();  /* ignore any init/configure logging */
+        esp_test_log_reset_();
     }
 
     void teardown()

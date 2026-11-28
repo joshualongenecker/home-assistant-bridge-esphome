@@ -95,7 +95,7 @@ void hook_noop_manager(void*, ha_discovery_manager_t*) {}
 bool hook_load_none(void*, DiscoveryLifecycleManager::DiscoveryRecord*) { return false; }
 void hook_save(void*, const DiscoveryLifecycleManager::DiscoveryRecord&) {}
 
-}  // namespace
+}
 
 TEST_GROUP(discovery_lifecycle_concurrency)
 {

@@ -172,7 +172,6 @@ TEST_GROUP(startup_integration)
     bridge->set_appliance_api_parsing(false);
   }
 
-  /* Configure with GEA2 UART only. */
   void configure_gea2_only()
   {
     bridge->set_gea2_uart(mock_uart);
@@ -180,7 +179,6 @@ TEST_GROUP(startup_integration)
     bridge->set_appliance_api_parsing(false);
   }
 
-  /* Configure with no UART. */
   void configure_no_uart()
   {
     bridge->set_mode(BRIDGE_MODE_POLL);
@@ -380,7 +378,6 @@ TEST(startup_integration, all_modes_cycle)
 
 TEST(startup_integration, all_uart_combinations)
 {
-  // GEA3 only
   esphome_hal_double_set_millis(0);
   bridge->set_gea3_uart(mock_uart);
   bridge->set_gea2_uart(nullptr);
@@ -390,7 +387,6 @@ TEST(startup_integration, all_uart_combinations)
   bridge->loop();
   CHECK(bridge->teardown());
 
-  // GEA2 only
   esphome_hal_double_set_millis(1000);
   bridge->set_gea3_uart(nullptr);
   bridge->set_gea2_uart(mock_uart);
@@ -398,7 +394,6 @@ TEST(startup_integration, all_uart_combinations)
   bridge->loop();
   CHECK(bridge->teardown());
 
-  // Both
   esphome_hal_double_set_millis(2000);
   bridge->set_gea3_uart(mock_uart);
   bridge->set_gea2_uart(mock_uart);
@@ -406,7 +401,6 @@ TEST(startup_integration, all_uart_combinations)
   bridge->loop();
   CHECK(bridge->teardown());
 
-  // Neither
   esphome_hal_double_set_millis(3000);
   bridge->set_gea3_uart(nullptr);
   bridge->set_gea2_uart(nullptr);
@@ -443,7 +437,6 @@ TEST(startup_integration, all_modes_x_all_uart_combinations)
 {
   int iteration = 0;
   for (int mode = BRIDGE_MODE_POLL; mode <= BRIDGE_MODE_AUTO; mode++) {
-    // GEA3 only
     {
       esphome_hal_double_set_millis(iteration++ * 1000);
       bridge->set_gea3_uart(mock_uart);
@@ -454,7 +447,6 @@ TEST(startup_integration, all_modes_x_all_uart_combinations)
       bridge->loop();
       CHECK(bridge->teardown());
     }
-    // GEA2 only
     {
       esphome_hal_double_set_millis(iteration++ * 1000);
       bridge->set_gea3_uart(nullptr);
@@ -465,7 +457,6 @@ TEST(startup_integration, all_modes_x_all_uart_combinations)
       bridge->loop();
       CHECK(bridge->teardown());
     }
-    // Both
     {
       esphome_hal_double_set_millis(iteration++ * 1000);
       bridge->set_gea3_uart(mock_uart);
@@ -476,7 +467,6 @@ TEST(startup_integration, all_modes_x_all_uart_combinations)
       bridge->loop();
       CHECK(bridge->teardown());
     }
-    // Neither
     {
       esphome_hal_double_set_millis(iteration++ * 1000);
       bridge->set_gea3_uart(nullptr);
@@ -1594,7 +1584,6 @@ TEST(startup_integration, full_startup_stress_across_all_modes)
 
 TEST(startup_integration, full_startup_stress_with_all_uart_combinations)
 {
-  // GEA3 only
   esphome_hal_double_set_millis(0);
   bridge->set_gea3_uart(mock_uart);
   bridge->set_gea2_uart(nullptr);
@@ -1609,7 +1598,6 @@ TEST(startup_integration, full_startup_stress_with_all_uart_combinations)
   }
   CHECK(bridge->teardown());
 
-  // GEA2 only
   esphome_hal_double_set_millis(10000);
   bridge->set_gea3_uart(nullptr);
   bridge->set_gea2_uart(mock_uart);
@@ -1622,7 +1610,6 @@ TEST(startup_integration, full_startup_stress_with_all_uart_combinations)
   }
   CHECK(bridge->teardown());
 
-  // Both
   esphome_hal_double_set_millis(20000);
   bridge->set_gea3_uart(mock_uart);
   bridge->set_gea2_uart(mock_uart);
@@ -1635,7 +1622,6 @@ TEST(startup_integration, full_startup_stress_with_all_uart_combinations)
   }
   CHECK(bridge->teardown());
 
-  // Neither
   esphome_hal_double_set_millis(30000);
   bridge->set_gea3_uart(nullptr);
   bridge->set_gea2_uart(nullptr);
@@ -1662,9 +1648,9 @@ static void append_gea3_frame(LifecycleMockUart *uart, const uint8_t *payload,
 {
   uint8_t frame[64];
   int frame_idx = 0;
-  frame[frame_idx++] = 0xE4;  // destination: bridge client address
+  frame[frame_idx++] = 0xE4;
   frame[frame_idx++] = tiny_gea_packet_transmission_overhead + payload_len;
-  frame[frame_idx++] = 0xB8;  // source: board address
+  frame[frame_idx++] = 0xB8;
   for (int i = 0; i < payload_len; i++) {
     frame[frame_idx++] = payload[i];
   }
@@ -1714,11 +1700,11 @@ static void queue_broadcast_response(LifecycleMockUart *uart, uint8_t appliance_
 {
   uint8_t payload[16];
   payload[0] = tiny_gea3_erd_api_command_read_response;
-  payload[1] = 0;  // request_id
+  payload[1] = 0;
   payload[2] = tiny_gea3_erd_api_read_result_success;
   payload[3] = (ERD_APPLIANCE_TYPE >> 8) & 0xFF;
   payload[4] = ERD_APPLIANCE_TYPE & 0xFF;
-  payload[5] = 1;  // data_size
+  payload[5] = 1;
   payload[6] = appliance_type;
   append_gea3_frame(uart, payload, 7);
 }
@@ -1734,7 +1720,7 @@ static void queue_read_response(LifecycleMockUart *uart, uint8_t request_id,
   payload[2] = tiny_gea3_erd_api_read_result_success;
   payload[3] = (erd >> 8) & 0xFF;
   payload[4] = erd & 0xFF;
-  payload[5] = 1;  // data_size
+  payload[5] = 1;
   payload[6] = (erd == ERD_APPLIANCE_TYPE) ? 0x03
                : (erd == ERD_MODEL_NUMBER) ? 'M' : 'S';
   append_gea3_frame(uart, payload, payload_len);
@@ -1790,7 +1776,6 @@ static void respond_to_erd_reads(LifecycleMockUart *uart)
   }
 }
 
-
 /* Drive the bridge from setup() until the autodiscovery broadcast has gone
  * out over the uart (the HSM's startup delay plus the manager's broadcast).
  * Returns the loop counter so callers continue the same simulated clock. */
@@ -1812,7 +1797,7 @@ TEST(startup_integration, full_lifecycle_poll_mode_reaches_running_and_publishes
   bridge->setup();
 
   int i = drive_past_broadcast(bridge, mock_uart);
-  CHECK(mock_uart->write_count > 0);  // autodiscovery broadcast went out
+  CHECK(mock_uart->write_count > 0);
   queue_broadcast_response(mock_uart, 0x03);
 
   for (; i <= 13500; i++) {
@@ -1992,8 +1977,6 @@ TEST(startup_integration, steady_state_window_leaks_no_heap)
          mqtt_double->publish_calls_ - publishes_before,
          mock_uart->write_count - writes_before);
 
-  /* The window has to have actually driven the data path, or the heap
-   * assertion below would be vacuous. */
   CHECK(mqtt_double->publish_calls_ > publishes_before);
   CHECK(mock_uart->write_count > writes_before);
   CHECK_TRUE(heap_after <= heap_warm + kSteadyStateHeapSlack);
@@ -2027,11 +2010,11 @@ TEST(startup_integration, restart_runs_the_startup_again_from_the_stabilization_
 {
   configure_poll_mode();
   bridge->setup();
-  bridge->loop();  // enters the stabilization delay at t=0
+  bridge->loop();
 
   const uint32_t later = AUTODISCOVERY_STARTUP_DELAY_MS + 100;
   esphome_hal_double_set_millis(later);
-  bridge->loop();  // delay elapsed: on to autodiscovery
+  bridge->loop();
   IBridgeServices* services = bridge;
   CHECK(services->is_startup_delay_elapsed());
 
@@ -2128,7 +2111,7 @@ TEST(startup_integration, reconnect_appliance_button_restarts_the_startup)
 
   ReconnectApplianceButton button(bridge);
   button.press_action();
-  CHECK(services->is_startup_delay_elapsed());  // nothing happens until loop()
+  CHECK(services->is_startup_delay_elapsed());
   bridge->loop();
 
   CHECK_FALSE(services->is_startup_delay_elapsed());
@@ -2163,10 +2146,10 @@ static size_t count_write_topic_subscriptions(esphome::mqtt::MqttTestDouble* mqt
 static void feed_appliance_type_response(RestartTestBridge* b, uint8_t board, uint8_t appliance_type)
 {
   const uint8_t payload[] = {
-    tiny_gea3_erd_api_command_read_response, 0 /* request id */,
+    tiny_gea3_erd_api_command_read_response, 0 ,
     tiny_gea3_erd_api_read_result_success,
     (uint8_t)(ERD_APPLIANCE_TYPE >> 8), (uint8_t)(ERD_APPLIANCE_TYPE & 0xFF),
-    1 /* data size */, appliance_type};
+    1 , appliance_type};
   uint8_t frame[3 + sizeof(payload)];
   frame[0] = 0xE4;
   frame[1] = (uint8_t)(tiny_gea_packet_transmission_overhead + sizeof(payload));
@@ -2189,10 +2172,10 @@ static void feed_appliance_type_response(RestartTestBridge* b, uint8_t board, ui
 static bool drive_startup_to_bridge_init(RestartTestBridge* b, uint32_t* now)
 {
   IBridgeServices* services = b;
-  b->loop();  // enters (or is in) the stabilization delay
+  b->loop();
   *now += AUTODISCOVERY_STARTUP_DELAY_MS + 100;
   esphome_hal_double_set_millis(*now);
-  b->loop();  // autodiscovery: broadcast sent
+  b->loop();
   feed_appliance_type_response(b, 0xC0, 35);
   for (int i = 0; i < 20 && !services->is_autodiscovery_complete(); i++) {
     *now += 250;
@@ -2220,7 +2203,7 @@ TEST(startup_integration, restart_clears_the_erd_cache)
   ReconnectApplianceButton button(b);
   button.press_action();
   CHECK_TRUE(b->restart_requested_);
-  CHECK_EQUAL(1, erd_cache_get_count(&b->erd_cache_));  // not until loop()
+  CHECK_EQUAL(1, erd_cache_get_count(&b->erd_cache_));
   b->loop();
 
   CHECK_FALSE(b->restart_requested_);
@@ -2280,7 +2263,6 @@ TEST(startup_integration, a_configured_board_silent_at_boot_does_not_republish)
   const uint32_t fp_alive = b->valid_erds_fingerprint_();
   CHECK(fp_alive != 0u);
 
-  // This boot: it did not
   erd_cache_clear(&b->erd_cache_);
   CHECK_TRUE(erd_cache_update(&b->erd_cache_, 0x0008, 0xC0, data, sizeof(data)));
   const uint32_t fp_silent = b->valid_erds_fingerprint_();
@@ -2360,7 +2342,6 @@ TEST(startup_integration, valid_erds_fingerprint_follows_the_valid_erd_set)
   b->add_custom_erd(0xF093);
   CHECK_EQUAL(fp_a, b->valid_erds_fingerprint_());
 
-  // A secondary board the configuration names does
   const uint16_t board_erds[] = {0xF400};
   const uint8_t board_addresses[] = {0x62};
   b->add_custom_erds_with_addresses(board_erds, board_addresses, 1);
@@ -2372,7 +2353,6 @@ TEST(startup_integration, valid_erds_fingerprint_follows_the_valid_erd_set)
   b->add_custom_erds_with_addresses(more_board_erds, board_addresses, 1);
   CHECK_EQUAL(fp_board_62, b->valid_erds_fingerprint_());
 
-  // ... and another board does
   const uint8_t other_board[] = {0x63};
   b->add_custom_erds_with_addresses(more_board_erds, other_board, 1);
   CHECK(b->valid_erds_fingerprint_() != fp_board_62);

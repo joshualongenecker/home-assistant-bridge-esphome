@@ -41,8 +41,6 @@ static void update_erd_write_result(
     return;
   }
 
-  // Use a stack buffer to avoid heap allocation.
-  // Max error payload: "{\"error\":\"retries_exhausted\"}" = 28 chars + null.
   char payload[32] = {0};
   if (success) {
     strcpy(payload, "ok");
@@ -55,8 +53,6 @@ static void update_erd_write_result(
   }
 
   ESP_LOGD(TAG, "Write result for ERD 0x%04X: %s", erd, payload);
-  /* Publish through the adapter's own publish_raw slot so the ESPHome global
-   * client is reached through one seam, not reached around. */
   esphome_mqtt_client_adapter_publish_raw(_self, topic, payload, strlen(payload), true);
 }
 
@@ -78,9 +74,6 @@ static i_tiny_event_t* on_mqtt_connect(i_mqtt_client_t* _self)
   return &self->on_mqtt_connect_event.interface;
 }
 
-/* The adapter is the seam boundary: ESPHome's global client is only ever
- * reached from here, so data-path modules query connectivity through the
- * injected i_mqtt_client_t. */
 static bool adapter_is_connected(i_mqtt_client_t* _self)
 {
   (void)_self;
@@ -105,17 +98,12 @@ extern "C" void esphome_mqtt_client_adapter_init(
 {
   self->initialized = true;
   self->interface.api = &api;
-  /* Lifetime: stores a pointer into DeviceIdentityManager's buffers
-   * (configured_device_id_ or generated_device_id_), which live in the
-   * bridge object and outlive the adapter. */
   self->device_id = device_id;
 
   tiny_event_init(&self->on_write_request_event);
   tiny_event_init(&self->on_mqtt_disconnect_event);
   tiny_event_init(&self->on_mqtt_connect_event);
 
-  // Wire ESPHome MQTT client connect/disconnect callbacks to our tiny events.
-  // Without this, mqtt_connected stays false forever and the publisher never publishes.
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
   if (mqtt_client != nullptr) {
     mqtt_client->set_on_connect([self](bool) {
@@ -125,8 +113,6 @@ extern "C" void esphome_mqtt_client_adapter_init(
       esphome_mqtt_client_adapter_notify_disconnected(self);
     });
 
-    // If already connected when we register, fire the event immediately so the
-    // publisher's mqtt_connected flag is set correctly on first loop().
     if (mqtt_client->is_connected()) {
       esphome_mqtt_client_adapter_notify_connected(self);
     }
@@ -152,13 +138,6 @@ extern "C" void esphome_mqtt_client_adapter_subscribe_write_topic(
   }
 
   mqtt_client->subscribe(self->write_topic_, [self](const std::string& topic, const std::string& payload) {
-    // Grammar and sentinel rules live in erd_topic.h: no-prefix topics
-    // parse to the ERD_TOPIC_PRIMARY (0xFF) sentinel, which the write
-    // bridge resolves to the detected host address; a secondary board at
-    // 0x00 parses as 0x00 and stays distinct from the sentinel. Topics that do
-    // not match the grammar are dropped -- and now say so, because the usual
-    // cause is a capital X in the 0x prefix, which is not the grammar and from
-    // outside looked like a write the bridge silently ignored.
     uint8_t board_address = 0;
     uint16_t erd = 0;
     erd_topic_op_t op = ERD_TOPIC_OP_VALUE;
@@ -170,9 +149,6 @@ extern "C" void esphome_mqtt_client_adapter_subscribe_write_topic(
     }
     if (op != ERD_TOPIC_OP_WRITE) return;
 
-    // Decode hex payload to a local stack buffer to avoid race condition:
-    // if a new MQTT message arrives before tiny_event_publish() delivers
-    // this one, the local buffer is already consumed by the event handler.
     uint8_t local_buffer[ERD_CACHE_MAX_DATA_SIZE];
     size_t decoded = 0;
     for (size_t i = 0; i + 1 < payload.size() && decoded < sizeof(local_buffer); i += 2) {
@@ -191,9 +167,6 @@ extern "C" void esphome_mqtt_client_adapter_subscribe_write_topic(
     args.size = local_size;
     args.value = local_buffer;
 
-    // tiny_event_publish() is synchronous (subscriber callback runs to
-    // completion before return), so the stack buffer is valid for the
-    // duration of the event delivery.
     tiny_event_publish(&self->on_write_request_event, &args);
   }, 0);
 }
@@ -206,13 +179,10 @@ extern "C" void esphome_mqtt_client_adapter_notify_connected(
 extern "C" void esphome_mqtt_client_adapter_destroy(
   esphome_mqtt_client_adapter_t* self)
 {
-  // Unregister all MQTT callbacks to prevent dangling lambda captures
-  // from firing after the adapter is gone (e.g., on re-init or OTA).
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
   if (mqtt_client != nullptr) {
     mqtt_client->set_on_connect(nullptr);
     mqtt_client->set_on_disconnect(nullptr);
-    // Unsubscribe from write topic (also captures 'self' by raw pointer).
     if (self->write_topic_[0] != '\0') {
       mqtt_client->unsubscribe(self->write_topic_);
     }

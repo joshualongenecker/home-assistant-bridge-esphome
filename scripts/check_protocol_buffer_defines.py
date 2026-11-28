@@ -30,12 +30,10 @@ from pathlib import Path
 DEFINES_REL = "src/esphome/core/defines.h"
 MAIN_REL = "src/main.cpp"
 
-# (define emitted by to_code, setter call emitted for the same UART)
 PROTOCOLS = (
     ("GEA_BRIDGE_HAS_GEA3", "set_gea3_uart"),
     ("GEA_BRIDGE_HAS_GEA2", "set_gea2_uart"),
 )
-
 
 def check(build_dir: Path) -> list[str]:
     """Return the problems found in one generated build dir (empty == clean)."""
@@ -49,7 +47,6 @@ def check(build_dir: Path) -> list[str]:
 
     defines = defines_path.read_text(encoding="utf-8", errors="replace")
     main = main_path.read_text(encoding="utf-8", errors="replace")
-    # A commented-out setter call must not count as a configured UART.
     main = re.sub(r"//[^\n]*", "", main)
     problems: list[str] = []
     emitted = set()
@@ -64,9 +61,6 @@ def check(build_dir: Path) -> list[str]:
         if has_uart and not has_define:
             problems.append(f"{build_dir}: {setter}() called but {define} is not defined")
 
-    # The component schema rejects a config with neither UART, so an ESPHome
-    # build always defines at least one protocol. Neither define means the
-    # header's "both stacks" fallback silently applies to a real device.
     if not emitted:
         problems.append(
             f"{build_dir}: neither GEA_BRIDGE_HAS_GEA3 nor GEA_BRIDGE_HAS_GEA2 is defined; "
@@ -74,7 +68,6 @@ def check(build_dir: Path) -> list[str]:
         )
 
     return problems
-
 
 def main(argv: list[str]) -> int:
     build_dirs = [Path(arg) for arg in argv[1:]]
@@ -94,7 +87,6 @@ def main(argv: list[str]) -> int:
     for build_dir in build_dirs:
         print(f"ok: {build_dir}")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv))

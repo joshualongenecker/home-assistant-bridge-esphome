@@ -1,8 +1,3 @@
-/*!
- * @file
- * @brief ESP-IDF esp_crt_bundle stubs for test/simulation builds.
- */
-
 #ifndef ESP_CRT_BUNDLE_STUB_H
 #define ESP_CRT_BUNDLE_STUB_H
 
@@ -19,4 +14,4 @@ static inline esp_crt_bundle_handle_t esp_crt_bundle_attach(void*) { return (esp
 }
 #endif
 
-#endif /* ESP_CRT_BUNDLE_STUB_H */
+#endif

@@ -1,4 +1,3 @@
-
 #include "feature_bit_manager.h"
 #include "geappliances_bridge_constants.h"
 #include "appliance_api_feature_lists.h"
@@ -24,7 +23,6 @@ void FeatureBitManager::init(i_tiny_gea3_erd_client_t* erd_client,
                               uint8_t host_address,
                               tiny_timer_group_t* timer_group)
 {
-  /* Unsubscribe from any previous init() to avoid dangling subscriptions on re-init. */
   if (this->erd_client_) {
     tiny_event_unsubscribe(
       tiny_gea3_erd_client_on_activity(this->erd_client_),
@@ -53,10 +51,6 @@ void FeatureBitManager::init(i_tiny_gea3_erd_client_t* erd_client,
   this->parse_common_done_ = false;
   this->valid_list_ready_ = false;
   this->valid_erds_count_ = 0;
-  /* Both counts describe this run's feature-bit read.  The members are
-   * default-initialised at construction, but init() is where valid_erds_count_ is
-   * reset, so the skip count has to be reset alongside it: a second init() would
-   * otherwise report a cumulative skip count next to a per-run valid count. */
   this->skipped_erds_count_ = 0;
 
   this->erd_data_ = FeatureBitErdData{};
@@ -97,7 +91,6 @@ void FeatureBitManager::start()
   if (this->erd_client_ == nullptr) {
     return;
   }
-  /* Idempotent: only queue the first read if we're at the start and haven't queued yet. */
   if (this->state_ != FEATURE_BIT_STATE_READING || this->reading_idx_ != 0 || this->read_queued_) {
     return;
   }
@@ -128,13 +121,10 @@ void FeatureBitManager::on_erd_activity_(const void* args)
   const tiny_gea3_erd_client_on_activity_args_t* a =
     reinterpret_cast<const tiny_gea3_erd_client_on_activity_args_t*>(args);
 
-  /* Ignore events for other appliances (e.g., GEA2 adapter responses) */
   if (a->address != this->host_address_) {
     return;
   }
 
-  /* Ignore events once we're done reading (PARSING, COMPLETE, or FAILED).
-   * The parse timer handles the PARSING phase independently. */
   if (this->state_ == FEATURE_BIT_STATE_PARSING || this->state_ == FEATURE_BIT_STATE_COMPLETE ||
       this->state_ == FEATURE_BIT_STATE_FAILED) {
     return;
@@ -142,15 +132,11 @@ void FeatureBitManager::on_erd_activity_(const void* args)
 
   tiny_erd_t expected_erd = this->get_expected_erd_();
 
-  /* If we haven't queued a read yet (queue was full), retry now. */
   if (!this->read_queued_) {
     this->queue_erd_read_();
     return;
   }
 
-  /* Only process events for the ERD we're actually waiting for.
-   * This prevents unrelated reads (e.g., from the polling bridge) from
-   * clearing read_queued_ and corrupting the read sequence. */
   if (a->type == tiny_gea3_erd_client_activity_type_read_completed) {
     if (a->read_completed.erd == expected_erd) {
       this->handle_read_completed_(a->read_completed.erd,
@@ -168,9 +154,6 @@ void FeatureBitManager::handle_read_completed_(tiny_erd_t erd, const void* data,
 {
   this->read_queued_ = false;
 
-  /* Validate the incoming ERD matches the expected one in the sequence.
-   * If ERDs arrive out of order or an unexpected ERD fires, skip it to
-   * avoid storing data in the wrong slot. */
   uint8_t idx = this->reading_idx_;
   if (idx >= FEATURE_ERD_COUNT || erd != feature_erd_list[idx]) {
     ESP_LOGE(TAG, "Feature bit ERD 0x%04X: unexpected (expected 0x%04X at index %u), skipping",
@@ -220,8 +203,6 @@ void FeatureBitManager::queue_erd_read_()
     ESP_LOGV(TAG, "Queued read for feature ERD 0x%04X", feature_erd);
     this->read_queued_ = true;
   } else {
-    /* Queue is full — arm a one-shot retry timer so we don't stall
-     * indefinitely when no other ERD activity occurs. */
     ESP_LOGD(TAG, "Queue full for ERD 0x%04X, scheduling retry in %u ms",
              feature_erd, static_cast<unsigned>(QUEUE_RETRY_MS));
     tiny_timer_start(this->timer_group_,
@@ -234,7 +215,7 @@ void FeatureBitManager::queue_erd_read_()
 tiny_erd_t FeatureBitManager::get_expected_erd_() const
 {
   if (this->reading_idx_ >= FEATURE_ERD_COUNT) {
-    return 0;  /* Not in a READING state */
+    return 0;
   }
   return feature_erd_list[this->reading_idx_];
 }
@@ -246,14 +227,11 @@ void FeatureBitManager::queue_retry_timer_callback_(void* context)
 
 void FeatureBitManager::queue_retry_()
 {
-  /* Don't retry if we've moved past the READING state (e.g., an event
-   * arrived and completed the read before the timer fired). */
   if (this->state_ == FEATURE_BIT_STATE_PARSING || this->state_ == FEATURE_BIT_STATE_COMPLETE ||
       this->state_ == FEATURE_BIT_STATE_FAILED) {
     return;
   }
   if (this->read_queued_) {
-    /* Read was already queued by an intervening event — nothing to do. */
     return;
   }
   this->queue_erd_read_();
@@ -264,14 +242,8 @@ void FeatureBitManager::skip_to_next_erd_(tiny_erd_t failed_erd)
   this->read_queued_ = false;
   this->skipped_erds_count_++;
 
-  /* VERBOSE: an unsupported feature ERD is the normal case - up to
-   * FEATURE_ERD_COUNT of them per boot, one per entry in the feature list - and
-   * the count is reported once by the completion summary. */
   ESP_LOGV(TAG, "Feature bit ERD 0x%04X failed or not supported, skipping", failed_erd);
 
-  /* ERD 0x0092 (common feature API) is the foundation for all feature
-   * filtering. Without it, we have no way to know which ERDs are
-   * supported. Mark as failed so the bridge falls back to full polling. */
   if (failed_erd == ERD_COMMON_FEATURE_API) {
     ESP_LOGW(TAG, "Common feature API (0x0092) not supported; feature bit filtering disabled");
     this->state_ = FEATURE_BIT_STATE_FAILED;
@@ -317,12 +289,11 @@ void FeatureBitManager::parse_next_step_()
     this->valid_erds_count_ = 0;
     this->valid_list_ready_ = false;
 
-    /* Index 0 is the common feature API (0x0092). */
     if (this->erd_data_.sizes[0] > 0) {
       uint32_t common_bits = static_cast<uint32_t>(
         read_be64(this->erd_data_.data[0], this->erd_data_.sizes[0]) & 0xFFFFFFFFu);
       ESP_LOGI(TAG, "Common feature API (0x0092) value: 0x%08lX", (unsigned long)common_bits);
-      (void)common_bits; /* Used in ESP_LOGI that may be compiled out. */
+      (void)common_bits;
     }
   }
 
@@ -351,21 +322,17 @@ void FeatureBitManager::parse_next_step_()
       this->parse_common_done_ = true;
       return;
     }
-    /* Not done with common features yet - return to keep timer tick short. */
     return;
   }
 
-  /* Static tables for appliance ERDs (indexed 0-9 in parse_erd_idx_,
-   * mapping to erd_data_ indices 1-10). */
   [[maybe_unused]] static const char* const erd_names[10] = {
     "0x0093", "0x0094", "0x0095", "0x0096", "0x0097",
     "0x0109", "0x010A", "0x010B", "0x010C", "0x010D"
   };
 
-  /* Process one appliance ERD per tick to avoid blocking the timer for too long. */
   if (this->parse_erd_idx_ < 10) {
     uint8_t idx = this->parse_erd_idx_;
-    uint8_t data_idx = idx + 1;  /* erd_data_ index: 1-10 for appliance features */
+    uint8_t data_idx = idx + 1;
 
     if (this->erd_data_.sizes[data_idx] < APPLIANCE_FEATURE_ERD_SIZE) {
       this->parse_erd_idx_++;
@@ -406,7 +373,6 @@ void FeatureBitManager::parse_next_step_()
     return;
   }
 
-  /* Add mandatory ERDs (always published regardless of feature bits). */
   static const tiny_erd_t mandatory_erds[] = {
     ERD_MODEL_NUMBER, ERD_SERIAL_NUMBER, ERD_APPLIANCE_TYPE,
     ERD_COMMON_FEATURE_API, ERD_APPLIANCE_FEATURE_API_0,
@@ -421,11 +387,6 @@ void FeatureBitManager::parse_next_step_()
   }
 
   this->valid_list_ready_ = true;
-  /* Not "skipped as unsupported": skip_to_next_erd_ is also reached from a read
-   * failure (the reason is never inspected, so a bus or queue timeout counts the
-   * same as an absent feature) and from an out-of-order or empty read.  Saying
-   * "unsupported" tells an operator the appliance lacks those features and to stop
-   * looking, which the counter does not support. */
   ESP_LOGI(TAG, "Feature bit parsing complete: %u valid ERDs, %u skipped "
                 "(unsupported or unreadable)",
            this->valid_erds_count_, this->skipped_erds_count_);
@@ -434,5 +395,5 @@ void FeatureBitManager::parse_next_step_()
   this->state_ = FEATURE_BIT_STATE_COMPLETE;
 }
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}

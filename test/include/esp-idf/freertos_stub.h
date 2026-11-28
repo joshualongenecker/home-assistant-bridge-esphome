@@ -1,11 +1,3 @@
-/*!
- * @file
- * @brief ESP-IDF FreeRTOS stubs for test/simulation builds.
- *
- * Provides minimal definitions of FreeRTOS types and functions so that
- * ESP-IDF-gated code compiles and exercises its logic in test builds.
- */
-
 #ifndef ESP_FREERTOS_STUB_H
 #define ESP_FREERTOS_STUB_H
 
@@ -21,7 +13,6 @@ extern "C" {
 typedef int BaseType_t;
 typedef unsigned int UBaseType_t;
 
-/* ---------- task.h types & functions ---------- */
 typedef void* TaskHandle_t;
 typedef void* StackType_t;
 
@@ -53,7 +44,6 @@ static inline TaskHandle_t xTaskCreateStaticPinnedToCore(void (*fn)(void*), cons
     return (TaskHandle_t)0x1;
 }
 
-/* ---------- queue.h types & functions ---------- */
 typedef void* QueueHandle_t;
 
 static inline QueueHandle_t xQueueCreateStatic(uint32_t count, uint32_t size,
@@ -71,7 +61,6 @@ static inline BaseType_t xQueueReceive(QueueHandle_t q, void* data, UBaseType_t 
 }
 static inline void vQueueDelete(QueueHandle_t) { }
 
-/* ---------- semphr.h types & functions ---------- */
 typedef void* SemaphoreHandle_t;
 
 /* Every binary semaphore shares one handle value and every mutex another, which
@@ -126,4 +115,4 @@ static inline eTaskState eTaskGetState(TaskHandle_t) { return eDeleted; }
 }
 #endif
 
-#endif /* ESP_FREERTOS_STUB_H */
+#endif

@@ -1,22 +1,3 @@
-/*!
- * @brief AutodiscoveryManager - appliance autodiscovery state machine.
- *
- * Self-driving: owns its own timers and event subscriptions; the bridge
- * calls start(); the startup HSM polls get_state() to advance past
- * discovery.  Retries indefinitely with GEA3 <-> GEA2 fallback if both UARTs
- * are configured.
- *
- * Subscribes to UART byte-level receive events and assembles packets
- * independently, bypassing the GEA interface single-packet buffer (drops
- * bytes when a packet is already assembled but not yet processed) and the
- * ERD client request_id filter (drops valid responses when an
- * unsupported_erd response from another board arrives first).
- *
- * Does not read ERDs beyond ERD_APPLIANCE_TYPE, manage MQTT or bridge
- * connections, or do post-discovery work; the 5-second startup delay is
- * handled by the startup HSM.
- */
-
 #pragma once
 
 #include <cstdint>
@@ -38,10 +19,6 @@ namespace geappliances_bridge {
 
 static constexpr uint32_t AUTODISCOVERY_BROADCAST_WINDOW_MS = 1000;
 
-// The Wi-Fi module's addresses. It answers the appliance-type broadcast too
-// (relaying the appliance's identity), often before the control board, but it
-// is not an appliance board the bridge can work with, so broadcast answers
-// from these addresses are ignored. A configured board_address still wins.
 static constexpr uint8_t AUTODISCOVERY_WIFI_MODULE_ADDRESS_1 = 0xBE;
 static constexpr uint8_t AUTODISCOVERY_WIFI_MODULE_ADDRESS_2 = 0xBF;
 
@@ -66,10 +43,8 @@ class AutodiscoveryManager {
             bool has_gea2_uart,
             uint8_t client_address);
 
-  /// Safe to call multiple times.
   void cleanup();
 
-  /// Idempotent if already past IDLE.
   void start();
   uint8_t  get_host_address()       const { return host_address_; }
   i_tiny_gea3_erd_client_t* get_active_erd_client() const { return active_erd_client_; }
@@ -80,8 +55,6 @@ class AutodiscoveryManager {
   /// production feeds bytes via the UART adapter callbacks.
   void feed_byte(uint8_t byte, bool is_gea3) { process_byte_(byte, is_gea3); }
 
-  /// When set, probes target this address instead of the 0xFF broadcast;
-  /// the GEA3→GEA2 fallback still applies.
   void set_target_address(uint8_t address);
 
  private:
@@ -89,7 +62,6 @@ class AutodiscoveryManager {
 
   void on_broadcast_response(uint8_t address, uint8_t appliance_type, bool is_gea3);
 
-  /// Static for the tiny_timer API.
   static void timer_callback_(void* context);
 
   static void on_gea3_byte_(void* context, const void* args);
@@ -119,15 +91,12 @@ class AutodiscoveryManager {
   i_tiny_gea3_erd_client_t* active_erd_client_ = nullptr;
   bool gea2_protocol_active_ = false;
 
-  // Per-protocol independent packet assemblers: each tracks its own
-  // receive state so packets assemble concurrently, bypassing the GEA
-  // interface single-packet buffer.
   struct discover_rx_t {
     uint16_t crc = 0;
     uint16_t count = 0;
     bool escaped = false;
     bool stx_received = false;
-    uint8_t buffer[256];  // max payload + header
+    uint8_t buffer[256];
   };
   discover_rx_t gea3_rx_{};
   discover_rx_t gea2_rx_{};
@@ -136,5 +105,5 @@ class AutodiscoveryManager {
   tiny_event_subscription_t gea2_byte_subscription_;
 };
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}

@@ -55,16 +55,14 @@ if _unknown_categories:
         "APPLIANCE_TYPE_CATEGORY names categories with no discovery output: "
         f"{_unknown_categories}; valid ones are {sorted(CATEGORIES)}")
 
-
 def _is_valid_device_class(domain: str, device_class: str) -> bool:
     """Check if device_class is valid for the given HA domain."""
     if not device_class:
         return True
     valid = VALID_DEVICE_CLASSES.get(domain)
     if valid is None:
-        return True  # no restrictions for this domain
+        return True
     return device_class in valid
-
 
 # ---------------------------------------------------------------------------
 # Basic helpers
@@ -74,11 +72,9 @@ def parse_erd_id(erd_id_str: str) -> int:
     """Convert ERD ID string (e.g., '0x0001') to integer."""
     return int(erd_id_str, 16)
 
-
 def erd_id_to_hex(erd_id_str: str) -> str:
     """Convert ERD ID string to lowercase hex, zero-padded to 4 chars."""
     return format(parse_erd_id(erd_id_str), '04x')
-
 
 def get_category(erd_id: int) -> Optional[str]:
     """Return the category name for an ERD ID, or None if unclassified."""
@@ -86,7 +82,6 @@ def get_category(erd_id: int) -> Optional[str]:
         if lo <= erd_id <= hi:
             return name
     return None
-
 
 def get_erd_byte_size(erd_data: List[Dict]) -> int:
     """Compute the actual byte size of an ERD from its data field definitions.
@@ -99,14 +94,12 @@ def get_erd_byte_size(erd_data: List[Dict]) -> int:
         return 0
     return max((d.get('offset', 0) + d.get('size', 0)) for d in erd_data)
 
-
 def get_first_enum_values(erd_data: List[Dict]) -> Dict[str, str]:
     """Return the values dict from the first enum-typed data field, or {}."""
     for d in erd_data:
         if d.get('type') == 'enum':
             return d.get('values', {})
     return {}
-
 
 def _get_first_enum_field_info(erd_data: List[Dict]) -> Tuple[Dict[str, str], int]:
     """Return (values_dict, field_size) for the first enum-typed data field.
@@ -120,7 +113,6 @@ def _get_first_enum_field_info(erd_data: List[Dict]) -> Tuple[Dict[str, str], in
             return d.get('values', {}), max(1, d.get('size', 1))
     return {}, 1
 
-
 # ---------------------------------------------------------------------------
 # Multi-field ERD helpers
 # ---------------------------------------------------------------------------
@@ -128,7 +120,6 @@ def _get_first_enum_field_info(erd_data: List[Dict]) -> Tuple[Dict[str, str], in
 def _is_signed_type(type_str: str) -> bool:
     """Return True if the type string represents a signed integer (e.g. 'i8', 'i16', 'i32')."""
     return bool(re.match(r'^i\d+$', type_str))
-
 
 def _is_float32_type(type_str: str) -> bool:
     """Return True for a four-byte IEEE-754 single-precision value."""
@@ -148,14 +139,11 @@ def _compute_number_range(data_type: str, scaling_factor: int) -> Tuple[float, f
         'u32': (0, 4294967295),
         'i32': (-2147483648, 2147483647),
     }
-    # Defensive: scaling_factor=0 would cause ZeroDivisionError.
-    # post_process.py Rule 4 should catch this, but guard here too.
     if scaling_factor <= 0:
         scaling_factor = 1
     raw_min, raw_max = bounds.get(data_type, (0, 255))
     step = 1.0 / scaling_factor
     return (raw_min / scaling_factor, raw_max / scaling_factor, step)
-
 
 def _get_primary_data_type(erd_data: List[Dict]) -> str:
     """Return the type of the primary (first non-reserved, non-bitfield) data field."""
@@ -177,7 +165,6 @@ def _is_reserved_field(name: str) -> bool:
     n = name.lower()
     return 'reserved' in n or 'padding' in n
 
-
 def _leaf_field_name(name: str) -> str:
     """Return the leaf portion of a potentially dot-qualified field name.
 
@@ -189,13 +176,9 @@ def _leaf_field_name(name: str) -> str:
     if len(parts) == 1:
         return name.strip()
     leaf = parts[-1].strip()
-    # If the last part is purely numeric and the second-to-last part ends
-    # with an alphanumeric char (letter or digit), the dot is likely part
-    # of a decimal or version number (e.g., "PM2.5" -> "PM2" + ".5").
     if len(parts) >= 2 and leaf.isdigit() and parts[-2][-1:].isalnum():
         return (parts[-2] + '.' + leaf).strip()
     return leaf
-
 
 def _clean_field_name(name: str) -> str:
     """Strip parenthetical suffixes (scaling/unit info) from a field name.
@@ -204,13 +187,9 @@ def _clean_field_name(name: str) -> str:
          'Line Input Voltage Volts x 100 (volts)' -> 'Line Input Voltage Volts x 100',
          'Option n Drying Temperature (Fahrenheit x 10)[0]' -> 'Option n Drying Temperature[0]'.
     """
-    # Keep trailing array index like [0], [1], etc. for uniqueness
-    # (removed: name = re.sub(r'\s*\[\d+\]\s*$', '', name))
-    # Remove parenthetical groups: either trailing, or before an array index
     result = re.sub(r'\s*\([^)]*\)\s*(?=\[\d+\])', '', name)
     result = re.sub(r'\s*\([^)]*\)\s*$', '', result)
     return result.strip()
-
 
 def _field_slug(name: str) -> str:
     """Convert a field name to a compact ASCII slug suitable for unique_ids.
@@ -222,20 +201,15 @@ def _field_slug(name: str) -> str:
     """
     slug = re.sub(r'[^a-z0-9]+', '_', name.lower())
     slug = slug.strip('_')
-    # Cap at 64 chars to keep MQTT topic segments reasonable without losing
-    # enough uniqueness to cause collisions within a single ERD's sub-fields.
     return slug[:64]
-
 
 def _has_bits(field: Dict) -> bool:
     """Return True if a field carries a 'bits' sub-object (i.e. it is a bit-field)."""
     return 'bits' in field and isinstance(field['bits'], dict)
 
-
 def _get_non_reserved_fields(erd_data: List[Dict]) -> List[Dict]:
     """Return data fields whose names do not indicate reserved/padding content."""
     return [d for d in erd_data if not _is_reserved_field(d.get('name', ''))]
-
 
 def _is_version_field(name: str) -> bool:
     """Return True if a field name matches a version component pattern.
@@ -249,15 +223,12 @@ def _is_version_field(name: str) -> bool:
             return True
     return False
 
-
 def _version_field_role(name: str) -> Optional[str]:
     """Return the version role of a field, or None if not a version field.
 
     Returns one of: 'crit_major', 'crit_minor', 'noncrit_major', 'noncrit_minor'.
     """
     n = name.lower()
-    # Check non-critical before critical to avoid substring match
-    # ("critical major" is a substring of "non-critical major")
     if 'non-critical major' in n:
         return 'noncrit_major'
     if 'non-critical minor' in n:
@@ -268,12 +239,10 @@ def _version_field_role(name: str) -> Optional[str]:
         return 'crit_minor'
     return None
 
-
 def _is_parametric_field(name: str) -> bool:
     """Return True if a field name is a parametric version component."""
     n = name.lower()
     return ('parametric major' in n) or ('parametric minor' in n)
-
 
 def _extract_board_prefix(name: str) -> str:
     """Extract the board prefix from a field name like 'UI Critical Major Version'.
@@ -282,7 +251,6 @@ def _extract_board_prefix(name: str) -> str:
     E.g. 'UI Critical Major Version' -> 'UI', 'Critical Major' -> ''.
     """
     n = name.strip()
-    # Check longer keywords first to avoid substring matches
     for keyword in ('Non-Critical Major', 'Non-Critical Minor',
                     'Critical Major', 'Critical Minor',
                     'Parametric Major', 'Parametric Minor'):
@@ -290,7 +258,6 @@ def _extract_board_prefix(name: str) -> str:
         if idx >= 0:
             return n[:idx].rstrip()
     return n
-
 
 def _is_simple_version_erd(erd_data: List[Dict]) -> bool:
     """Return True if the ERD is a simple 4-byte version ERD.
@@ -312,7 +279,6 @@ def _is_simple_version_erd(erd_data: List[Dict]) -> bool:
             return False
     return True
 
-
 def _group_multi_board_version_fields(erd_data: List[Dict]) -> List[Dict]:
     """Group fields of a multi-board version ERD by board prefix.
 
@@ -325,7 +291,6 @@ def _group_multi_board_version_fields(erd_data: List[Dict]) -> List[Dict]:
     if not nr:
         return []
 
-    # Group fields by board prefix
     boards: Dict[str, Dict[str, Dict]] = {}
     for field in nr:
         name = field.get('name', '')
@@ -340,7 +305,6 @@ def _group_multi_board_version_fields(erd_data: List[Dict]) -> List[Dict]:
             p_role = 'parametric_major' if 'parametric major' in n else 'parametric_minor'
             boards[prefix][p_role] = field
 
-    # Filter to boards that have all 4 version components
     required = {'crit_major', 'crit_minor', 'noncrit_major', 'noncrit_minor'}
     groups = []
     for prefix, roles in boards.items():
@@ -360,7 +324,6 @@ def _group_multi_board_version_fields(erd_data: List[Dict]) -> List[Dict]:
             })
     return groups
 
-
 def _classify_erd_data(erd_data: List[Dict]) -> str:
     """Classify how sub-fields of an ERD should be expanded for HA discovery.
 
@@ -376,14 +339,11 @@ def _classify_erd_data(erd_data: List[Dict]) -> str:
     if len(nr) <= 1:
         return 'single'
 
-    # Check for simple 4-byte version ERD before other classifications
     if _is_simple_version_erd(erd_data):
         return 'version'
 
-    # Check for multi-board version ERD
     groups = _group_multi_board_version_fields(erd_data)
     if groups:
-        # Only classify as multi-board if ALL non-reserved fields are accounted for
         total_accounted = 0
         for g in groups:
             total_accounted += len(g['version_fields'])
@@ -395,16 +355,12 @@ def _classify_erd_data(erd_data: List[Dict]) -> str:
     no_bits = [d for d in nr if not _has_bits(d)]
 
     if not with_bits:
-        # All byte-offset: split only if they occupy different (offset, size) ranges
         offsets = {(d.get('offset', 0), d.get('size', 1)) for d in no_bits}
         return 'byte_offset' if len(offsets) > 1 else 'single'
     elif not no_bits:
-        # Pure bit-field ERD
         return 'bitfield'
     else:
-        # Mixed: primary value field + bit-flag fields
         return 'mixed'
-
 
 # ---------------------------------------------------------------------------
 # Value template generators
@@ -438,11 +394,8 @@ def _byte_subfield_value_template(field: Dict, erd_scaling: int) -> str:
     elif field_type == 'bool':
         return f"{{{{ '01' if value[{hex_start}:{hex_end}] != '00' else '00' }}}}"
     elif _is_float32_type(field_type):
-        # ERD MQTT state payloads are hexadecimal bytes. Home Assistant's
-        # from_hex/unpack filters decode the GEA big-endian IEEE-754 payload.
         return f"{{{{ value[{hex_start}:{hex_end}] | from_hex | unpack('>f') | round(3) }}}}"
     else:
-        # Numeric types: u8, u16, u32, i8, i16, i32, etc.
         if _is_signed_type(field_type):
             max_val = 2 ** (size * 8)
             half_val = max_val // 2
@@ -488,7 +441,6 @@ def _string_subfield_value_template(field: Dict) -> str:
         "{{ ns.value.rstrip('_') }}"
     )
 
-
 def _bitfield_sub_value_template(field: Dict) -> str:
     """Generate a Jinja2 value_template that extracts one bit-field sub-field.
 
@@ -529,7 +481,6 @@ def _version_value_template(fields: List[Dict]) -> str:
         parts.append(f"(value[{hex_start}:{hex_end}] | int(base=16) | string)")
     return '{{ ' + ' + \".\" + '.join(parts) + ' }}'
 
-
 def _parametric_version_value_template(fields: List[Dict]) -> str:
     """Generate a Jinja2 value_template for a 2-part parametric version.
 
@@ -547,11 +498,9 @@ def _parametric_version_value_template(fields: List[Dict]) -> str:
         return ''
     return '{{ ' + ' + \".\" + '.join(parts) + ' }}'
 
-
 def _unit_to_ha(unit: str) -> str:
     """Convert an API unit string to the Home Assistant display unit."""
     return {'degF': '\u00b0F', 'degC': '\u00b0C'}.get(unit, unit)
-
 
 def _compute_sensor_value_template(scaling_factor: int, data_size: int, signed: bool = False,
                                    float32: bool = False) -> str:
@@ -562,8 +511,6 @@ def _compute_sensor_value_template(scaling_factor: int, data_size: int, signed: 
     negative numbers rather than large positive values.
     """
     if float32:
-        # GEA multi-byte ERDs are sent most-significant byte first. The
-        # Home Assistant template functions have been available since 2023.4.
         return "{{ value | from_hex | unpack('>f') | round(3) }}"
     if signed:
         max_val = 2 ** (data_size * 8)
@@ -581,7 +528,6 @@ def _compute_sensor_value_template(scaling_factor: int, data_size: int, signed: 
         return f'{{{{ (value | int(base=16)) / {scaling_factor} | round({dp}) }}}}'
     return '{{ value | int(base=16) }}'
 
-
 def _string_value_template(data_size: int) -> str:
     """Return a Jinja2 value_template for string-type ERDs.
 
@@ -589,8 +535,6 @@ def _string_value_template(data_size: int) -> str:
     so the template converts each hex byte pair to ASCII, skipping
     null bytes and stripping trailing '_' padding.
     """
-    # Build a lookup string for ASCII 0x20-0x7E (printable range).
-    # Index 0 maps to 0x20 (' '), index 0x5E maps to 0x7E ('~').
     chars = ''.join(chr(i) for i in range(0x20, 0x7F))
     chars_escaped = chars.replace("'", "\\'")
     return (
@@ -604,7 +548,6 @@ def _string_value_template(data_size: int) -> str:
         "{% endfor %}"
         "{{ ns.value.rstrip('_') }}"
     )
-
 
 def _infer_unit_from_field_name(field_name: str, parent_unit: str) -> str:
     """Override the parent ERD unit when the field name explicitly names a unit.
@@ -620,7 +563,6 @@ def _infer_unit_from_field_name(field_name: str, parent_unit: str) -> str:
     if 'fahrenheit' in name_lower:
         return '\u00b0F'
     return parent_unit
-
 
 def _compute_binary_sensor_value_template(data_size: int) -> str:
     """Return value_template for a binary_sensor ERD.
@@ -640,7 +582,6 @@ def _compute_switch_value_template(data_size: int) -> str:
     """
     return ''
 
-
 def _paired_primary_field_template(erd_by_id: Dict[str, Dict], paired_erd_str: str,
                                     erd_scaling: int, for_switch: bool = False) -> Optional[str]:
     """Return a Jinja2 value_template that extracts the primary field from a
@@ -655,7 +596,6 @@ def _paired_primary_field_template(erd_by_id: Dict[str, Dict], paired_erd_str: s
     if pf is None:
         return None
     if for_switch:
-        # Extract just the hex bytes for the primary field.
         offset = pf.get('offset', 0)
         size = pf.get('size', 1)
         hex_start = offset * 2
@@ -670,7 +610,6 @@ def _select_options_and_templates(enum_values: Dict[str, str], data_size: int):
     it is a write-only protocol marker (not a valid user-visible state).
     Returns (options_json_str, value_template_str, command_template_str).
     """
-    # Filter out 'Request Consumed' (255) and sort by numeric key
     valid_pairs = sorted(
         [(int(k), v) for k, v in enum_values.items() if v != 'Request Consumed'],
         key=lambda x: x[0]
@@ -680,27 +619,20 @@ def _select_options_and_templates(enum_values: Dict[str, str], data_size: int):
 
     hex_chars = data_size * 2
 
-    # Build value_template: map hex string -> option name
     hex_to_name = ', '.join(
         f"'{k:0{hex_chars}x}': '{_jinja2_escape(v)}'" for k, v in valid_pairs
     )
-    # Unmapped raw values fall back to 'None', which HA's MQTT select treats
-    # as "state unknown". Any other non-option string is logged as an error
-    # on every update (e.g. a 00 request ERD with options only for 01/02).
     value_template = f"{{{{ {{{hex_to_name}}}.get(value[:{hex_chars}], 'None') }}}}"
 
-    # Build command_template: map option name -> hex string
     name_to_hex = ', '.join(
         f"'{_jinja2_escape(v)}': '{k:0{hex_chars}x}'" for k, v in valid_pairs
     )
     command_template = f"{{{{ {{{name_to_hex}}}[value] }}}}"
 
-    # Build options JSON array
     option_names = [v for _, v in valid_pairs]
     options_json = '[' + ', '.join(f'"{name}"' for name in option_names) + ']'
 
     return (options_json, value_template, command_template)
-
 
 def _enum_sensor_value_template(enum_values: Dict[str, str], field_size: int) -> str:
     """Build value_template for a read-only enum sensor.
@@ -724,7 +656,6 @@ def _enum_sensor_value_template(enum_values: Dict[str, str], field_size: int) ->
     )
     return f"{{{{ {{{hex_to_name}}}.get(value[:{hex_chars}], 'Unknown') }}}}"
 
-
 def _strip_pair_role_word(name: str) -> str:
     """Remove trailing or standalone 'Status'/'Request' words from a paired-ERD name.
 
@@ -733,15 +664,11 @@ def _strip_pair_role_word(name: str) -> str:
         'Freeze Sentinel Request'               -> 'Freeze Sentinel'
         'Boost Mode State - Requested/Desired'  -> 'Boost Mode State'
     """
-    # Compound suffix form, e.g. ' - Requested/Desired' / ' - Status/Actual'
     result = re.sub(r'\s*[-–—:]?\s*(?:requested|request|status)\s*/\s*(?:desired|actual)\s*$',
                     '', name, flags=re.IGNORECASE)
-    # Strip the word wherever it appears as a complete word (word boundaries)
     result = re.sub(r'\b(?:Status|Request)\b', '', result, flags=re.IGNORECASE)
-    # Collapse multiple spaces and strip surrounding whitespace
     result = re.sub(r'\s+', ' ', result).strip()
     return result
-
 
 def _number_command_template(data_size: int, scaling_factor: int, signed: bool = False) -> str:
     """Return command_template for a number entity.
@@ -761,7 +688,6 @@ def _number_command_template(data_size: int, scaling_factor: int, signed: bool =
         return f"{{{{ '%0{hex_chars}x' % (((value | float) * {scaling_factor}) | round | int) }}}}"
     return f"{{{{ '%0{hex_chars}x' % (value | int) }}}}"
 
-
 def _number_command_bytes(data_size: int, scaling_factor: int, signed: bool,
                           min_val: float, max_val: float) -> int:
     """Worst-case bytes the number's command renders across its range.
@@ -778,7 +704,6 @@ def _number_command_bytes(data_size: int, scaling_factor: int, signed: bool,
                     abs(round(max_val * scaling_factor)))
         hex_chars = max(hex_chars, len(format(worst, 'x')))
     return (hex_chars + 1) // 2
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers for HA-discovery data collection
@@ -813,7 +738,6 @@ def _find_paired_field(request_field: Dict, paired_erd_str: str,
     req_offset = request_field.get('offset', 0)
     req_size = request_field.get('size', 1)
 
-    # Strip "Request"/"Status" suffix for name matching.
     def _strip_role(n: str) -> str:
         n = n.strip()
         for suffix in (' request', ' status'):
@@ -823,19 +747,16 @@ def _find_paired_field(request_field: Dict, paired_erd_str: str,
 
     req_stripped = _strip_role(req_name)
 
-    # (1) Name match.
     for d in paired_data:
         d_stripped = _strip_role(d.get('name', ''))
         if d_stripped == req_stripped:
             return d
 
-    # (2) (offset, size) fallback.
     for d in paired_data:
         if d.get('offset', 0) == req_offset and d.get('size', 1) == req_size:
             return d
 
     return None
-
 
 def _paired_field_vt(field: Dict, paired_erd_str: str, pair_role: str,
                      erd_by_id: Dict[str, Dict], scaling_factor: int) -> str:
@@ -850,7 +771,6 @@ def _paired_field_vt(field: Dict, paired_erd_str: str, pair_role: str,
             p_scaling = int(paired.get('scaling_factor') or scaling_factor)
             return _byte_subfield_value_template(paired, p_scaling)
     return _byte_subfield_value_template(field, scaling_factor)
-
 
 def _paired_bitfield_vt(field: Dict, paired_erd_str: str, pair_role: str,
                         erd_by_id: Dict[str, Dict]) -> str:
@@ -880,7 +800,6 @@ def _paired_switch_vt(field: Dict, paired_erd_str: str, pair_role: str,
     hex_end = (offset + size) * 2
     return f"{{{{ value[{hex_start}:{hex_end}] }}}}"
 
-
 def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
                        collect, erd_id_int: int, display_name: str,
                        ha_domain: str, unit: str, device_class: str,
@@ -890,17 +809,14 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
     """Handle classification == 'single'. Returns True if an entry was collected."""
     vt, ct, opts = '', '', ''
     min_val, max_val, step_val = 0.0, 0.0, 1.0
-    cb = 0  # bytes the command renders (for the partial-write demotion pass)
+    cb = 0
 
     if ha_domain == 'sensor':
-        # Detect enum from either device_class or data field type.
         primary_type = _get_primary_data_type(erd_data)
         if device_class == 'enum' or primary_type == 'enum':
             ev, fs = _get_first_enum_field_info(erd_data)
             vt = _enum_sensor_value_template(ev, fs)
         elif primary_type == 'string':
-            # String-type ERDs: MQTT payload is hex. Convert each byte
-            # pair to plain ASCII, stripping trailing '_' padding.
             vt = _string_value_template(data_size)
         elif data_size <= 4:
             primary_type = _get_primary_data_type(erd_data)
@@ -909,33 +825,21 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
                 scaling_factor, data_size, signed, _is_float32_type(primary_type)
             )
     elif ha_domain == 'switch':
-        # For paired switches, read state from the status ERD's primary field.
         pf = _get_primary_field(erd_by_id, paired_erd_str)
         if pf is None:
             pf = {'name': '', 'type': 'u8', 'offset': 0, 'size': 1}
         vt = _paired_switch_vt(pf, paired_erd_str, pair_role, erd_by_id)
         if not paired_erd_str:
-            # Unpaired switch: the bridge only emits command_topic when a
-            # command_template is present (or the ERD is paired), and HA
-            # rejects a switch without one. A 1-byte ERD can take the
-            # '01'/'00' payload as-is; wider ERDs can't be written from a
-            # single byte, so expose them read-only instead.
             if data_size == 1:
                 ct = '{{ value }}'
                 cb = 1
             else:
-                # Keep the first-byte slice VT so '01'/'00' state matching
-                # still works for the wider payload.
                 ha_domain = 'binary_sensor'
         else:
-            # Paired switch: the bridge emits command_topic with the
-            # '01'/'00' payloads (set below); the command is one byte.
             cb = 1
     elif ha_domain == 'select':
         ev, fs = _get_first_enum_field_info(erd_data)
         if ev:
-            # For paired request ERDs, use the status field's enum values
-            # for the VT so it decodes the actual appliance state.
             if pair_role == 'request' and paired_erd_str and paired_erd_str in erd_by_id:
                 enum_field = next((d for d in erd_data if d.get('type') == 'enum'), None)
                 if enum_field:
@@ -945,8 +849,6 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
             opts, vt, ct = _select_options_and_templates(ev, fs)
             cb = fs
         else:
-            # No enum values to populate options; skip rather than emit
-            # a broken select entity.
             return False
     elif ha_domain == 'number':
         pf = _get_primary_field(erd_by_id, paired_erd_str)
@@ -963,7 +865,6 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
             signed = _is_signed_type(_get_primary_data_type(erd_data))
             vt = _compute_sensor_value_template(scaling_factor, data_size, signed)
         ct = _number_command_template(data_size, scaling_factor, signed)
-        # Compute min/max/step for number entities
         if pf:
             n_type = pf.get('type', 'u8')
             n_scale = int(erd_by_id[paired_erd_str].get('scaling_factor') or 1)
@@ -976,14 +877,10 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
         min_val, max_val, step_val = _compute_number_range(n_type, n_scale)
         cb = _number_command_bytes(data_size, scaling_factor, signed,
                                    min_val, max_val)
-    # button: no templates
 
-    # Allow overrides to supply a custom value_template that bypasses
-    # the auto-generated one (e.g., combining multi-field u64 values).
     custom_vt = erd.get('value_template')
     if custom_vt:
         vt = custom_vt
-    # For switch/binary_sensor, set payload_on/off and state_on/off to hex
     p_on = ''
     p_off = ''
     s_on = ''
@@ -1000,7 +897,6 @@ def _handle_single_erd(erd: Dict, erd_by_id: Dict[str, Dict],
             p_on, p_off, s_on, s_off,
             min_val, max_val, step_val, command_bytes=cb)
     return True
-
 
 def _handle_byte_offset_erd(erd_by_id: Dict[str, Dict], collect,
                             erd_id_int: int, display_name: str,
@@ -1019,23 +915,15 @@ def _handle_byte_offset_erd(erd_by_id: Dict[str, Dict], collect,
         f_dev_cls = f_dc or ('enum' if f_type == 'enum' else '')
         f_unit = field.get('unit_of_measurement') or _infer_unit_from_field_name(leaf, unit)
         f_state_cls = field.get('state_class') or (state_class if f_type in ('u8', 'u16', 'u32', 'i8', 'i16', 'i32') else '')
-        # Don't inherit ERD-level unit/scaling for non-numeric fields
-        # (e.g., enum status fields shouldn't inherit gal/min from a sibling).
         if f_type not in ('u8', 'u16', 'u32', 'i8', 'i16', 'i32'):
             f_unit = ''
-        # Use per-field pairing/domain if available (mixed-pairing ERDs)
         f_pair_role = field.get('pair_role') or pair_role
         f_paired_erd = field.get('paired_erd') or paired_erd_str
         f_paired_id = parse_erd_id(f_paired_erd) if f_paired_erd else 0
         f_ha_domain = field.get('ha_domain') or ha_domain
-        # Per-field scaling — used for VT, CT, range, and stored in entry.
         f_scaling = int(field.get('scaling_factor') or scaling_factor)
         if f_type not in ('u8', 'u16', 'u32', 'i8', 'i16', 'i32'):
             f_scaling = 1
-        # An unpaired switch/number sub-field can't be written on its own
-        # (a write must carry the whole multi-field ERD payload), so no
-        # command_topic is emitted and HA would reject the entity outright.
-        # Expose it read-only instead, matching _handle_bitfield_erd.
         bin_payloads = f_ha_domain == 'switch'
         f_cb = 0
         if not f_paired_id and f_ha_domain in ('switch', 'number'):
@@ -1061,13 +949,12 @@ def _handle_byte_offset_erd(erd_by_id: Dict[str, Dict], collect,
                 opts, vt, ct = _select_options_and_templates(enum_vals, field_size)
                 f_cb = field_size
             else:
-                # No enum values; fall back to sensor-style VT
                 vt = _enum_sensor_value_template(enum_vals, field_size)
                 opts, ct = '', ''
         else:
             if f_ha_domain == 'switch':
                 vt = _paired_switch_vt(field, f_paired_erd, f_pair_role, erd_by_id)
-                f_cb = 1  # '01'/'00' payloads
+                f_cb = 1
             else:
                 vt = _paired_field_vt(field, f_paired_erd, f_pair_role, erd_by_id, f_scaling)
             opts, ct = '', ''
@@ -1075,7 +962,6 @@ def _handle_byte_offset_erd(erd_by_id: Dict[str, Dict], collect,
                 field_size = field.get('size', 1)
                 signed = _is_signed_type(f_type)
                 ct = _number_command_template(field_size, f_scaling, signed)
-        # Compute min/max/step for number sub-fields
         f_min, f_max, f_step = 0.0, 0.0, 1.0
         if f_ha_domain == 'number':
             f_min, f_max, f_step = _compute_number_range(f_type, f_scaling)
@@ -1091,7 +977,6 @@ def _handle_byte_offset_erd(erd_by_id: Dict[str, Dict], collect,
                 '00' if bin_payloads else '',
                 f_min, f_max, f_step, command_bytes=f_cb)
 
-
 def _handle_bitfield_erd(collect, erd_id_int: int, display_name: str,
                          ha_domain: str, scaling_factor: int, data_size: int,
                          pair_role: str, paired_erd_str: str,
@@ -1101,13 +986,10 @@ def _handle_bitfield_erd(collect, erd_id_int: int, display_name: str,
         leaf = _clean_field_name(_leaf_field_name(field.get('name', '')))
         fid = _field_slug(leaf)
         bits_size = field.get('bits', {}).get('size', 1)
-        # Use per-field pairing/domain if available (mixed-pairing ERDs)
         f_pair_role = field.get('pair_role') or pair_role
         f_paired_erd = field.get('paired_erd') or paired_erd_str
         f_paired_id = parse_erd_id(f_paired_erd) if f_paired_erd else 0
         f_ha_domain = field.get('ha_domain') or ha_domain
-        # For paired request ERDs, inherit the parent domain (switch/select/number)
-        # so bitfield sub-entities are controllable, not read-only.
         if f_pair_role == 'request' and f_ha_domain in ('switch', 'select', 'number'):
             sub_domain = f_ha_domain
         else:
@@ -1119,18 +1001,12 @@ def _handle_bitfield_erd(collect, erd_id_int: int, display_name: str,
         b_s_off = '00' if sub_domain in ('binary_sensor', 'switch') else ''
         f_scaling = int(field.get('scaling_factor') or scaling_factor)
         f_bf_dc = field.get('device_class') or ''
-        # A switch sub-field's '01'/'00' command sets the whole payload, so
-        # it is only a full-payload write when the bit starts at payload bit
-        # 0; the demotion pass checks bit_start. Multi-bit (number/select)
-        # sub-fields have no command template, so command_bytes stays 0 and
-        # they are demoted when the ERD is paired.
         f_cb = 1 if sub_domain == 'switch' else 0
         f_bit_start = field.get('offset', 0) * 8 + field.get('bits', {}).get('offset', 0)
         collect(erd_id_int, f'{display_name} - {leaf}', sub_domain, '', f_bf_dc,
                 '', f_scaling, data_size, f_paired_id, f_pair_role,
                 vt, '', '', fid, '', b_p_on, b_p_off, b_s_on, b_s_off,
                 command_bytes=f_cb, bit_start=f_bit_start)
-
 
 def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
                       erd_id_int: int, display_name: str,
@@ -1148,27 +1024,18 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
         p_type = primary.get('type', '')
         p_dc = primary.get('device_class') or ''
         p_dev_cls = p_dc or ('enum' if p_type == 'enum' else '')
-        # Use per-field pairing/domain if available (mixed-pairing ERDs)
         p_pair_role = primary.get('pair_role') or pair_role
         p_paired_erd = primary.get('paired_erd') or paired_erd_str
         p_paired_id = parse_erd_id(p_paired_erd) if p_paired_erd else 0
         p_ha_domain = primary.get('ha_domain') or ha_domain
-        # Per-field scaling — used for VT, CT, range, and stored in entry.
         p_scaling = int(primary.get('scaling_factor') or scaling_factor)
 
-        # Skip the primary field if it's paired to a controllable request ERD
-        # (switch/select/number) — the request ERD handles state+command.
-        # Only generate the primary if it's unpaired or the paired request
-        # ERD is not a controllable domain.
         skip_primary = False
         if p_pair_role == 'status' and p_paired_erd and p_paired_erd in erd_by_id:
             req = erd_by_id[p_paired_erd]
             if req.get('pair_role') == 'request' and req.get('ha_domain') in ('switch', 'select', 'number'):
                 skip_primary = True
 
-        # Unpaired switch/number primary fields share the ERD with bit-flag
-        # fields, so they can't be written on their own; expose read-only
-        # (see _handle_byte_offset_erd).
         p_bin_payloads = p_ha_domain == 'switch'
         p_demoted = False
         if not p_paired_id and p_ha_domain in ('switch', 'number'):
@@ -1185,7 +1052,6 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
                     p_vt = _paired_field_vt(primary, '', '', erd_by_id, p_scaling)
                 p_ct = ''
             elif p_ha_domain == 'binary_sensor' and p_type == 'enum':
-                # binary_sensor can't display enum labels; use ON/OFF
                 p_dev_cls = ''
                 p_field_size = primary.get('size', 1)
                 p_vt = _compute_binary_sensor_value_template(p_field_size)
@@ -1194,7 +1060,7 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
                 if p_ha_domain == 'switch':
                     p_vt = _paired_switch_vt(primary, p_paired_erd, p_pair_role, erd_by_id)
                     p_ct = ''
-                    p_cb = 1  # '01'/'00' payloads
+                    p_cb = 1
                 else:
                     p_vt = _paired_field_vt(primary, p_paired_erd, p_pair_role, erd_by_id, p_scaling)
                     p_ct = ''
@@ -1202,7 +1068,6 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
                         p_field_size = primary.get('size', 1)
                         p_signed = _is_signed_type(p_type)
                         p_ct = _number_command_template(p_field_size, p_scaling, p_signed)
-            # Compute min/max/step for number primary fields
             p_min, p_max, p_step = 0.0, 0.0, 1.0
             if p_ha_domain == 'number':
                 p_min, p_max, p_step = _compute_number_range(p_type, p_scaling)
@@ -1225,13 +1090,10 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
         leaf = _clean_field_name(_leaf_field_name(field.get('name', '')))
         fid = _field_slug(leaf)
         bits_size = field.get('bits', {}).get('size', 1)
-        # Use per-field pairing/domain if available (mixed-pairing ERDs)
         f_pair_role = field.get('pair_role') or pair_role
         f_paired_erd = field.get('paired_erd') or paired_erd_str
         f_paired_id = parse_erd_id(f_paired_erd) if f_paired_erd else 0
         f_ha_domain = field.get('ha_domain') or ha_domain
-        # For paired request ERDs, inherit the parent domain (switch/select/number)
-        # so bitfield sub-entities are controllable, not read-only.
         if f_pair_role == 'request' and f_ha_domain in ('switch', 'select', 'number'):
             sub_domain = f_ha_domain
         else:
@@ -1250,7 +1112,6 @@ def _handle_mixed_erd(erd_by_id: Dict[str, Dict], collect,
                 vt, '', '', fid, '', b_p_on, b_p_off, b_s_on, b_s_off,
                 command_bytes=f_cb, bit_start=f_bit_start)
 
-
 def _handle_version_erd(collect, erd_id_int: int, display_name: str,
                         ha_domain: str, unit: str, device_class: str,
                         state_class: str, scaling_factor: int, data_size: int,
@@ -1262,7 +1123,6 @@ def _handle_version_erd(collect, erd_id_int: int, display_name: str,
     collect(erd_id_int, display_name, ha_domain, unit, device_class,
             state_class, scaling_factor, data_size, paired_erd_id,
             pair_role, vt, '', '', '', '', '', '', '', '')
-
 
 def _handle_multi_board_version_erd(collect, erd_id_int: int, display_name: str,
                                      ha_domain: str, unit: str, device_class: str,
@@ -1280,7 +1140,6 @@ def _handle_multi_board_version_erd(collect, erd_id_int: int, display_name: str,
                 state_class, scaling_factor, data_size, paired_erd_id,
                 pair_role, vt, '', '', fid, '', '', '', '', '')
 
-        # Add parametric version if both fields present
         param_fields = group['parametric_fields']
         if param_fields[0] is not None and param_fields[1] is not None:
             param_name = f'{display_name} - {board} Parametric Version' if board else f'{display_name} - Parametric Version'
@@ -1290,7 +1149,6 @@ def _handle_multi_board_version_erd(collect, erd_id_int: int, display_name: str,
                 collect(erd_id_int, param_name, ha_domain, unit, device_class,
                         state_class, scaling_factor, data_size, paired_erd_id,
                         pair_role, p_vt, '', '', param_fid, '', '', '', '', '')
-
 
 # ---------------------------------------------------------------------------
 # Partial-write demotion
@@ -1328,8 +1186,6 @@ def _demote_partial_write_entities(entries: List[Dict],
     for e in entries:
         if e['domain'] not in ('switch', 'number', 'select'):
             continue
-        # The bridge emits a command topic when the entity has a command
-        # template or a paired ERD; anything else is already read-only.
         if not (e['command_template'] or e['paired_erd_id']):
             continue
         target = e['paired_erd_id'] if e['pair_role'] == 'status' else e['erd_id']
@@ -1341,8 +1197,6 @@ def _demote_partial_write_entities(entries: List[Dict],
         target_erd = erd_by_id.get(target_hex)
         target_non_reserved = 0
         if target_erd is None:
-            # Unknown target ERD: the write width cannot be verified, so
-            # fail closed and demote the whole group.
             target_ds = None
         else:
             target_ds = get_erd_byte_size(target_erd.get('data', [])) or 1
@@ -1365,8 +1219,6 @@ def _demote_partial_write_entities(entries: List[Dict],
             demoted.append(e)
     return demoted
 
-
-
 def _collect_ha_discovery_entries(erds: List[Dict]) -> List[Dict]:
     """Process all ERDs with ha_domain metadata and return a list of entry dicts.
 
@@ -1385,7 +1237,6 @@ def _collect_ha_discovery_entries(erds: List[Dict]) -> List[Dict]:
     ha_erds = [e for e in erds if 'ha_domain' in e]
     entries: List[Dict] = []
 
-    # Track (erd_id, field_id) to detect and resolve collisions.
     _field_id_counts: Dict[tuple, int] = {}
 
     def _make_unique_field_id(erd_id_int: int, field_id: str) -> str:
@@ -1416,14 +1267,9 @@ def _collect_ha_discovery_entries(erds: List[Dict]) -> List[Dict]:
         non-bit-field entities). Both are used by the partial-write
         demotion pass; they are not emitted to the JSONL.
         """
-        # Skip availability/allowability metadata — not actionable in HA.
         combined = (name + ' ' + field_id).lower()
-        # But don't skip real "allowed" values like "Allowed Setpoint".
-        # Skip availability/allowability metadata, but not real data fields.
-        # "Allowed Setpoint", "Minimum Allowed X", "Maximum Allowed X" are real data.
         if ('allowed' in combined and 'setpoint' not in combined and 'minimum allowed' not in combined and 'maximum allowed' not in combined) or 'available' in combined:
             return
-        # Ensure field_id is unique within this ERD to avoid unique_id collisions.
         fid = _make_unique_field_id(erd_id_int, field_id)
         entries.append({
             'erd_id': erd_id_int,
@@ -1467,12 +1313,10 @@ def _collect_ha_discovery_entries(erds: List[Dict]) -> List[Dict]:
         erd_data = erd.get('data', [])
         data_size = get_erd_byte_size(erd_data) or 1
 
-        # Skip request ERDs without a valid status counterpart.
         if pair_role == 'request':
             if not (paired_erd_str and paired_erd_str in erd_by_id):
                 continue
 
-        # Skip status ERD if paired request is controllable and all fields paired.
         if pair_role == 'status' and paired_erd_str and paired_erd_str in erd_by_id:
             paired = erd_by_id[paired_erd_str]
             paired_role = paired.get('pair_role') or ''
@@ -1485,18 +1329,15 @@ def _collect_ha_discovery_entries(erds: List[Dict]) -> List[Dict]:
                 if all_paired:
                     continue
 
-        # Determine classification
         if ha_domain in ('select', 'button'):
             nr_fields = _get_non_reserved_fields(erd_data)
             classification = 'single' if len(nr_fields) <= 1 else _classify_erd_data(erd_data)
         else:
             classification = _classify_erd_data(erd_data)
-        # Allow overrides to force classification
         forced_classification = erd.get('force_classification')
         if forced_classification:
             classification = forced_classification
 
-        # Dispatch to handler
         if classification == 'single':
             if not _handle_single_erd(erd, erd_by_id, collect, erd_id_int,
                                       display_name, ha_domain, unit, device_class,
@@ -1533,7 +1374,6 @@ def _collect_ha_discovery_entries(erds: List[Dict]) -> List[Dict]:
               f"{'y' if len(demoted) == 1 else 'ies'} to read-only "
               f"across {len(demoted_erds)} ERD(s)", file=sys.stderr)
     return entries
-
 
 # ---------------------------------------------------------------------------
 # JSONL generation
@@ -1578,11 +1418,9 @@ def generate_ha_discovery_jsonl_by_category(erds: List[Dict]) -> Dict[str, str]:
             # --- entity validation ---
             domain = e['domain']
 
-            # Skip select entities without options (broken in HA)
             if domain == 'select' and not e['options_json']:
                 continue
 
-            # Skip number entities with zero range (mn == mx, invalid in HA)
             if domain == 'number' and e.get('min_val') == e.get('max_val'):
                 continue
 
@@ -1592,7 +1430,6 @@ def generate_ha_discovery_jsonl_by_category(erds: List[Dict]) -> Dict[str, str]:
                 'd': domain,
                 'ds': e['data_size'],
             }
-            # Omit fields that equal their defaults to save space
             if e['unit']:                         obj['u']  = e['unit']
             if e['device_class'] and _is_valid_device_class(domain, e['device_class']):
                 obj['dc'] = e['device_class']
@@ -1617,7 +1454,6 @@ def generate_ha_discovery_jsonl_by_category(erds: List[Dict]) -> Dict[str, str]:
 
     return result
 
-
 # ---------------------------------------------------------------------------
 # File discovery and main
 # ---------------------------------------------------------------------------
@@ -1634,15 +1470,10 @@ def find_erd_definitions_json() -> Optional[Path]:
     seen_paths = set()
 
     search_paths = [
-        # Local submodule (for development with checked out repo)
         repo_root / 'lib' / 'public-appliance-api-documentation' / json_filename,
-        # ESPHome library cache in user's home directory
         Path.home() / '.esphome' / 'external_files' / 'libraries' / 'public-appliance-api-documentation' / json_filename,
-        # ESPHome library cache in /config (Home Assistant add-on)
         Path('/config/.esphome/external_files/libraries/public-appliance-api-documentation/' + json_filename),
-        # ESPHome library cache relative to component (build directory)
         repo_root / '.esphome' / 'external_files' / 'libraries' / 'public-appliance-api-documentation' / json_filename,
-        # Parent library path (external_components layout)
         repo_root / 'lib' / 'public-appliance-api-documentation' / json_filename,
     ]
 
@@ -1656,7 +1487,6 @@ def find_erd_definitions_json() -> Optional[Path]:
 
     return None
 
-
 def fetch_erd_definitions_from_github() -> Optional[dict]:
     """Fetch ERD definitions from GitHub as fallback."""
     import urllib.request as urllib
@@ -1669,7 +1499,6 @@ def fetch_erd_definitions_from_github() -> Optional[dict]:
         print(f"Failed to fetch from GitHub: {e}", file=sys.stderr)
         return None
 
-
 def _build_erds_from_flat_list(flat_entries: List[Dict]) -> List[Dict]:
     """Convert the flat processed JSON list into grouped ERD objects.
 
@@ -1680,7 +1509,6 @@ def _build_erds_from_flat_list(flat_entries: List[Dict]) -> List[Dict]:
     """
     from collections import OrderedDict
 
-    # Group flat entries by erd_id, preserving order
     groups: Dict[str, List[Dict]] = OrderedDict()
     for entry in flat_entries:
         erd_id = entry.get('erd_id', '')
@@ -1690,11 +1518,9 @@ def _build_erds_from_flat_list(flat_entries: List[Dict]) -> List[Dict]:
 
     erds = []
     for erd_id, entries in groups.items():
-        # Use the first entry to get ERD-level metadata
         first = entries[0]
         review = first.get('review') or {}
 
-        # Build data array from field-level info
         data_fields = []
         for entry in entries:
             field = {
@@ -1707,7 +1533,6 @@ def _build_erds_from_flat_list(flat_entries: List[Dict]) -> List[Dict]:
                 field['values'] = entry['field_values']
             if entry.get('field_bits'):
                 field['bits'] = entry['field_bits']
-            # Store per-field review metadata for mixed-pairing ERDs
             field_review = entry.get('review') or {}
             if field_review.get('paired_erd'):
                 field['paired_erd'] = field_review['paired_erd']
@@ -1735,7 +1560,6 @@ def _build_erds_from_flat_list(flat_entries: List[Dict]) -> List[Dict]:
             'data': data_fields,
         }
 
-        # Add review metadata as top-level keys for _collect_ha_discovery_entries
         if review.get('ha_domain'):
             erd['ha_domain'] = review['ha_domain']
         if review.get('device_class') is not None:
@@ -1759,7 +1583,6 @@ def _build_erds_from_flat_list(flat_entries: List[Dict]) -> List[Dict]:
 
     return erds
 
-
 # ---------------------------------------------------------------------------
 # File discovery and main
 # ---------------------------------------------------------------------------
@@ -1777,11 +1600,9 @@ def main():
     repo_root = script_dir.parent
     output_dir = Path(args.output_dir) if args.output_dir else repo_root / 'ha_discovery'
 
-    # Load ERD definitions
     data = None
 
     if args.processed:
-        # Use processed JSON (flat list format from the pipeline)
         print(f"Reading processed ERD definitions from {args.processed}", file=sys.stderr)
         try:
             with open(args.processed, 'r') as f:
@@ -1789,7 +1610,6 @@ def main():
         except Exception as e:
             print(f"Failed to read {args.processed}: {e}", file=sys.stderr)
             sys.exit(1)
-        # Processed JSON is a flat list; group by erd_id to build ERD objects
         erds = _build_erds_from_flat_list(data)
     else:
         json_file = find_erd_definitions_json()
@@ -1803,7 +1623,6 @@ def main():
         else:
             print("Local ERD definitions not found, trying GitHub fallback...", file=sys.stderr)
 
-        # Fallback to GitHub
         if data is None:
             data = fetch_erd_definitions_from_github()
             if data is None:
@@ -1815,10 +1634,8 @@ def main():
 
     print(f"Found {len(erds)} ERD definitions", file=sys.stderr)
 
-    # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate JSONL by category
     jsonl_by_cat = generate_ha_discovery_jsonl_by_category(erds)
     total_entries = 0
     for cat, content in jsonl_by_cat.items():
@@ -1832,7 +1649,6 @@ def main():
     print(f"\nTotal entities generated: {total_entries}", file=sys.stderr)
     print(f"Output directory: {output_dir}", file=sys.stderr)
     print("Done!", file=sys.stderr)
-
 
 if __name__ == '__main__':
     main()

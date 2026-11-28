@@ -1,13 +1,5 @@
-/*!
- * @file
- * @brief Adapter that wraps a GEA2 ERD client as a GEA3 ERD client.
- */
-
 #include "gea2_erd_client_adapter.h"
 
-// GEA2 and GEA3 activity args are layout-compatible for read/write event types
-// (type 0=read_completed, 1=read_failed, 2=write_completed, 3=write_failed).
-// Re-publish GEA2 activity args as GEA3 args via the adapter's event.
 static void on_gea2_activity(void* context, const void* args)
 {
   auto self = static_cast<gea2_erd_client_adapter_t*>(context);
@@ -42,13 +34,12 @@ static bool adapter_write(
   return result;
 }
 
-// GEA2 does not support subscriptions; return false so callers fall back to polling.
-static bool adapter_subscribe(i_tiny_gea3_erd_client_t* /*self*/, uint8_t /*address*/)
+static bool adapter_subscribe(i_tiny_gea3_erd_client_t* , uint8_t )
 {
   return false;
 }
 
-static bool adapter_retain_subscription(i_tiny_gea3_erd_client_t* /*self*/, uint8_t /*address*/)
+static bool adapter_retain_subscription(i_tiny_gea3_erd_client_t* , uint8_t )
 {
   return false;
 }
@@ -85,8 +76,6 @@ extern "C" void gea2_erd_client_adapter_destroy(
   i_tiny_gea2_erd_client_t* gea2_client)
 {
   if (!self || !self->gea2_client) return;
-  /* Idempotent: skip if the stored client differs from the one passed in,
-   * or if init() was never called (gea2_client is null). */
   if (self->gea2_client != gea2_client) return;
   tiny_event_unsubscribe(
     tiny_gea2_erd_client_on_activity(gea2_client),

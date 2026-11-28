@@ -71,7 +71,6 @@ TEST(erd_cache_mqtt_publisher_pause, pause_sets_paused_and_resets_first_round_do
   CHECK_FALSE(publisher.paused);
   CHECK_FALSE(publisher.first_round_done);
 
-  /* Simulate first_round_done being true (e.g. after a full round). */
   publisher.first_round_done = true;
 
   erd_cache_mqtt_publisher_pause(&publisher);
@@ -117,7 +116,6 @@ TEST(erd_cache_mqtt_publisher_pause, publish_skips_when_paused)
   uint8_t data = 0x42;
   erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
-  /* Pause before publishing. */
   erd_cache_mqtt_publisher_pause(&publisher);
 
   CHECK_TRUE(publisher.paused);
@@ -128,7 +126,6 @@ TEST(erd_cache_mqtt_publisher_pause, publish_skips_when_paused)
   CHECK(publisher.missed_loops > 0);
   CHECK_EQUAL(0u, publisher.total_published);
 
-  /* Verify that first_round_done() accessor returns false. */
   CHECK_FALSE(erd_cache_mqtt_publisher_first_round_done(&publisher));
 }
 
@@ -149,14 +146,12 @@ TEST(erd_cache_mqtt_publisher_pause, publish_resumes_publishing_after_resume)
   uint8_t data = 0x42;
   erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
-  /* Pause, then resume. */
   erd_cache_mqtt_publisher_pause(&publisher);
   CHECK_TRUE(publisher.paused);
 
   erd_cache_mqtt_publisher_resume(&publisher);
   CHECK_FALSE(publisher.paused);
 
-  /* After resume, publishing should work. */
   bool published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_TRUE(published);
 }
@@ -179,15 +174,11 @@ TEST(erd_cache_mqtt_publisher_pause, first_round_done_false_after_resume_true_af
   uint8_t data = 0x42;
   erd_cache_update(&cache, 0x0008, 0xFF, &data, sizeof(data));
 
-  /* Pause and resume — first_round_done should be false after resume
-   * (pause resets it, resume does not set it). */
   erd_cache_mqtt_publisher_pause(&publisher);
   erd_cache_mqtt_publisher_resume(&publisher);
 
   CHECK_FALSE(erd_cache_mqtt_publisher_first_round_done(&publisher));
 
-  /* Publish the ERD, then publish again to scan the empty cache
-   * and set first_round_done = true. */
   bool published = erd_cache_mqtt_publisher_publish_one(&publisher);
   CHECK_TRUE(published);
 
@@ -310,7 +301,6 @@ TEST(erd_cache_mqtt_publisher_pause, first_round_done_works_with_null_state_mute
     "device",
     0xE0);
 
-  /* Initially false. */
   CHECK_FALSE(erd_cache_mqtt_publisher_first_round_done(&publisher));
 
   /* Manually set to true and verify accessor reads it. */
@@ -336,7 +326,6 @@ TEST(erd_cache_mqtt_publisher_pause, pause_resets_first_round_done_when_already_
 
   erd_cache_mqtt_publisher_pause(&publisher);
 
-  /* Should still be false (idempotent reset). */
   CHECK_FALSE(publisher.first_round_done);
   CHECK_TRUE(publisher.paused);
 }
@@ -354,7 +343,6 @@ TEST(erd_cache_mqtt_publisher_pause, resume_does_not_set_first_round_done)
     "device",
     0xE0);
 
-  /* Set first_round_done to true, then pause (resets it), then resume. */
   publisher.first_round_done = true;
   erd_cache_mqtt_publisher_pause(&publisher);
   CHECK_FALSE(publisher.first_round_done);

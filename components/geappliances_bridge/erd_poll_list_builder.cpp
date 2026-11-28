@@ -1,4 +1,3 @@
-
 #include "erd_poll_list_builder.h"
 #include "erd_lists.h"
 #include "geappliances_bridge_log.h"
@@ -101,8 +100,6 @@ ErdPollListResult build_erd_poll_list(const ErdPollListConfig& config)
 
     if (config.appliance_type < maximumApplianceType) {
       const auto& group = applianceTypeToErdGroupTranslation[config.appliance_type];
-      // Appliance types with no category-specific ERDs upstream (e.g.
-      // HomeVentilation) have a NULL list and keep only the ERDs above.
       if (group.erdList != nullptr) {
         result.erds_count = append_standard_erds(result.erds, result.erds_count,
                                                  group.erdList, group.erdCount);
@@ -119,5 +116,5 @@ ErdPollListResult build_erd_poll_list(const ErdPollListConfig& config)
   return result;
 }
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}

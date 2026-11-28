@@ -87,7 +87,7 @@ const type_name kTypeNames[] = {
   {255, "Unknown"},
 };
 
-}  // namespace
+}
 
 TEST_GROUP(appliance_type_map)
 {

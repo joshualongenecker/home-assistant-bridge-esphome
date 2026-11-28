@@ -1,5 +1,3 @@
-
-
 #ifndef startup_hsm_h
 #define startup_hsm_h
 
@@ -27,9 +25,6 @@ enum {
 
 namespace esphome {
 namespace geappliances_bridge {
-// Wrapper struct that embeds the HSM and holds the bridge services pointer.
-// Uses container_of pattern (same as erd_write_bridge_t, erd_bridge_poll_t)
-// to recover the wrapper from the HSM pointer in state functions.
 typedef struct {
   tiny_hsm_t hsm;
   IBridgeServices* services;
@@ -61,20 +56,16 @@ tiny_hsm_result_t startup_state_subscription_watch(
 
 tiny_hsm_result_t startup_state_running(
   tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
-/// Recover the IBridgeServices pointer from the embedded HSM using container_of.
 IBridgeServices* services_from_hsm(tiny_hsm_t* hsm);
 
-/// Initialize the startup HSM wrapper with the given bridge services and initial state.
 void startup_hsm_wrapper_init(startup_hsm_wrapper_t* self, IBridgeServices* services,
   tiny_hsm_state_t initial);
 
-/// Destroy the startup HSM wrapper (unsubscribes event subscriptions).
 void startup_hsm_wrapper_destroy(startup_hsm_wrapper_t* self);
 
-// HSM configuration (state descriptors + hierarchy)
 extern const tiny_hsm_configuration_t startup_hsm_configuration;
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}
 
 #endif

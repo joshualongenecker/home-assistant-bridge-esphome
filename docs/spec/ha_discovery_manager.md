@@ -576,3 +576,112 @@ After finishing all lines in a decompressed chunk, `run()` returns to the main l
 7. **No discovery ordering guarantee:** Entities within a category are published in the order they appear in the JSONL data. There is no guarantee of a specific ordering across categories.
 8. **Non-ESP-IDF builds skip discovery entirely:** On non-ESP-IDF platforms, `start()` transitions directly to COMPLETE and `run()` is a no-op. This is appropriate for simulator builds where MQTT discovery is not needed.
 9. **JSONL schema is implicit:** The JSONL field names (`i`, `n`, `d`, `fi`, `p`, `r`, `u`, `dc`, `sc`, `o`, `dt`, `sf`, `m`, `pon`, `poff`, `son`, `soff`, `mn`, `mx`, `st`, `vt`, `ct`) are not documented in the code. The schema is defined by the tool that generates `ha_discovery_data.h`.
+
+---
+
+## 15. Notes
+
+Module-local decisions and hazards recovered from the first-party comments in
+`ha_discovery_manager.cpp` / `ha_discovery_manager.h`; the number in parentheses is the comment-audit id.
+Cross-cutting decisions found in the same audit (multi-board topic grammar, publish pacing and its backoff
+window, the injected time source, the lifecycle phase machine and its heap gate, the cleanup spinlock,
+codegen-preserved pointers) are routed to their own ADRs and are not restated here.
+
+### 15.1 JSONL parsing helpers
+
+- `json_get_str()` accepts a quote as the start of a key only when it is the first character of the line or
+  is preceded by `{`, `,` or `[`. Without that guard a value that happens to spell a key name (key `d` in
+  `{"name":"d"}`) matches and the wrong field is extracted. (1478)
+- The string scanner's `if (*end == '\\' && *(end + 1)) end++` is what keeps an unterminated trailing
+  backslash from stepping past the NUL while skipping an escape pair. (1479)
+- `json_unescape()` does not decode `\uXXXX`: `case 'u'` advances four characters and writes nothing, so an
+  entity name carrying a unicode escape loses it. §5.4 lists `\uXXXX` among the escapes it handles.
+- `json_embed_value()` — named `json_reescape()` in §5.4 — copies the raw `vt` / `ct` template with **no**
+  transformation: the JSONL templates arrive already JSON-escaped, and unescaping them would produce invalid
+  JSON inside the payload. Its clamp to `out_size - 1` is not a silent truncation, because both call sites
+  test `reescaped >= space` and jump to `too_large`. (1481)
+
+### 15.2 Entity-name keyword filter
+
+- `FILTER_KEYWORDS[]` is what marks an entity as internal/diagnostic (`"linux diagnostics"`,
+  `"reset reason"`, `"seconds since last reset"`, …). `process_jsonl_line()` applies it only when
+  `filter_config_topics` is set, and the match is case-insensitive. The §3.2 parameter note that the flag is
+  "stored for future use" is out of date. (1484)
+- `should_filter_config_topic()` lowercases the name into a 256-byte stack buffer `lower[]`. The bound that
+  makes that safe is `entity_name_buf` (160 B) in `ha_discovery_manager_t`: a name can never exceed it, so
+  `lower[]` keeps headroom. Shrinking `lower[]` below the `entity_name_buf` bound makes the truncation
+  silent and the filter stops matching long names. (1485)
+
+### 15.3 Optional-field buffers live in the struct
+
+- The optional-field buffers (`field_id_buf` … `step_buf`) are struct members that `process_jsonl_line()`
+  clears to `""` before parsing rather than locals: the ESP task stack cannot hold them. (1486, 1541)
+- Templates are deliberately absent from that set. `vt` / `ct` are copied from the raw JSONL line straight
+  into `payload_buf` (§15.1), so no per-field buffer limit applies to them. (1486, 1541)
+
+### 15.4 Availability injection
+
+- `ha_discovery_manager_set_availability()` clears all three buffers **first**: an empty topic means
+  availability is fully off, and stale payload bytes would still be mixed into
+  `ha_discovery_manager_data_hash()` and trigger a republish. (1515, 1540)
+- `copy_availability_value()` rejects a value that would be truncated, or that contains `"`, `\`, a control
+  character (`< 0x20`) or `0x7F`, because the values are embedded verbatim in every payload. (1500)
+- Rejection disables availability entirely rather than publishing a partial topic: a truncated or malformed
+  `avty_t` leaves every entity of the device permanently unavailable in Home Assistant. (1516)
+- The keys are abbreviated — `avty_t`, `pl_avail`, `pl_not_avail` — to keep the largest payloads inside
+  `HA_DISCOVERY_PAYLOAD_BUF_SIZE` (8,192 B). Home Assistant accepts long and short keys in the same payload.
+  (1499)
+- Availability enters the fingerprint only when it is set, so a `mqtt: topic_prefix` or node-name change
+  (which moves the LWT status topic) forces a cleanup and republish, while an install with birth/will
+  disabled keeps the pre-availability hash and gets no spurious republish. (1519, 1549)
+
+### 15.5 Run-lifetime memory (supersedes §9.1, §9.2 and §12.4)
+
+- `ha_discovery_manager_start()` heap-allocates the four run buffers — `decomp_buf` (18,432 B), `line_buf`
+  (18,432 B), `payload_buf` (8,192 B) and `decomp_state` (`sizeof(tinfl_decompressor)` ≈ 8.2 KB) — and
+  `cleanup_resources()` releases them when the run ends. `topic_buf` (192 B) is the deliberate exception: it
+  stays a static member. (1520, 1530, 1535, 1536, 1537, 1538, 1539)
+- That memory never persists into steady state: a completed run ends in `DiscoveryLifecycleManager`'s
+  `kPhaseRebootPending`, which calls `App.safe_reboot()`. (1520)
+- `ha_discovery_manager_init()` frees any buffers a previous run still holds, and releases the cleanup
+  module's per-run topic queue, **before** its `memset`; otherwise a re-init orphans ~52 KB. The queue needs
+  the same treatment because a refresh cycle or an aborted run can land while a cleanup still owns it.
+  `ha_discovery_manager_cleanup()` relies on the same ordering. (1513, 1522)
+- `HA_DISCOVERY_DECOMP_BUF_SIZE` MUST stay ≥ the largest `max_decompressed_chunk` in
+  `ha_discovery_categories[]`. The current maximum is 7,419 B (laundry; range is 6,236 B), and the generator
+  re-splits chunks on every pipeline rerun, so the margin moves — the "range category has 17,770 bytes"
+  figure carried by the removed comment is from an older generated set. `HA_DISCOVERY_LINE_BUF_SIZE` equals
+  the decompression buffer because a line can never exceed the chunk that holds it. (1526)
+- `tinfl_init()` is called per chunk in `chunk_decompress()`, so the decompressor state is scratch, not
+  state worth keeping outside a run. (1535)
+- Peak per run: those four allocations plus `sorted_erds` (`POLLING_LIST_MAX_SIZE` = 659 entries × 2 B =
+  1,318 B). §9.1's "645 × 2 bytes" and its "all buffers embedded — no heap allocation during discovery"
+  describe the pre-rec-9/10 layout. (1524, 1530)
+
+### 15.6 Main-loop cooperation
+
+- `start()` builds the sorted ERD list and the device JSON inline; `run()` is called from the main loop and
+  publishes one entity per call. That shape is the loop-time budget — it keeps MQTT callbacks and the task
+  watchdog fed between publishes. (1473, 1474, 1475, 1524)
+- Completion cleanup and logging run on the call that observes `COMPLETE`, not on the publish-return path,
+  so the last entity publish does not block on cleanup. (1510)
+- Payloads are built directly in `payload_buf`; there is no intermediate payload staging to size. (1496)
+- `domain_topic_prefix` (128 B) is precomputed and reused while the domain is unchanged, to avoid one
+  `snprintf` per entity on a 3,605-entity range run (§7.2). (1545)
+- `sorted_erds_count` is only meaningful after `build_sorted_erd_list()`, so the "N ERDs to publish" DEBUG
+  line sits in `start()` after the build; a boot-time summary printed before the run starts reads 0. (1521)
+
+### 15.7 Corrections to earlier prose
+
+- The `scale_factor` step fallback is gated by `scale_factor_buf[0] && !step_buf[0] &&
+  strcmp(domain_buf, "number") == 0`: it applies **only** to the `number` domain. The comment removed at
+  `ha_discovery_manager.cpp:714` said "for non-number domains", which is the opposite of the guard. (1498)
+- The `dt`-based range fallback is gated by `!min_buf[0] && data_type_buf[0]`; `mx` is not tested. A line with
+  `mx` but no `mn` therefore emits `max` twice — the explicit one, then the data-type pair.
+- When `mqtt_client` is NULL, `run()` advances `current_offset` past the entity and returns, so that entity's
+  config is dropped for the rest of the run; it is not re-attempted when MQTT connects. That differs from a
+  dropped publish (§8.6), which leaves the offset alone and never loses an entity. (1506)
+- `total_filtered` counts every skip, not only "ERD not registered": the keyword filter, a malformed board
+  address, an explicit `ff` board address, an unregistered ERD, an unregistered paired ERD, prefix
+  truncation, a prefix too long for `topic_buf`, suffix truncation, and a payload too large. §11 narrows it
+  to the first case. (1532)

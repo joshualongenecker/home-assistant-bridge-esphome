@@ -25,7 +25,6 @@ void DiagnosticSensorPublisher::init(
   this->erd_cache_publisher_ = &erd_cache_publisher;
 }
 
-// Templated to avoid std::function SBO/heap allocation risk on each loop().
 template<typename GetA, typename GetB>
 static bool publish_sensor_group(sensor::Sensor* a, sensor::Sensor* b,
                                  uint32_t* last_publish, uint32_t interval_ms,
@@ -74,5 +73,5 @@ void DiagnosticSensorPublisher::loop() {
       [this]() -> uint32_t { return erd_cache_mqtt_publisher_get_last_disconnect_duration_ms(this->erd_cache_publisher_); });
 }
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}

@@ -24,7 +24,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 import generate_erd_lists as gen
 from appliance_type_categories import APPLIANCE_TYPE_CATEGORY, UNKNOWN_APPLIANCE_TYPE
 
-
 def upstream_appliance_types():
     """The ERD 0x0008 enum as it ships in the documentation submodule."""
     path = (Path(__file__).resolve().parents[1] /
@@ -32,7 +31,6 @@ def upstream_appliance_types():
             "appliance_api_erd_definitions.json")
     with open(path) as f:
         return gen.get_appliance_type_values(json.load(f)["erds"])
-
 
 class TestApplianceGroupRows(unittest.TestCase):
 
@@ -76,7 +74,6 @@ class TestApplianceGroupRows(unittest.TestCase):
             APPLIANCE_TYPE_CATEGORY.update(original)
 
     def test_stale_mapping_entry_fails_loudly(self):
-        # The mirror case: upstream removed a type the mapping still covers.
         original = dict(APPLIANCE_TYPE_CATEGORY)
         APPLIANCE_TYPE_CATEGORY[99] = "range"
         try:
@@ -105,7 +102,6 @@ class TestApplianceGroupRows(unittest.TestCase):
                 continue
             self.assertIn(token, gen.CATEGORY_CPP)
 
-
 class TestApplianceTypeMap(unittest.TestCase):
 
     def test_generated_map_returns_string_literals(self):
@@ -115,7 +111,6 @@ class TestApplianceTypeMap(unittest.TestCase):
         self.assertNotIn("#include <string>", header)
         self.assertIn('case 0: return "WaterHeater";', header)
         self.assertIn('default: return "Unknown";', header)
-
 
 if __name__ == "__main__":
     unittest.main()

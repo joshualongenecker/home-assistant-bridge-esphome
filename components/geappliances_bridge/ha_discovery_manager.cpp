@@ -1,7 +1,3 @@
-// Main-loop design: start() builds the sorted ERD list and device JSON inline.
-// run() is called from the main loop; it decompresses chunks, parses JSONL,
-// and publishes one entity per call, keeping loop times low.
-
 #include "ha_discovery_manager.h"
 #include "ha_discovery_data.h"
 #include "appliance_type_category.h"
@@ -34,29 +30,8 @@
 
 GEA_TAG(TAG) = "ha_discovery";
 
-/* After a config publish is dropped (the ESPHome MQTT backend's 30-slot
- * outbound queue is full), wait this long before the next attempt. Retrying at
- * main-loop rate against a full queue churns the backend's drop counter and
- * flaps the MQTT component's publish warning; the run's offset is not advanced
- * on a drop, so the retry republishes the same entity once the queue has
- * drained.
- *
- * This does NOT threaten the publish phase's abort path: that timeout is an
- * idle timeout on successful publishes (DiscoveryLifecycleManager), so a
- * congested-but-progressing run is never aborted however long it takes. The
- * value is a plain storm-reduction / convergence trade. In the regime where
- * every entity drops once, an entity costs ceil(B/L)*L + L with L the
- * main-loop period (one publish per iteration), so the largest run (a range
- * appliance: common + energy + range = 3605 entities) converges in about
- * 3605 * 116 ms ~= 7 min at the fleet-typical L ~= 29 ms, versus ~17 min at
- * the cache publisher's 250 ms -- which has no deadline and can afford it.
- * B below L buys nothing: the retry would fire on the next iteration anyway. */
 static const uint32_t HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS = 64;
 
-/* Extract a JSON string value for the given key.
- * Returns a pointer to the first character of the value (after opening quote)
- * and sets *out_len to the length (not including closing quote).
- * Returns NULL if key not found or value is not a string. */
 static const char* json_get_str(const char* json, const char* key,
                                  const char** out_value, size_t* out_len)
 {
@@ -64,8 +39,6 @@ static const char* json_get_str(const char* json, const char* key,
     const char* p = json;
 
     while ((p = strstr(p, "\"")) != NULL) {
-        /* Verify this " is the start of a key (preceded by {, ,, or [),
-         * not a value that happens to match the key name. */
         if (p > json && *(p - 1) != '{' && *(p - 1) != ',' && *(p - 1) != '[') { p++; continue; }
         if (strncmp(p + 1, key, key_len) == 0 && p[key_len + 1] == '\"') {
             p = p + key_len + 3;
@@ -76,7 +49,7 @@ static const char* json_get_str(const char* json, const char* key,
                 *out_value = p + 1;
                 const char* end = p + 1;
                 while (*end && *end != '"') {
-                    if (*end == '\\' && *(end + 1)) end++;  /* skip escaped char, guard against unterminated escape */
+                    if (*end == '\\' && *(end + 1)) end++;  
                     end++;
                 }
                 *out_len = (size_t)(end - *out_value);
@@ -127,7 +100,7 @@ static void json_unescape(const char* src, size_t src_len, char* out, int out_si
                 case 'n':  out[i++] = '\n'; break;
                 case 'r':  out[i++] = '\r'; break;
                 case 't':  out[i++] = '\t'; break;
-                case 'u':  /* skip \uXXXX */ if (p + 4 < end) p += 4; break;
+                case 'u':   if (p + 4 < end) p += 4; break;
                 default:   out[i++] = *p; break;
             }
         } else {
@@ -138,11 +111,6 @@ static void json_unescape(const char* src, size_t src_len, char* out, int out_si
     out[i] = '\0';
 }
 
-/* Copy a raw JSON string value for embedding in another JSON string.
- * The input is already JSON-escaped (contains \\, \", etc.).
- * Embedding it directly in another JSON string requires no transformation —
- * the escape sequences remain valid.
- * Returns the number of bytes written (excluding null terminator). */
 static int json_embed_value(const char* src, size_t src_len, char* out, int out_size)
 {
     if (src_len >= (size_t)out_size) src_len = (size_t)(out_size - 1);
@@ -163,9 +131,6 @@ static bool erd_is_registered_sorted(const ha_discovery_manager_t* self, uint16_
     return false;
 }
 
-/* Linear scan: the list is at most CUSTOM_ERDS_MAX (128) entries and is only
- * consulted for lines that carry an explicit board address, i.e. the custom
- * profile's lines, so a run costs at most a few thousand comparisons. */
 static bool is_configured_board_erd(const ha_discovery_manager_t* self, uint16_t erd_id,
                                     uint8_t board_address)
 {
@@ -194,7 +159,6 @@ static void build_sorted_erd_list(ha_discovery_manager_t* self)
             self->sorted_erds[self->sorted_erds_count++] = entry->erd;
         }
     }
-    /* Insertion sort (small N). */
     for (uint16_t i = 1; i < self->sorted_erds_count; i++) {
         uint16_t key = self->sorted_erds[i];
         uint16_t j = i;
@@ -290,9 +254,6 @@ static int chunk_decompress(ha_discovery_manager_t* self, const uint8_t* compres
     return 0;
 }
 
-/* Keywords that mark an entity as internal/diagnostic.
- * If filter_config_topics is enabled and the entity name contains
- * any of these (case-insensitive), the entity is skipped. */
 static const char* FILTER_KEYWORDS[] = {
     "linux diagnostics",
     "gea interface diagnostic",
@@ -368,11 +329,6 @@ static const char* FILTER_KEYWORDS[] = {
     NULL
 };
 
-/* should_filter_config_topic: converts entity name to lowercase for keyword
- * matching. Uses a 256-byte stack buffer (lower[]). Entity names from the
- * pipeline are bounded by entity_name_buf[160] in ha_discovery_manager_t,
- * so the 256-byte buffer always has headroom. Long-term: replace with a
- * case-insensitive strstr variant to eliminate the stack allocation. */
 static bool should_filter_config_topic(const char* name) {
     char lower[256];
     size_t i, name_len = strlen(name);
@@ -414,7 +370,6 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
     if (!json_get_str(line, "d", &val, &len)) return false;
     json_unescape(val, len, self->domain_buf, sizeof(self->domain_buf));
 
-    /* Optional fields — use struct buffers to avoid stack overflow. */
     self->field_id_buf[0] = '\0';
     self->board_address_buf[0] = '\0';
     self->paired_erd_buf[0] = '\0';
@@ -452,9 +407,6 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
     if (json_get_str(line, "mx", &val, &len)) json_unescape(val, len, self->max_buf, sizeof(self->max_buf));
     if (json_get_str(line, "st", &val, &len)) json_unescape(val, len, self->step_buf, sizeof(self->step_buf));
 
-    /* Board addresses are emitted as two hexadecimal digits by the custom
-     * profile generator. Reject malformed optional data before it reaches a
-     * discovery topic or entity identifier. */
     if (self->board_address_buf[0] &&
         (strlen(self->board_address_buf) != 2 ||
          strspn(self->board_address_buf, "0123456789abcdefABCDEF") != 2)) {
@@ -462,12 +414,6 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
         return false;
     }
 
-    /* The topic grammar takes the board address numerically: empty means the
-     * primary-board sentinel, anything else is the parsed physical address.
-     * An explicit "ff"/"FF" is the GEA broadcast address, which the grammar
-     * reserves for the sentinel and which can never be a physical board
-     * address; reject it so an address-specific entity can never silently
-     * bind to (and control) the primary board. */
     uint8_t board_address = (uint8_t)ERD_TOPIC_PRIMARY;
     if (self->board_address_buf[0]) {
         board_address = (uint8_t)strtoul(self->board_address_buf, NULL, 16);
@@ -478,13 +424,6 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
     }
     uint16_t erd_id = (uint16_t)strtoul(erd_id_hex, NULL, 16);
 
-    /* The cache filter narrows the static category tables to what this
-     * appliance answers. A configured custom ERD on an explicit board is
-     * exempt (issue #212): it was asked for by name, so a board that is silent
-     * at this boot must leave its entities stale in Home Assistant, not have
-     * them deleted by the cleanup that precedes this run. The board address
-     * check keeps the exemption to the lines that name that board; a line
-     * without "a" is a primary-board line and always takes the cache filter. */
     const bool explicit_board = self->board_address_buf[0] != '\0';
     bool uncached = false;
     if (!erd_is_registered_sorted(self, erd_id)) {
@@ -508,8 +447,6 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
     }
     self->line_uncached_configured = uncached;
 
-    /* Build unique_id. Address-aware entries include the two-digit board
-     * address, keeping overlapping ERD IDs on separate boards distinct. */
     if (self->field_id_buf[0] && self->board_address_buf[0]) {
         snprintf(self->unique_id_buf, sizeof(self->unique_id_buf), "%s_erd_%s_address_%s_%s",
                  self->device_id, erd_id_hex, self->board_address_buf, self->field_id_buf);
@@ -544,15 +481,9 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
         snprintf(self->actual_command_topic_buf, sizeof(self->actual_command_topic_buf), "%s", self->command_topic_buf);
     }
 
-    /* Build topic using pre-computed domain prefix if available.
-     * domain_topic_prefix is 128 bytes. Worst case: "homeassistant/"(14) +
-     * domain_buf[32] + "/"(1) + device_id[64] + "/"(1) = 112 bytes.
-     * Address-aware custom entries add "_address_xx" to the suffix. Truncation
-     * is detected below so oversized configuration topics are safely skipped. */
     if (self->domain_topic_prefix[0] == '\0' || strcmp(self->domain_buf, self->current_domain_prefix_buf) != 0) {
         snprintf(self->domain_topic_prefix, sizeof(self->domain_topic_prefix),
             "homeassistant/%s/%s/", self->domain_buf, self->device_id);
-        /* Detect prefix truncation: if it doesn't end with '/', it was cut short. */
         size_t plen = strlen(self->domain_topic_prefix);
         if (plen == 0 || self->domain_topic_prefix[plen - 1] != '/') {
             self->total_filtered++;
@@ -567,9 +498,8 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
             self->total_filtered++;
             return false;
         }
-        /* Copy prefix first so strlen() below reads initialized memory. */
         memcpy(self->topic_buf, self->domain_topic_prefix, prefix_len);
-        size_t remaining = sizeof(self->topic_buf) - prefix_len - 1; /* -1 for null */
+        size_t remaining = sizeof(self->topic_buf) - prefix_len - 1;
         if (self->field_id_buf[0] && self->board_address_buf[0]) {
             snprintf(self->topic_buf + prefix_len, remaining, "%s_address_%s_%s/config",
                      erd_id_hex, self->board_address_buf, self->field_id_buf);
@@ -581,7 +511,6 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
         } else {
             snprintf(self->topic_buf + prefix_len, remaining, "%s/config", erd_id_hex);
         }
-        /* Detect suffix truncation: if topic doesn't end with '/config', it was cut short. */
         size_t topic_len = strlen(self->topic_buf);
         if (topic_len < 7 || strcmp(self->topic_buf + topic_len - 7, "/config") != 0) {
             self->total_filtered++;
@@ -589,9 +518,6 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
         }
     }
 
-    /* Build payload directly in shared buffer.
-     * Templates are embedded directly from the raw JSONL line with re-escaping,
-     * avoiding intermediate buffer limits. */
     char* payload = self->payload_buf;
     int pos = 0;
     int space = (int)HA_DISCOVERY_PAYLOAD_BUF_SIZE - 1;
@@ -692,7 +618,6 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
                 if (n < 0 || n >= space) goto too_large;
                 pos += n; space -= n;
             }
-            /* Fallback to dt-based ranges if mn/mx not set. */
             if (!self->min_buf[0] && self->data_type_buf[0]) {
                 if (strcmp(self->data_type_buf, "u8") == 0) {
                     n = snprintf(payload + pos, space, "\"min\":0,\"max\":255,");
@@ -711,7 +636,6 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
                 pos += n; space -= n;
             }
         }
-        /* Fallback step from scale_factor if st not set (for non-number domains). */
         if (self->scale_factor_buf[0] && !self->step_buf[0] && strcmp(self->domain_buf, "number") == 0) {
             n = snprintf(payload + pos, space, "\"step\":%s,", self->scale_factor_buf);
             if (n < 0 || n >= space) goto too_large;
@@ -744,8 +668,6 @@ static bool process_jsonl_line(ha_discovery_manager_t* self, const char* line)
         }
     }
 
-    /* Abbreviated keys keep the largest payloads under
-     * HA_DISCOVERY_PAYLOAD_BUF_SIZE; HA accepts mixed long and short keys. */
     if (self->availability_topic_buf[0]) {
         n = snprintf(payload + pos, space, "\"avty_t\":\"%s\",", self->availability_topic_buf);
         if (n < 0 || n >= space) goto too_large;
@@ -787,8 +709,6 @@ bool ha_discovery_test_build_payload(ha_discovery_manager_t* self, const char* l
 }
 #endif
 
-/* Copies src into a fixed buffer. Rejects values that would be truncated or
- * that need JSON escaping, since they are embedded verbatim in payloads. */
 static bool copy_availability_value(char* destination, size_t destination_size, const char* src)
 {
     size_t len = strlen(src);
@@ -834,8 +754,6 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
         return;
     }
 
-    /* If still in BUILDING state, the build happened inline in start().
-     * Transition to DISCOVERING on the first run() call. */
     if (self->state == ha_discovery_state_building) {
         self->state = ha_discovery_state_discovering;
         self->current_category = 0;
@@ -856,12 +774,6 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
         return;
     }
 
-    /* Backoff after a dropped config publish (see
-     * HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS). 0 means no window is armed, and
-     * that is tested first: the rollover-safe signed diff reads now - 0 as
-     * negative once millis() passes 2^31, which would otherwise stall every
-     * publish for the remaining ~25 days before the wrap. Within an armed
-     * window the signed diff handles the wrap correctly. */
     if (self->retry_backoff_until_ms != 0 &&
         (int32_t)(self->get_time_ms() - self->retry_backoff_until_ms) < 0) {
         return;
@@ -872,8 +784,6 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
             ha_discovery_category_t cat = discovery_category_at(self, self->current_category);
 
             if (strcmp(cat.name, "custom") != 0 && !should_process_category(cat.name, self->appliance_type)) {
-                /* Skip unneeded category. Return to main loop; next run()
-                 * will try the next category. */
                 self->current_category++;
                 self->current_chunk = 0;
                 self->current_offset = 0;
@@ -883,8 +793,6 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
 
             if (self->current_decomp_size == 0) {
                 if (self->current_chunk >= cat.num_chunks) {
-                    /* Done with this category. Return to main loop; next
-                     * run() will try the next category. */
                     self->current_category++;
                     self->current_chunk = 0;
                     self->current_offset = 0;
@@ -931,8 +839,6 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
 
                 if (process_jsonl_line(self, self->line_buf)) {
                     if (!self->mqtt_client) {
-                        /* No MQTT client yet — skip this entity.
-                         * Discovery will be retried later when MQTT connects. */
                         self->current_offset = (uint32_t)(line_end - decomp) + 1;
                         return;
                     }
@@ -940,13 +846,6 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
                     const bool sent = mqtt_client_publish_raw(self->mqtt_client, self->topic_buf,
                         self->payload_buf, strlen(self->payload_buf), true);
                     if (!sent) {
-                        /* Publish dropped (the ESPHome MQTT backend's 30-slot
-                         * outbound queue is full) — don't advance the offset so
-                         * the entity is retried, and hold off further attempts.
-                         * Retrying at main-loop rate against a full queue only
-                         * churns the backend's drop counter and flaps the MQTT
-                         * component's publish warning; the entity is republished
-                         * from the same offset once the queue has drained. */
                         self->retry_backoff_until_ms = t_publish
                             + (self->get_time_ms() - t_publish)
                             + HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS;
@@ -968,15 +867,11 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
                             cat.name, (unsigned long)self->total_discovered, (unsigned long)self->total_published);
                     }
 
-                    /* One entity per call — return to main loop. */
                     return;
                 } else {
                     self->current_offset = (uint32_t)(line_end - decomp) + 1;
                 }
             }
-            /* Done with this chunk. Return to main loop; next run() will
-             * advance to the next chunk or category. This avoids blocking
-             * the main loop while skipping empty chunks. */
             self->current_chunk++;
             self->current_offset = 0;
             self->current_decomp_size = 0;
@@ -989,9 +884,6 @@ void ha_discovery_manager_run(ha_discovery_manager_t* self)
         }
     }
 
-    /* If just completed, do cleanup and logging on this call.
-     * This is separate from the publish-return path so the last
-     * entity publish doesn't block on cleanup. */
     if (self->state == ha_discovery_state_complete) {
         cleanup_resources(self);
 
@@ -1014,13 +906,11 @@ void ha_discovery_manager_set_time_fn(
     ha_discovery_manager_t* self,
     uint32_t (*get_time_ms)(void))
 {
-    /* NULL restores the init default (esphome::millis). */
     self->get_time_ms = get_time_ms ? get_time_ms : esphome::millis;
 }
 
 void ha_discovery_manager_init(ha_discovery_manager_t* self)
 {
-    /* Preserve custom data pointers; they are set by codegen and survive reinit. */
     const uint8_t* custom_data = self->custom_data;
     const void* custom_chunks = self->custom_chunks;
     uint16_t custom_num_chunks = self->custom_num_chunks;
@@ -1029,12 +919,6 @@ void ha_discovery_manager_init(ha_discovery_manager_t* self)
     const ha_discovery_board_erd_t* configured_board_erds = self->configured_board_erds;
     uint16_t configured_board_erds_count = self->configured_board_erds_count;
 
-    /* Free any discovery allocations still held from a prior run before
-     * zeroing the struct, so a re-init can never orphan the ~52 KB of heap
-     * memory (mirrors ha_discovery_manager_cleanup()). free(NULL) is a no-op
-     * when they were never allocated. The cleanup topic queue is a per-run
-     * allocation too (rec 10), and a refresh cycle or an aborted run can land
-     * while a cleanup still owns it. */
     ha_discovery_cleanup_release_queue(&self->cleanup);
     free(self->decomp_buf);
     free(self->line_buf);
@@ -1102,15 +986,11 @@ void ha_discovery_manager_set_availability(
     const char* payload_available,
     const char* payload_not_available)
 {
-    /* Clear all three first: an empty topic means availability is fully off,
-     * and stale payload bytes must not linger (they feed the data hash). */
     self->availability_topic_buf[0] = '\0';
     self->payload_available_buf[0] = '\0';
     self->payload_not_available_buf[0] = '\0';
     if (topic == NULL || topic[0] == '\0') return;
 
-    /* A truncated or malformed topic would leave every entity permanently
-     * unavailable in HA, so disable availability rather than publish it. */
     if (!copy_availability_value(self->payload_available_buf, sizeof(self->payload_available_buf),
                                  payload_available ? payload_available : "online") ||
         !copy_availability_value(self->payload_not_available_buf, sizeof(self->payload_not_available_buf),
@@ -1121,7 +1001,6 @@ void ha_discovery_manager_set_availability(
     }
 }
 
-/* FNV-1a over a NUL-terminated string. */
 static uint32_t fnv1a_str(const char* s)
 {
     uint32_t h = 2166136261u;
@@ -1132,7 +1011,6 @@ static uint32_t fnv1a_str(const char* s)
     return h;
 }
 
-/* boost::hash_combine-style mix of `value` into `seed`. */
 static uint32_t discovery_hash_combine(uint32_t seed, uint32_t value)
 {
     return seed ^ (value + 0x9e3779b9u + (seed << 6) + (seed >> 2));
@@ -1144,11 +1022,6 @@ uint32_t ha_discovery_manager_data_hash(const ha_discovery_manager_t* self)
     if (self->custom_data_hash != 0) {
         h = discovery_hash_combine(h, self->custom_data_hash);
     }
-    /* Availability is injected into every payload at runtime, so it must
-     * participate in the fingerprint: a topic_prefix/node-name change (which
-     * changes the LWT status topic) must trigger a republish. Empty buffers
-     * mix nothing, so an install with birth/will disabled keeps the
-     * pre-availability hash and gets no spurious republish. */
     if (self->availability_topic_buf[0] != '\0') {
         h = discovery_hash_combine(h, fnv1a_str(self->availability_topic_buf));
     }
@@ -1171,11 +1044,6 @@ void ha_discovery_manager_start(ha_discovery_manager_t* self)
 {
     if (self->state != ha_discovery_state_idle) return;
 
-    /* Allocate the large discovery buffers and the tinfl decompressor state on
-     * the heap for the duration of this run only. The device reboots after
-     * discovery, so this memory never persists into steady state; keeping it
-     * out of the struct removes ~52 KB from the permanent heap carve on
-     * non-discovery boots. */
     size_t free_heap __attribute__((unused)) = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t largest_free __attribute__((unused)) = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
     ESP_LOGI(TAG, "Discovery: allocating %u bytes (decomp+line+payload+tinfl); free heap=%u, largest block=%u",
@@ -1200,8 +1068,6 @@ void ha_discovery_manager_start(ha_discovery_manager_t* self)
     }
 
     build_sorted_erd_list(self);
-    /* One line per discovery run, at DEBUG. This is the only point the count is
-     * meaningful: a boot-time summary printed before the run starts reads 0. */
     ESP_LOGD(TAG, "Discovery: %u ERDs to publish", self->sorted_erds_count);
     build_device_json(self);
 
@@ -1210,10 +1076,6 @@ void ha_discovery_manager_start(ha_discovery_manager_t* self)
 
 void ha_discovery_manager_cleanup(ha_discovery_manager_t* self)
 {
-    /* cleanup_resources() -> ha_discovery_cleanup_destroy() releases the
-     * per-run topic queue before the memset below, the same way init() does
-     * on a re-init; a cleanup holding the queue here would otherwise orphan
-     * it (rec 10). */
     cleanup_resources(self);
 
     memset(self, 0, sizeof(*self));

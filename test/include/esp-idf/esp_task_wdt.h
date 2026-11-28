@@ -1,8 +1,3 @@
-/*!
- * @file
- * @brief ESP-IDF esp_task_wdt stubs for test/simulation builds.
- */
-
 #ifndef ESP_TASK_WDT_STUB_H
 #define ESP_TASK_WDT_STUB_H
 
@@ -18,4 +13,4 @@ static inline int esp_task_wdt_delete(void*) { return 0; }
 }
 #endif
 
-#endif /* ESP_TASK_WDT_STUB_H */
+#endif

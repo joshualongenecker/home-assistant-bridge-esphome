@@ -99,7 +99,6 @@ TEST_GROUP_BASE(erd_bridge_subscribe, simulation_test_base)
       .andReturnValue(true);
   }
 
-
   template <typename T>
   void when_an_erd_publication_is_received(uint8_t publisher_address, tiny_erd_t erd, T data)
   {
@@ -208,7 +207,6 @@ TEST(erd_bridge_subscribe, should_preserve_cache_data_on_host_came_online)
   given_that_an_erd_publication_has_been_received(0xC0, 0xABCD, uint32_t(0x12345678));
   CHECK_EQUAL(1u, erd_cache_get_count(&test_cache));
 
-  // Simulate the appliance host restarting.
   a_subscription_to_should_be_requested_for(0xC0);
   when_a_subscription_host_came_online_is_received_for(0xC0);
 
@@ -235,10 +233,8 @@ TEST(erd_bridge_subscribe, should_periodically_retain_an_active_subscription)
   // Receive an ERD publication so quiet period transitions to steady (not failed).
   given_that_an_erd_publication_has_been_received(0xC0, 0xABCD, uint32_t(0x12345678));
 
-  // Advance past the quiet period to reach steady state.
   after(subscription_quiet_period);
 
-  // Now in steady state; retention should fire.
   after(subscription_retention_period - subscription_quiet_period - 1);
 
   a_subscription_retention_should_be_requested_for(0xC0);
@@ -293,7 +289,6 @@ TEST(erd_bridge_subscribe, should_transition_to_steady_after_quiet_period_with_n
   // to steady (not failed — failed is for when no ERDs are published at all).
   given_that_an_erd_publication_has_been_received(0xC0, 0xABCD, uint32_t(0x12345678));
 
-  // Advance to just before the quiet period — nothing should happen.
   after(subscription_quiet_period - 1);
 
   // Quiet period elapses, transitioning to steady. No mock expectations
@@ -314,7 +309,6 @@ TEST(erd_bridge_subscribe, should_return_to_subscribed_on_new_erd_while_steady)
   // Receive an ERD publication so quiet period transitions to steady.
   given_that_an_erd_publication_has_been_received(0xC0, 0xABCD, uint32_t(0x12345678));
 
-  // Advance past the quiet period to reach steady state.
   after(subscription_quiet_period);
 
   // A new ERD publication should transition back to subscribed.
@@ -334,7 +328,6 @@ TEST(erd_bridge_subscribe, should_retain_subscription_in_steady_state)
   // Receive an ERD publication so quiet period transitions to steady.
   given_that_an_erd_publication_has_been_received(0xC0, 0xABCD, uint32_t(0x12345678));
 
-  // Advance past the quiet period to reach steady state.
   after(subscription_quiet_period);
 
   // Retention should fire at 30s from when subscribed was entered.
@@ -349,14 +342,12 @@ TEST(erd_bridge_subscribe, should_resubscribe_on_host_came_online_from_steady)
   // Receive an ERD publication so quiet period transitions to steady.
   given_that_an_erd_publication_has_been_received(0xC0, 0xABCD, uint32_t(0x12345678));
 
-  // Advance past the quiet period to reach steady state.
   after(subscription_quiet_period);
 
   // Host came online from steady should transition to subscribing.
   a_subscription_to_should_be_requested_for(0xC0);
   when_a_subscription_host_came_online_is_received_for(0xC0);
 }
-
 
 // ---------------------------------------------------------------------------
 // Dual-subscription tests: two independent bridge instances, each watching a
@@ -444,7 +435,6 @@ TEST_GROUP_BASE(erd_bridge_subscribe_dual, simulation_test_base)
 
 };
 
-
 TEST(erd_bridge_subscribe_dual, each_bridge_subscribes_to_its_own_address_at_init)
 {
   a_subscription_should_be_requested_for(address_a);
@@ -463,7 +453,6 @@ TEST(erd_bridge_subscribe_dual, each_bridge_subscribes_to_its_own_address_at_ini
     &test_cache);
 }
 
-
 TEST(erd_bridge_subscribe_dual, each_bridge_independently_retains_its_subscription)
 {
   given_both_bridges_are_initialized();
@@ -473,10 +462,8 @@ TEST(erd_bridge_subscribe_dual, each_bridge_independently_retains_its_subscripti
   when_an_erd_publication_is_received(address_a, 0xABCD, uint32_t(0x12345678));
   when_an_erd_publication_is_received(address_b, 0xABCD, uint32_t(0x12345678));
 
-  // Advance past the quiet period for both bridges.
   after(subscription_quiet_period);
 
-  // Now both are in steady state; retention should fire for both.
   after(subscription_retention_period - subscription_quiet_period - 1);
 
   mock()
@@ -501,7 +488,6 @@ TEST(erd_bridge_subscribe_dual, resubscribing_one_bridge_does_not_affect_the_oth
   when_an_erd_publication_is_received(address_a, 0xABCD, uint32_t(0x12345678));
   when_an_erd_publication_is_received(address_b, 0xABCD, uint32_t(0x12345678));
 
-  // Advance past the quiet period for both bridges.
   after(subscription_quiet_period);
 
   // bridge_b's host comes back online: only bridge_b should resubscribe
@@ -573,7 +559,6 @@ TEST(erd_bridge_subscribe, filter_active_allows_valid_erd_into_cache)
   mock().ignoreOtherCalls();
   when_an_erd_publication_is_received(0xC0, 0x0001, data);
 
-  // Cache should have the valid ERD.
   CHECK_EQUAL(1u, erd_cache_get_count(&test_cache));
   uint16_t iter = 0;
   erd_cache_entry_t* entry = erd_cache_get_next_entry(&test_cache, &iter);
@@ -608,12 +593,10 @@ TEST(erd_bridge_subscribe, filtered_erd_does_not_affect_hsm_state)
   erd_bridge_subscribe_set_erd_registry(&self, &registry);
   mock().enable();
 
-  // Trigger subscription added so the bridge enters subscribed state.
   mock().disable();
   after_a_subscription_is_added_or_retained_for(0xC0);
   mock().enable();
 
-  // Send only invalid ERD publications.
   uint8_t data = 0xBB;
   mock().ignoreOtherCalls();
   when_an_erd_publication_is_received(0xC0, 0x0002, data);
@@ -622,8 +605,6 @@ TEST(erd_bridge_subscribe, filtered_erd_does_not_affect_hsm_state)
   // Wait for the quiet period to expire.
   after(subscription_quiet_period + 1);
 
-  // Bridge should transition to failed (no valid ERDs published).
   CHECK(self.current_state == subscription_state_failed);
-  // Cache should be empty.
   CHECK_EQUAL(0u, erd_cache_get_count(&test_cache));
 }

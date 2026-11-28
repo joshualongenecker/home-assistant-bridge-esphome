@@ -22,7 +22,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pipeline_utils import SCRIPT_DIR, REPO_ROOT, load_json
 from ha_constants import SENSOR_DEVICE_CLASS_STATE_CLASSES
 
-
 def _word_bound(name_lower, kw):
     """Check if kw appears as a whole word (or at word boundary) in name_lower.
 
@@ -30,7 +29,6 @@ def _word_bound(name_lower, kw):
     """
     normalized = name_lower.replace('_', ' ')
     return bool(re.search(r'\b' + re.escape(kw) + r'\b', normalized))
-
 
 def infer_state_class(entry):
     """Infer state_class from field name, device_class, and ha_domain.
@@ -45,57 +43,41 @@ def infer_state_class(entry):
     desc_lower = (entry.get('erd_description') or '').lower()
     combined = name_lower + ' ' + desc_lower
 
-    # Only assign state_class for sensor domain
     if ha_domain != 'sensor':
         return None, None
 
-    # HA only supports long-term statistics for numeric sensors.
-    # Non-numeric device classes (enum, timestamp, date, uptime) output text
-    # strings — state_class on these causes HA to reject the sensor for LTS.
     NON_NUMERIC_DEVICE_CLASSES = {'enum', 'timestamp', 'date', 'uptime'}
     if device_class in NON_NUMERIC_DEVICE_CLASSES:
         return None, None
 
     # --- Fields WITH device_class ---
     if device_class is not None:
-        # --- Total: cumulative counters that can go up and down ---
         total_keywords = [
             'cumulative', 'total', 'consumption', 'usage', 'since clear',
         ]
         if any(kw in name_lower for kw in total_keywords):
-            # Exclude averages (instantaneous derived values)
             if 'average' in name_lower:
                 return None, None
             if device_class in ('energy', 'gas', 'water', 'volume'):
                 return 'total', 0.9
 
-        # --- Total_increasing: counters that only increase ---
-        # Use word-boundary matching to avoid 'cycle' matching 'MyCycle'
         total_increasing_keywords = [
             'count', 'number of', 'runtime', 'uptime',
         ]
         if any(kw in name_lower for kw in total_increasing_keywords):
             return 'total_increasing', 0.85
 
-        # 'cycle' requires word-boundary match (not substring)
         if _word_bound(name_lower, 'cycle'):
-            # Only for non-temperature device classes (MyCycle is a product feature)
             if device_class not in ('temperature',):
                 return 'total_increasing', 0.8
 
-        # --- Measurement: instantaneous values ---
-        # Only assign 'measurement' if the device_class allows it per HA spec.
         valid_states = SENSOR_DEVICE_CLASS_STATE_CLASSES.get(device_class, set())
         if 'measurement' in valid_states:
-            # Exclude cumulative/total fields from measurement
             if not any(kw in name_lower for kw in total_keywords):
                 return 'measurement', 0.9
 
         return None, None
 
-    # --- Fields WITHOUT device_class: assign measurement for counter/time/level ---
-    # These are sensors where we don't know the unit but the name suggests
-    # a measurable quantity (counter, time, level, position).
     counter_keywords = [
         'counter', 'count', 'total', 'cycle', 'reset', 'dispense',
         'door', 'error', 'fault', 'number of',
@@ -110,7 +92,6 @@ def infer_state_class(entry):
         return 'measurement', 0.7
 
     return None, None
-
 
 def apply_detection(entries):
     """Walk all entries, detect state_class, and overwrite review field.
@@ -134,7 +115,6 @@ def apply_detection(entries):
         if sc is None:
             continue
 
-        # Only write when not already set, preserving manual overrides.
         if review.get('state_class'):
             continue
 
@@ -144,8 +124,6 @@ def apply_detection(entries):
         total_applied += 1
 
     return total_checked, total_matched, total_applied
-
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -178,7 +156,6 @@ def main():
         with open(args.input, 'w', encoding='utf-8') as f:
             json.dump(entries, f, indent=2, ensure_ascii=False)
         print(f"Output: {args.input}")
-
 
 if __name__ == '__main__':
     main()

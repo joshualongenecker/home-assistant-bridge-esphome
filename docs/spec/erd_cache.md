@@ -284,3 +284,13 @@ The window is determined by the call interval of the consumer (e.g., ~60 s if ca
 5. **Linear scan for free slot:** New entry insertion scans for the first invalid slot, which is O(n) in the worst case.
 
 6. **No batch republish:** `erd_cache_snapshot_next_updated()` clears `update_required` per entry. If publishing fails mid-iteration (e.g., MQTT disconnect), the cleared entries are not re-marked. A batch republish mechanism would need to iterate all entries via `erd_cache_get_next_entry()` and re-publish.
+
+---
+
+## 11. Notes
+
+1. **The per-entry publish cooldown is driven by the bridge's `loop()`, not by the cache or the publisher task.** `GeappliancesBridge::loop()` calls `erd_cache_tick_cooldowns(&erd_cache_)` at most once per 1000 ms, gated on `throttle_rate_seconds_ > 0`, and remembers the previous tick in the member `last_cooldown_tick_` — a member, not a static, so it resets on re-init and there is no first-tick race on cold start. The elapsed test is unsigned (`now - last_cooldown_tick_ >= 1000`), so a `millis()` wrap cannot stall the tick. (1159)
+
+2. **A missed tick defers a publish; it never loses one.** `erd_cache_tick_cooldowns()` decrements `publish_cooldown` by exactly one, and only for entries that are `valid && update_required && publish_cooldown > 0`, so an iteration that never reaches the tick (long protocol-stack run, publisher paused for a discovery run) delays eligibility by whole seconds while `update_required` stays set. `erd_cache_mark_published()` reloads `publish_cooldown = max_cooldown` under the lock, guarded by `entry->valid` because `erd_cache_clear()` may have run between the publisher's snapshot and the mark; `erd_cache_mark_unpublished()` re-arms `update_required` for a dropped publish and likewise refuses to revive a cleared entry so `dirty_count` stays correct. (1159)
+
+3. **The rate limit is bounded by its type and by the schema.** `max_cooldown` and `publish_cooldown` are `uint8_t` seconds, `erd_cache_set_throttle_rate_seconds()` takes `uint8_t`, and `__init__.py` validates `throttle_rate_seconds` with `cv.int_range(min=0, max=255)` (default 1). `0` disables rate limiting: `erd_cache_tick_cooldowns()` returns immediately and the cooldown check in the dirty-entry scan is skipped. Locking and arena invariants are ADR-0004; the publisher's drain and wake policy is ADR-0010 — neither is restated here.

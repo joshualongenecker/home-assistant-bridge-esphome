@@ -22,7 +22,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pipeline_utils import SCRIPT_DIR, REPO_ROOT, load_json
-# Import from ha_constants
 from ha_constants import (
     DEVICE_CLASS_KEYWORDS,
     DEVICE_CLASS_EXCLUSIONS,
@@ -31,7 +30,6 @@ from ha_constants import (
     SENSOR_NON_NUMERIC_DEVICE_CLASSES,
 )
 from auto_detect_ha_domain import PROTOCOL_MARKERS, BINARY_LABELS
-
 
 def _word_bound(name_lower, kw):
     """Check if kw appears as a whole word (or at word boundary) in name_lower.
@@ -42,11 +40,9 @@ def _word_bound(name_lower, kw):
     normalized = name_lower.replace('_', ' ')
     return bool(re.search(r'\b' + re.escape(kw) + r'\b', normalized))
 
-
 def _has_any(name_lower, kws):
     """Check if any keyword appears as substring in name_lower."""
     return any(kw in name_lower for kw in kws)
-
 
 def _check_exclusions(name_lower, dc):
     """Check if name should be excluded for this device class.
@@ -55,13 +51,11 @@ def _check_exclusions(name_lower, dc):
     Uses both standard exclusions from ha_constants and extra exclusions.
     All exclusions use word-boundary matching where possible.
     """
-    # Standard exclusions from ha_constants
     standard = DEVICE_CLASS_EXCLUSIONS.get(dc, [])
     for exc in standard:
         if exc in name_lower:
             return True
 
-    # Extra exclusions per device class
     extra = {
         'power': [
             'power outage', 'powered', 'power/care', 'power consumption',
@@ -113,7 +107,6 @@ def _check_exclusions(name_lower, dc):
 
     return False
 
-
 def infer_device_class(entry):
     """Infer device_class from field name, type, and unit.
 
@@ -132,26 +125,16 @@ def infer_device_class(entry):
     erd_description = entry.get('erd_description', '')
     combined = name_lower + ' ' + erd_name.lower() + ' ' + erd_description.lower()
 
-    # --- Binary sensors: detect occupancy and problem indicators ---
-    # Skip paired fields (they're controls, not status sensors)
     if ha_domain == 'binary_sensor' and not entry.get('review', {}).get('pair_role'):
-        # Occupancy: match 'occupied' in field name only (not erd name/description)
-        # to avoid false positives like "Occupancy Present" capability flags.
         if 'occupied' in name_lower:
             return 'occupancy', 0.8
-        # Problem: match in combined name+erd_name+description
         if any(_word_bound(combined, kw) for kw in ['fault', 'issue', 'error', 'alarm', 'limited']):
             return 'problem', 0.8
 
-    # Skip bit-fields (they're boolean indicators)
     if field_bits is not None:
         return None, None
 
-    # --- Enum detection (before type check, as enum fields have field_type='enum') ---
     if entry.get('field_values') is not None:
-        # Multi-value enums (3+ functional values) -> enum
-        # Descriptive 2-value enums (not on/off) -> enum
-        # Binary enums (on/off) -> no device_class (handled by binary_sensor/switch)
         values = entry.get('field_values', {})
         functional = {v for v in values.values() if v not in PROTOCOL_MARKERS}
         if len(functional) >= 3:
@@ -161,7 +144,6 @@ def infer_device_class(entry):
             if not labels.issubset(BINARY_LABELS):
                 return 'enum', 0.85
 
-    # Skip non-numeric types (enum, string, bool, raw)
     if field_type not in ('u8', 'u16', 'u32', 'i8', 'i16', 'i32'):
         return None, None
 
@@ -188,32 +170,25 @@ def infer_device_class(entry):
         }
         dc = unit_to_dc.get(unit)
         if dc:
-            # Unit-based detection still checks exclusions
             if _check_exclusions(name_lower, dc):
                 return None, None
             return dc, 0.95
 
     # --- Keyword-based detection ---
     for dc, keywords in DEVICE_CLASS_KEYWORDS.items():
-        # Never assign device_class='duration' (AGENTS.md rule)
         if dc == 'duration':
             continue
         for kw in keywords:
-            # Skip very short keywords that match inside unrelated words
             if len(kw) <= 2:
                 continue
 
-            # Use word-boundary matching for short-ish keywords (3-7 chars)
-            # to avoid 'temp' in 'attempts', 'timeout' in 'timeouts', etc.
             if len(kw) <= 7:
                 if not _word_bound(name_lower, kw):
                     continue
             else:
-                # Longer keywords use substring matching
                 if kw not in name_lower:
                     continue
 
-            # Check exclusions
             if _check_exclusions(name_lower, dc):
                 continue
 
@@ -241,7 +216,6 @@ def infer_device_class(entry):
 
     return None, None
 
-
 def apply_detection(entries):
     """Walk all entries, detect device_class, and overwrite review field.
 
@@ -254,7 +228,6 @@ def apply_detection(entries):
 
     for entry in entries:
         field_type = entry.get('field_type', '')
-        # Process numeric types, enum types, and bool (for occupancy/problem detection)
         if field_type not in ('u8', 'u16', 'u32', 'i8', 'i16', 'i32', 'enum', 'bool'):
             continue
         total_checked += 1
@@ -262,22 +235,16 @@ def apply_detection(entries):
 
         dc, confidence = infer_device_class(entry)
         if dc is None:
-            # Clear stale device_class from previous runs when the detector
-            # no longer finds a match (e.g., keyword logic changed).
             if review.get('device_class') is not None:
                 review['device_class'] = None
             continue
 
-        # Always write when detected, overwriting stale or incorrect values.
         review['device_class'] = dc
         review['_dc_confidence'] = confidence
         total_matched += 1
         total_applied += 1
 
     return total_checked, total_matched, total_applied
-
-
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -310,7 +277,6 @@ def main():
         with open(args.input, 'w', encoding='utf-8') as f:
             json.dump(entries, f, indent=2, ensure_ascii=False)
         print(f"Output: {args.input}")
-
 
 if __name__ == '__main__':
     main()

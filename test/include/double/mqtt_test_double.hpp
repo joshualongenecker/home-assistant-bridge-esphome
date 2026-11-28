@@ -49,7 +49,7 @@ class MqttTestDouble : public MQTTClientComponent {
 
   bool is_connected() override { return connected_; }
   bool publish(const std::string& topic, const std::string& payload,
-               uint8_t /*qos*/, bool retain) override {
+               uint8_t , bool retain) override {
     last_published_topic_ = topic;
     last_published_payload_ = payload;
     last_published_retain_ = retain;
@@ -60,7 +60,7 @@ class MqttTestDouble : public MQTTClientComponent {
   }
 
   bool publish(const char* topic, const char* payload, size_t payload_length,
-               uint8_t /*qos*/, bool retain) override {
+               uint8_t , bool retain) override {
     last_published_topic_ = topic;
     last_published_payload_.assign(payload, payload_length);
     last_published_retain_ = retain;
@@ -72,7 +72,7 @@ class MqttTestDouble : public MQTTClientComponent {
 
   void subscribe(const std::string& topic,
                  std::function<void(const std::string&, const std::string&)> callback,
-                 uint8_t /*qos*/) override {
+                 uint8_t ) override {
     subscribed_topics_.push_back(topic);
     subscribe_callback_ = callback;
   }
@@ -80,7 +80,6 @@ class MqttTestDouble : public MQTTClientComponent {
   void unsubscribe(const std::string& topic) override {
     unsubscribed_topics_.push_back(topic);
   }
-
 
   void set_on_connect(std::function<on_connect_callback_t>&& callback) override {
     on_connect_callback_ = std::move(callback);
@@ -97,7 +96,7 @@ class MqttTestDouble : public MQTTClientComponent {
   }
 };
 
-}  // namespace mqtt
-}  // namespace esphome
+}
+}
 
 #endif

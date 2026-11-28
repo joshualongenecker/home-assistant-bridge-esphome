@@ -68,7 +68,7 @@ const expected_category kEvidenceBacked[] = {
   {58, nullptr},          // HomeVentilation: no upstream ERD defined yet
 };
 
-}  // namespace
+}
 
 TEST_GROUP(erd_lists)
 {

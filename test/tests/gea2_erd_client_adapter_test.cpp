@@ -345,7 +345,6 @@ TEST(gea2_erd_client_adapter, destroy_unsubscribes_from_gea2_activity)
 {
   when_the_adapter_is_initialized();
 
-  /* After init, the adapter subscribed to the GEA2 client's on_activity event. */
   CHECK_EQUAL(1u, tiny_list_count(&gea2_client.on_activity.subscribers));
 
   gea2_erd_client_adapter_destroy(&adapter, &gea2_client.interface);
