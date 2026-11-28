@@ -24,6 +24,7 @@
     "components/geappliances_bridge/protocol_stack.cpp": 26,
     "components/geappliances_bridge/protocol_stack.h": 62,
     "scripts/check_generated_sync.sh": 21,
+    "scripts/comment_policy.py": 20,
     "scripts/generate_erd_lists.py": 30,
     "scripts/ha_discovery/generators/compress_ha_discovery.py": 1,
     "scripts/ha_discovery/generators/generate_ha_discovery.py": 29,
