@@ -36,7 +36,6 @@ DEVICE_CLASS_EXCLUSIONS = {
                  "uptime", "run time", "warming time"],
 }
 
-# Union of all unit keyword mappings from all scripts (authoritative)
 UNIT_KEYWORD_MAP = {
     "volts": "V",
     "amps": "A",
@@ -64,11 +63,8 @@ MEASUREMENT_DEVICE_CLASSES = {
     "distance", "battery", "signal_strength", "illuminance",
 }
 
-# Valid HA state classes (includes measurement_angle)
 VALID_STATE_CLASSES = {"measurement", "total", "total_increasing", "measurement_angle"}
 
-# Device classes that imply a unit_of_measurement is required (all from SENSOR_DEVICE_CLASS_UNITS
-# that don't allow None as a valid unit)
 UNIT_IMPLYING_DEVICE_CLASSES = {
     "absolute_humidity", "apparent_power", "area", "atmospheric_pressure",
     "battery", "blood_glucose_concentration", "carbon_monoxide",
@@ -85,7 +81,6 @@ UNIT_IMPLYING_DEVICE_CLASSES = {
     "water", "weight", "wind_direction", "wind_speed",
 }
 
-# Valid device classes per HA domain
 VALID_DEVICE_CLASSES = {
     "sensor": {
         "absolute_humidity", "apparent_power", "aqi", "area",
@@ -134,10 +129,8 @@ VALID_DEVICE_CLASSES = {
     "switch": set(),
 }
 
-# Sensor device classes that are non-numeric (cannot have unit_of_measurement or state_class)
 SENSOR_NON_NUMERIC_DEVICE_CLASSES = {"date", "enum", "timestamp", "uptime"}
 
-# Valid units for each sensor device_class (from HA DEVICE_CLASS_UNITS)
 SENSOR_DEVICE_CLASS_UNITS = {
     "absolute_humidity": {"g/m³", "mg/m³"},
     "apparent_power": {"mVA", "VA", "kVA"},
@@ -165,7 +158,7 @@ SENSOR_DEVICE_CLASS_UNITS = {
     "illuminance": {"lx"},
     "irradiance": {"W/m²", "BTU/(h⋅ft²)"},
     "moisture": {"%"},
-    "monetary": set(),  # Any ISO4217 code is valid; skip unit validation
+    "monetary": set(),
     "nitrogen_dioxide": {"ppb", "ppm", "μg/m³"},
     "nitrogen_monoxide": {"ppb", "μg/m³"},
     "nitrous_oxide": {"μg/m³"},
@@ -202,9 +195,6 @@ SENSOR_DEVICE_CLASS_UNITS = {
     "wind_speed": {"m/s", "km/h", "ft/s", "mph", "kn", "Beaufort"},
 }
 
-# Valid state_classes for each sensor device_class (from HA DEVICE_CLASS_STATE_CLASSES)
-# Note: area, data_size, distance, duration, precipitation, weight use set(SensorStateClass)
-# which includes all 4 state classes including measurement_angle
 SENSOR_DEVICE_CLASS_STATE_CLASSES = {
     "absolute_humidity": {"measurement"},
     "apparent_power": {"measurement"},
@@ -269,15 +259,12 @@ SENSOR_DEVICE_CLASS_STATE_CLASSES = {
     "wind_speed": {"measurement"},
 }
 
-# Valid units for each state_class (from HA STATE_CLASS_UNITS)
 STATE_CLASS_UNITS = {
     "measurement_angle": {"°"},
 }
 
-# Number device class units (same as sensor, independent copy)
 NUMBER_DEVICE_CLASS_UNITS = dict(SENSOR_DEVICE_CLASS_UNITS)
 
-# Valid device classes for binary_sensor
 BINARY_SENSOR_DEVICE_CLASSES = {
     "battery", "battery_charging", "carbon_monoxide", "cold",
     "connectivity", "door", "garage_door", "gas", "heat",
@@ -286,7 +273,6 @@ BINARY_SENSOR_DEVICE_CLASSES = {
     "problem", "running", "safety", "smoke", "sound",
     "tamper", "update", "vibration", "window",
 }
-# ERD category ranges (authoritative form for categorization)
 CATEGORIES = {
     "common": (0x0000, 0x0FFF),
     "refrigeration": (0x1000, 0x1FFF),
@@ -300,8 +286,6 @@ CATEGORIES = {
     "energy": (0xD000, 0xDFFF),
 }
 
-# Category names as a list (for scripts that just need the names)
 CATEGORIES_LIST = list(CATEGORIES.keys())
 
-# Protocol marker labels to exclude from enum value counts
 PROTOCOL_MARKERS = {"Request Consumed", "Request processed", "Consumed"}

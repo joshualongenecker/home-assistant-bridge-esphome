@@ -1,4 +1,3 @@
-
 #include "erd_bridge_poll.h"
 
 #include "erd_bridge_common.h"
@@ -8,8 +7,6 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/application.h"
 #include "erd_cache.h"
-// This bridge does not perform broadcast discovery — that is the
-// responsibility of DeviceIdentityManager/AutodiscoveryManager.
 
 GEA_TAG(TAG) = "erd_bridge_poll";
 
@@ -19,20 +16,15 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
 static tiny_hsm_result_t state_failed(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data);
 static void send_poll_read_requests_bounded(erd_bridge_poll_t* self, uint32_t budget_ms);
 static bool send_cycle_reads(erd_bridge_poll_t* self);
-static constexpr uint32_t POLL_YIELD_MS = 50;          // per-batch time budget
-static constexpr uint32_t POLL_CYCLE_SEND_BUDGET_MS = 100;  // max time per send invocation
-static constexpr uint32_t POLL_CYCLE_RESUME_MS = 100;   // timer interval when send budget exceeded
+static constexpr uint32_t POLL_YIELD_MS = 50;
+static constexpr uint32_t POLL_CYCLE_SEND_BUDGET_MS = 100;
+static constexpr uint32_t POLL_CYCLE_RESUME_MS = 100;
 
-/* Default yield between send batches: hands control back to the ESPHome
- * main loop / IDLE task on the same core. */
 static void poll_default_yield(void)
 {
   esphome::delay(0);
 }
 
-/* Arm the polling timer for `ticks`.  Whether a timer is armed is encoded by
- * the cycle phase (idle/awaiting ⟹ interval timer, sending ⟹ resume timer),
- * not tracked separately here. */
 static void arm_polling_timer(erd_bridge_poll_t* self, tiny_timer_ticks_t ticks)
 {
   tiny_timer_start(
@@ -50,7 +42,6 @@ static void reset_lost_appliance_timer(erd_bridge_poll_t* self)
     });
 }
 
-/* Fixed-capacity polling list — deduplicates on (erd, address) pairs. */
 static void add_erd_to_polling_list(erd_bridge_poll_t* self, tiny_erd_t erd, uint8_t address)
 {
   for (uint16_t i = 0; i < self->polling_list_count; i++) {
@@ -66,37 +57,17 @@ static void add_erd_to_polling_list(erd_bridge_poll_t* self, tiny_erd_t erd, uin
   }
 }
 
-/* Reset the polling bridge's discovery state (erd_set and polling list).
- * Called from state_probe_list on re-entry after appliance lost so that
- * a new discovery phase always starts from a clean slate.
- *
- * Does NOT clear the shared erd_cache — that cache may be shared with the
- * subscription bridge.  Clearing it here would destroy subscription data
- * when the polling bridge re-discovers after appliance loss. */
 static void clear_discovery_state(erd_bridge_poll_t* self)
 {
   erd_set_clear(&self->erd_set);
   self->polling_list_count = 0;
 }
 
-/* Cycle-phase transition helper.  The phase machine is intentionally not
- * logged per transition: a steady-state cycle changes phase three times per
- * interval, which floods debug builds.  The cycle machine is observable at
- * startup through the "Entered steady-state polling" log and the
- * current_state/cycle_phase fields. */
 static void set_cycle_phase(erd_bridge_poll_t* self, poll_cycle_phase_t phase)
 {
   self->cycle_phase = phase;
 }
 
-/* Drive one round of budgeted cycle sends and arm the follow-up timer.
- * Used to start a cycle (from idle) and to resume or restart one (from
- * sending / awaiting_restart):
- *   - all reads queued within budget → phase awaiting, interval timer armed
- *   - budget exceeded → phase stays sending, resume timer armed
- * If the drive itself completes the cycle (queue-full drops count the ERD as
- * completed), the completion handler has already resolved the phase; the
- * interval timer is armed for the next cycle and the phase stays idle. */
 static void drive_cycle_sends(erd_bridge_poll_t* self)
 {
   bool all_sent = send_cycle_reads(self);
@@ -112,15 +83,6 @@ static void drive_cycle_sends(erd_bridge_poll_t* self)
   }
 }
 
-/* Cycle completion: record health/failure bookkeeping, then resolve the next
- * phase from the phase the cycle completed in:
- *   awaiting          — the interval timer is still armed; return to idle and
- *                       let it start the next cycle (respects the interval).
- *   awaiting_restart  — the interval elapsed mid-cycle; start the next cycle
- *                       immediately.
- *   sending           — queue-full drops completed the cycle mid-send; return
- *                       to idle (the drive tail arms the interval timer).
- * Phase idle is unreachable here: a cycle completes only while in flight. */
 static void on_polling_cycle_complete(erd_bridge_poll_t* self)
 {
   uint32_t now = self->get_time_ms();
@@ -152,13 +114,6 @@ static void on_polling_cycle_complete(erd_bridge_poll_t* self)
   }
 }
 
-/* Send the next discovery-phase read request.  This operates on
- * appliance_erd_list / appliance_erd_list_count — NOT on erd_polling_list.
- * It is used by state_probe_list to advance one ERD at a time during
- * the probe phase.  For steady-state polling, see send_next_poll_read_request.
- *
- * Uses post-increment: erd_index points to the current ERD before the call,
- * and is advanced after the read is queued.  Initialized to 0 on entry. */
 static bool send_next_read_request(erd_bridge_poll_t* self)
 {
   reset_lost_appliance_timer(self);
@@ -185,9 +140,6 @@ static void send_next_poll_read_request(erd_bridge_poll_t* self)
     uint32_t elapsed = self->get_time_ms() - t0;
     self->erd_index++;
     if (!queued) {
-      /* Queue full — the read was silently dropped. Count it as completed
-       * (failed) so the cycle can advance. The ERD will be retried on the
-       * next cycle. */
       self->cycle_completed_count++;
       if (self->cycle_completed_count >= self->polling_list_count) {
         on_polling_cycle_complete(self);
@@ -225,25 +177,12 @@ static void send_poll_read_requests_bounded(erd_bridge_poll_t* self, uint32_t bu
   while (self->erd_index < self->polling_list_count) {
     send_next_poll_read_request(self);
     count++;
-    // Check time budget every 10 ERDs to minimize overhead on small lists.
     if (count % 10 == 0 && (self->get_time_ms() - start) >= budget_ms) {
       break;
     }
   }
 }
 
-/* Send cycle read requests within a time budget.  Arms no timer itself —
- * drive_cycle_sends() arms the follow-up timer from the return value.  This
- * prevents a single blocking call from holding the main loop long enough to
- * trigger the ESP32 task watchdog timer.
- *
- * Phase: entry marks the cycle `sending`; when the loop exits with all reads
- * queued and the cycle still in flight, the phase becomes `awaiting`.  If the
- * drive itself completed the cycle (queue-full drops), the completion handler
- * already resolved the phase and this tail re-asserts idle.
- *
- * Returns true if all reads were sent within budget, false if the budget
- * was exceeded and a resume timer should be armed. */
 static bool send_cycle_reads(erd_bridge_poll_t* self)
 {
   set_cycle_phase(self, poll_cycle_phase_sending);
@@ -256,8 +195,6 @@ static bool send_cycle_reads(erd_bridge_poll_t* self)
     }
   }
   if (self->cycle_completed_count >= self->polling_list_count) {
-    /* The drive completed the cycle (queue-full drops, or an empty polling
-     * list); the cycle is over — wait for the interval timer. */
     set_cycle_phase(self, poll_cycle_phase_idle);
   } else {
     set_cycle_phase(self, poll_cycle_phase_awaiting);
@@ -289,14 +226,8 @@ static tiny_hsm_result_t handle_discovery_list_signals(tiny_hsm_t* hsm, tiny_hsm
   switch (signal) {
     case signal_read_completed: {
       tiny_erd_t erd = args->read_completed.erd;
-      // The client includes the source board address in every completion.
-      // Do not infer it from the ERD list: an ERD ID can exist on more than
-      // one board, in which case a list lookup would select the first match.
       uint8_t addr = args->address;
       add_erd_to_polling_list(self, erd, addr);
-      // Store the physical board address in the cache. The publisher maps the
-      // primary board's address back to the legacy (no-prefix) MQTT topic, so
-      // topics remain backward compatible while diagnostics show the real address.
       erd_cache_update(self->erd_cache, erd, addr,
               reinterpret_cast<const uint8_t*>(args->read_completed.data),
               args->read_completed.data_size);
@@ -307,9 +238,6 @@ static tiny_hsm_result_t handle_discovery_list_signals(tiny_hsm_t* hsm, tiny_hsm
     }
 
     case signal_read_failed:
-      // Both not_supported and retries_exhausted are definitive — the GEA client
-      // has finished its work.  Exclude the ERD from the polling list by simply
-      // not adding it.
       if (!send_next_read_request(self)) {
         tiny_hsm_transition(hsm, state_polling);
       }
@@ -327,10 +255,6 @@ static tiny_hsm_result_t poll_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signa
 
   switch (signal) {
     case signal_appliance_lost:
-      // Restore the known host address and re-probe from scratch.
-      // The caller always initializes the bridge with a real host address
-      // (from autodiscovery); broadcast discovery is the responsibility of
-      // DeviceIdentityManager/AutodiscoveryManager, not the polling bridge.
       self->erd_host_address = self->known_host_address;
       tiny_hsm_transition(hsm, state_probe_list);
       break;
@@ -352,7 +276,6 @@ static tiny_hsm_result_t state_probe_list(tiny_hsm_t* hsm, tiny_hsm_signal_t sig
     self->appliance_erd_list = self->probe_list;
     self->appliance_erd_list_count = self->probe_list_count;
     self->erd_index = 0;
-    // Clear discovery state on re-entry after appliance lost.
     if (self->polling_list_count > 0) {
       clear_discovery_state(self);
     }
@@ -366,9 +289,6 @@ static tiny_hsm_result_t state_probe_list(tiny_hsm_t* hsm, tiny_hsm_signal_t sig
     return tiny_hsm_result_signal_consumed;
   }
 
-  // Phase 2 verification: any failure — whether explicitly rejected
-  // (not_supported) or timed out after all retries (retries_exhausted) —
-  // permanently excludes the ERD from the Phase 3 polling list.
   if (signal == signal_read_failed) {
     erd_set_insert(&self->erd_set, args->read_failed.erd);
     if (args->read_failed.reason == tiny_gea3_erd_client_read_failure_reason_retries_exhausted) {
@@ -398,44 +318,25 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       self->current_state = polling_state_polling;
       ESP_LOGI(TAG, "Entered steady-state polling: %u ERDs, interval %lu ms",
                self->polling_list_count, (unsigned long)self->polling_interval_ms);
-      // Notify startup HSM that discovery is complete.  Safe to call
-      // synchronously from inside the polling HSM's state entry because:
-      // 1. The callback sends a signal to the *startup* HSM (a different
-      //    instance), not the polling HSM.
-      // 2. startup_state_subscription_watch entry gates custom ERD polling
-      //    on the subscription quiet window, which has not elapsed yet, so
-      //    maybe_start_custom_erd_polling() returns early without touching
-      //    the polling bridge.
-      // 3. startup_state_running entry only logs.
-      // Invariant: the callback must never trigger a path that sends a
-      // signal back to the polling HSM while this entry handler runs.
       if (self->on_discovery_complete != nullptr) {
         self->on_discovery_complete(self->on_discovery_complete_context);
       }
       break;
     case signal_polling_timer_expired: {
-      // The polling timer doubles as the cycle-start timer (idle), the resume
-      // timer (sending), and the in-flight wait timer (awaiting) — the phase
-      // says which role it is playing here.
       switch (self->cycle_phase) {
         case poll_cycle_phase_idle:
-          // Interval elapsed with no cycle in flight — start the next cycle.
           self->erd_index = 0;
           self->cycle_completed_count = 0;
           self->cycle_start_ms = self->get_time_ms();
           drive_cycle_sends(self);
           break;
         case poll_cycle_phase_sending:
-          // Resume timer fired — continue sending where the last pass stopped.
           drive_cycle_sends(self);
           break;
         case poll_cycle_phase_awaiting:
-          // Interval elapsed mid-cycle: let the in-flight cycle finish, then
-          // restart immediately (the completion handler drives it).
           set_cycle_phase(self, poll_cycle_phase_awaiting_restart);
           break;
         case poll_cycle_phase_awaiting_restart:
-          // Unreachable: no timer is armed in this phase.
           break;
       }
       break;
@@ -447,8 +348,6 @@ static tiny_hsm_result_t state_polling(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       const uint8_t*  erd_data  = reinterpret_cast<const uint8_t*>(args->read_completed.data);
       uint8_t         data_size = args->read_completed.data_size;
 
-      // Preserve the address reported by the client. Matching only on ERD ID
-      // mixes data when the same ID was successfully polled on two boards.
       uint8_t addr = args->address;
 
       if (erd_set_contains(&self->erd_set, erd)) {
@@ -528,9 +427,6 @@ static const tiny_hsm_configuration_t poll_hsm_configuration = {
   .state_count = element_count(poll_hsm_state_descriptors)
 };
 
-// Shared initialization helper.  Sets self->erd_host_address and
-// self->probe_list BEFORE calling tiny_hsm_init(), so that
-// state_probe_list entry can probe at the correct address.
 static void erd_bridge_poll_init_impl(
   erd_bridge_poll_t*    self,
   tiny_timer_group_t*       timer_group,
@@ -544,11 +440,7 @@ static void erd_bridge_poll_init_impl(
   self->timer_group            = timer_group;
   self->erd_client             = erd_client;
   self->polling_interval_ms    = polling_interval_ms;
-  // Must be set before tiny_hsm_init() so state_probe_list entry
-  // can probe at the correct address.
   self->erd_host_address       = initial_host_address;
-  // Store the pre-known address so that signal_appliance_lost can restore it
-  // after a transient read failure.
   self->known_host_address     = initial_host_address;
   self->probe_list             = probe_list;
   self->probe_list_count       = probe_list_count;
@@ -560,18 +452,10 @@ static void erd_bridge_poll_init_impl(
   self->cycle_count                 = 0;
   self->polling_failure_count     = 0;
   self->cycle_has_failure         = false;
-  /* Time/yield defaults are installed unconditionally — unlike the
-   * on_discovery_complete preservation below.  Nothing on the hardware path
-   * pre-sets them, and erd_bridge_poll_t is a plain (garbage-initialized)
-   * member of GeappliancesBridge, so a preserve-if-non-NULL check here would
-   * read garbage and skip the default install.  Tests inject via the
-   * setters AFTER init. */
   self->get_time_ms = esphome::millis;
   self->yield_fn = poll_default_yield;
   erd_set_init(&self->erd_set);
   self->erd_cache = cache;
-  // Preserve a pre-set callback (e.g., from the bridge wiring it before
-  // init to avoid a race when discovery completes synchronously).
   if (self->on_discovery_complete == nullptr) {
     self->on_discovery_complete_context = nullptr;
   }
@@ -614,7 +498,6 @@ void erd_bridge_poll_set_time_fn(
   erd_bridge_poll_t* self,
   uint32_t (*get_time_ms)(void))
 {
-  /* NULL restores the init default (esphome::millis). */
   self->get_time_ms = get_time_ms ? get_time_ms : esphome::millis;
 }
 
@@ -622,33 +505,24 @@ void erd_bridge_poll_set_yield_fn(
   erd_bridge_poll_t* self,
   void (*yield_fn)(void))
 {
-  /* NULL restores the init default (the delay(0) wrapper). */
   self->yield_fn = yield_fn ? yield_fn : poll_default_yield;
 }
 
 void erd_bridge_poll_destroy(erd_bridge_poll_t* self)
 {
-  /* Guard against destroy() being called on a never-initialized struct (e.g.
-   * in test teardowns that always call both bridge and polling destroy). */
   if (!self->timer_group) {
     return;
   }
 
-  /* Stop all active timers so they cannot fire after the bridge is torn down.
-   * tiny_timer_stop() is idempotent: safe to call even if a timer is not active. */
   tiny_timer_stop(self->timer_group, &self->appliance_lost_timer);
   tiny_timer_stop(self->timer_group, &self->polling_timer);
 
-  /* Remove event subscription before freeing heap state.
-   * Guard against partial init where erd_client may be null. */
   if (self->erd_client) {
     tiny_event_unsubscribe(
       tiny_gea3_erd_client_on_activity(self->erd_client),
       &self->erd_client_activity_subscription);
   }
 
-  /* erd_set and erd_polling_list are fixed arrays embedded in the struct —
-   * no heap cleanup needed. */
   self->current_state = polling_state_none;
   self->cycle_phase = poll_cycle_phase_idle;
 }

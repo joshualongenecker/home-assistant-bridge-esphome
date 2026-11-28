@@ -1,4 +1,3 @@
-
 #include "erd_cache_mqtt_publisher.h"
 #include "erd_cache.h"
 #include "erd_bridge_common.h"
@@ -17,21 +16,8 @@
 GEA_TAG(PUBLISHER_TAG) = "erd_cache_mqtt_publisher";
 #include "esp_task_wdt.h"
 
-/* After a publish is dropped (the ESPHome MQTT backend's 30-slot outbound
- * queue is full), wait this long before the next attempt.  Retrying at
- * main-loop rate against a full queue only churns the backend's drop counter
- * and flaps the MQTT component warning flag; the cache holds the latest value
- * per ERD, so the retry delivers whatever is current once the queue drains. */
 static const uint32_t PUBLISH_RETRY_BACKOFF_MS = 250;
 
-/* Backlog pacing.  The ESPHome MQTT backend queue holds 30 messages and exposes
- * no depth accessor, so overflow can only be observed as a failed publish — which
- * PUBLISH_RETRY_BACKOFF_MS already handles reactively.  To keep the queue from
- * filling in the first place, the drain is paced while the dirty backlog is large
- * enough to threaten it: boot's first round and the post-reconnect drain both mark
- * every cached ERD dirty at once.  Because the cache coalesces (the snapshot always
- * copies the newest bytes), a slower drain delivers fresher values rather than
- * fewer of them, so pacing costs only convergence time after boot. */
 static const uint16_t PUBLISH_PACE_BACKLOG_THRESHOLD = 10;
 static const uint32_t PUBLISH_PACE_INTERVAL_MS = 100;
 
@@ -45,18 +31,10 @@ static void mqtt_publisher_task(void* arg)
   }
 
   while (self->task_running) {
-    // Block until work is signalled. No timeout: signal_work() paces its own give
-    // while the backlog is large, and stop() gives the semaphore directly so the
-    // task always wakes to shut down.
     if (xSemaphoreTake(self->work_semaphore, portMAX_DELAY) != pdTRUE) {
       continue;
     }
 
-    // Acquire the state mutex to safely read shared state (mqtt_connected,
-    // cache pointers, paused). These fields can be modified by the main loop
-    // during preemptive context switches. Cache access is separately protected
-    // by the cache's own mutex (erd_cache_t.lock) inside the snapshot and mark
-    // functions, so the state mutex is only held for this short read.
     bool connected = false;
     bool has_deps = false;
     bool paused = false;
@@ -69,7 +47,6 @@ static void mqtt_publisher_task(void* arg)
         xSemaphoreGive(self->state_mutex);
       }
     } else {
-      // Fallback when mutex creation failed — read without protection.
       connected = self->mqtt_connected;
       paused = self->paused;
       has_deps = self->cache != NULL && self->mqtt_client != NULL &&
@@ -83,7 +60,6 @@ static void mqtt_publisher_task(void* arg)
     erd_cache_mqtt_publisher_publish_one(self);
   }
 
-  // Signal completion before deleting the task (clean shutdown handshake).
   if (self->done_semaphore) {
     xSemaphoreGive(self->done_semaphore);
   }
@@ -141,9 +117,6 @@ void erd_cache_mqtt_publisher_init(
     mqtt_client_on_mqtt_connect(self->mqtt_client),
     &self->mqtt_connect_subscription);
 
-  /* If MQTT is already connected when we register, set the flag so the
-   * publisher knows it can publish.  Don't call on_connected() — that
-   * logs "MQTT reconnected" which is misleading at init time. */
   if (mqtt_client_is_connected(self->mqtt_client)) {
     self->mqtt_connected = true;
   }
@@ -188,19 +161,11 @@ void erd_cache_mqtt_publisher_start(erd_cache_mqtt_publisher_t* self)
   if (self->task_handle != NULL) return;
   if (self->work_semaphore == NULL) return;
   self->task_running = true;
-  /* Pin the publisher task to Core 0 (dual-core) with priority 1 (below the
-   * main loop). The cache is now protected by its own mutex (erd_cache_t.lock),
-   * so the publisher no longer needs to share a core with the main loop for
-   * thread safety.  Core 0 keeps the publisher off ESPHome's loop core (Core 1)
-   * so it cannot starve the loopTask watchdog, and priority 1 ensures the main
-   * loop (higher priority) always preempts the publisher when it needs the CPU.
-   * On single-core chips (C3, C6) the coreID is ignored and the mutex provides
-   * the safety. */
 #if CONFIG_FREERTOS_UNICORE
   self->task_handle = xTaskCreateStatic(
       mqtt_publisher_task,
       "erd_mqtt_pub",
-      ERD_MQTT_PUBLISHER_TASK_STACK_BYTES / sizeof(StackType_t),  /* words, matching task_stack[] size */
+      ERD_MQTT_PUBLISHER_TASK_STACK_BYTES / sizeof(StackType_t),
       self,
       1,
       self->task_stack,
@@ -209,12 +174,12 @@ void erd_cache_mqtt_publisher_start(erd_cache_mqtt_publisher_t* self)
   self->task_handle = xTaskCreateStaticPinnedToCore(
       mqtt_publisher_task,
       "erd_mqtt_pub",
-      ERD_MQTT_PUBLISHER_TASK_STACK_BYTES / sizeof(StackType_t),  /* words, matching task_stack[] size */
+      ERD_MQTT_PUBLISHER_TASK_STACK_BYTES / sizeof(StackType_t),
       self,
       1,
       self->task_stack,
       &self->task_tcb,
-      0);  /* Core 0 — off ESPHome's loop core (Core 1) to avoid starving the watchdog */
+      0);
 #endif
   if (self->task_handle == NULL) {
     ESP_LOGE(PUBLISHER_TAG, "Failed to create MQTT publisher task");
@@ -225,21 +190,15 @@ void erd_cache_mqtt_publisher_start(erd_cache_mqtt_publisher_t* self)
 void erd_cache_mqtt_publisher_stop(erd_cache_mqtt_publisher_t* self)
 {
   if (!self->task_running) return;
-  /* Signal the semaphore first to wake the task, then set
-   * task_running=false so the task sees the flag on wake. */
   if (self->work_semaphore != NULL) {
     xSemaphoreGive(self->work_semaphore);
   }
   self->task_running = false;
-  // Wait for the task to signal completion via done_semaphore.
-  // The task gives this semaphore before calling vTaskDelete, so we
-  // know it has entered the termination path.
   if (self->done_semaphore != NULL) {
     if (xSemaphoreTake(self->done_semaphore, pdMS_TO_TICKS(1000)) != pdTRUE) {
       ESP_LOGW(PUBLISHER_TAG, "MQTT publisher task did not signal done within 1 s");
     }
   } else {
-    // Fallback: poll with delay when done_semaphore creation failed.
     uint32_t start = esphome::millis();
     while (self->task_handle != NULL && esphome::millis() - start < 1000) {
       esp_task_wdt_reset();
@@ -250,13 +209,6 @@ void erd_cache_mqtt_publisher_stop(erd_cache_mqtt_publisher_t* self)
     }
   }
 
-  // After vTaskDelete() the task is on xTasksWaitingTermination.
-  // The idle task runs prvCheckTasksWaitingTermination to unlink the
-  // TCB's list items via uxListRemove().  For StaticTask_t the TCB
-  // memory is caller-owned so FreeRTOS doesn't free it, but it does
-  // access the TCB's list pointers during unlinking.  We MUST yield
-  // here so the idle task can finish before destroy() memsets the
-  // struct — which would zero those list pointers mid-uxListRemove.
   esp_task_wdt_reset();
   vTaskDelay(pdMS_TO_TICKS(100));
   self->task_handle = NULL;
@@ -268,31 +220,6 @@ void erd_cache_mqtt_publisher_signal_work(erd_cache_mqtt_publisher_t* self)
     return;
   }
 
-  /* Pace only while a large backlog is queued up (see the constants above).
-   * Below the threshold the task is woken every loop, so ordinary one-or-two-value
-   * changes keep their latency.  A zero last_work_signal_ms means "nothing has been
-   * paced yet", so the first wake is never suppressed: without that clause a
-   * backlog forming inside the first PUBLISH_PACE_INTERVAL_MS of uptime would be
-   * held back before the task has ever run.  Stamping a literal 0 would re-arm that
-   * bypass: get_time_ms() reads 0 during the first millisecond of uptime and again
-   * at every 2^32 ms (~49.7 day) wrap, so the bypass can come back long after boot.
-   * Every loop iteration sharing such a millisecond then wakes the task unpaced - a
-   * handful of extra wakes per boot and per wrap, closed again by the next paced
-   * wake, which stores a non-zero stamp.
-   *
-   * The elapsed test is UNSIGNED deliberately.  The publish task takes the work
-   * semaphore with portMAX_DELAY, so a window that still reads as open against an
-   * ancient stamp suppresses every wake forever - only a wake that passes refreshes
-   * the stamp, so nothing can expire it.  A signed (now - last) comparison goes
-   * negative for any idle gap above 2^31 ms (~24.9 days), which would take a bridge
-   * that idles 25 days with a small backlog and then sees a >10-entry backlog (a
-   * reconnect republish is enough) out of publishing ERDs until the millisecond
-   * counter rolls over.  Unsigned, the modulo difference is the true gap for any
-   * idle period under 2^32 ms.  False suppression then needs a stamp one OR MORE
-   * wraps plus <100 ms old - k wraps is reachable, because only a passing paced
-   * wake refreshes the stamp, so a bridge idling with the gate disengaged for
-   * ~99.4 days carries one across two wraps.  Either way it expires inside the
-   * window. */
   if (self->cache != NULL && self->get_time_ms != NULL &&
       erd_cache_get_dirty_count(self->cache) > PUBLISH_PACE_BACKLOG_THRESHOLD) {
     uint32_t now = self->get_time_ms();
@@ -317,20 +244,11 @@ bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self)
     return false;
   }
 
-  /* Backoff after a dropped publish (see PUBLISH_RETRY_BACKOFF_MS).  0 means no
-   * window is armed, and that is tested first: the rollover-safe signed diff
-   * reads now - 0 as negative once millis() passes 2^31, which would otherwise
-   * block every publish for the ~25 days until the counter wraps.  Within an
-   * armed window the signed diff handles the wrap correctly. */
   if (self->retry_backoff_until_ms != 0 &&
       (int32_t)(self->get_time_ms() - self->retry_backoff_until_ms) < 0) {
     return false;
   }
 
-  /* Publish one entry. The snapshot atomically copies the payload out of the
-   * arena under the cache lock, so the main loop cannot overwrite it during
-   * the slow MQTT publish. The task loop checks mqtt_connected/paused before
-   * calling; direct callers (tests) must set up state themselves. */
   uint8_t snap_data[ERD_CACHE_MAX_DATA_SIZE];
   erd_cache_entry_t* entry = NULL;
   tiny_erd_t snap_erd = 0;
@@ -341,8 +259,6 @@ bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self)
                                                     snap_data, &snap_size);
   bool published_ok = false;
   if (have_entry) {
-    /* The cache stores physical board addresses; the detected primary
-     * address maps onto the grammar's 0xFF primary sentinel. */
     int topic_len = erd_topic_format(self->task_topic, sizeof(self->task_topic),
                                      self->device_id,
                                      snap_addr == self->primary_board_address ? (uint8_t)ERD_TOPIC_PRIMARY : snap_addr,
@@ -368,10 +284,6 @@ bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self)
         published_ok = true;
         self->retry_backoff_until_ms = 0;
       } else {
-        /* Publish dropped (queue full or not connected) - re-set
-         * update_required so the entry is picked up on the next wake, and
-         * hold off further attempts until the backend queue has had a chance
-         * to drain. */
         erd_cache_mark_unpublished(self->cache, entry);
         self->retry_backoff_until_ms = t_publish + elapsed + PUBLISH_RETRY_BACKOFF_MS;
       }
@@ -380,12 +292,6 @@ bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self)
     }
   }
 
-  /* Update the publisher's own state under the state mutex (never held across
-   * the slow publish above) so this task and the main loop's readers
-   * (get_publish_rate, first_round_done, on_connected) see a consistent view.
-   * publish_index is intentionally left alone: it is the scan iterator advanced
-   * by the snapshot under the cache lock, and its only other writer is
-   * on_connected's reset-to-0 - a benign race (aligned uint16_t, idempotent). */
   if (self->state_mutex) {
     if (xSemaphoreTake(self->state_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
       if (published_ok) {
@@ -410,10 +316,6 @@ bool erd_cache_mqtt_publisher_publish_one(erd_cache_mqtt_publisher_t* self)
 
 void erd_cache_mqtt_publisher_on_connected(erd_cache_mqtt_publisher_t* self)
 {
-  /* Threshold for considering a disconnect "long enough" to warrant a full
-   * republish of all cached ERDs.  A 60 s gap covers broker restarts that
-   * lose their in-memory retained store before the next autosave flush,
-   * while avoiding unnecessary republishes on short network blips. */
   static const uint32_t RECONNECT_REPUBLISH_THRESHOLD_MS = 60000;
 
   bool was_long_disconnect = false;
@@ -424,10 +326,6 @@ void erd_cache_mqtt_publisher_on_connected(erd_cache_mqtt_publisher_t* self)
       self->mqtt_connected = true;
       self->first_round_done = false;
       disconnect_start = self->disconnect_start_ms;
-      /* Don't reset disconnect_start_ms here — it may be set from a prior
-       * disconnect and we want to measure the cumulative outage duration
-       * across multiple ESPHome reconnect attempts. Reset only on the final
-       * successful reconnect (when we know we're stable). */
       xSemaphoreGive(self->state_mutex);
     }
   } else {
@@ -436,7 +334,6 @@ void erd_cache_mqtt_publisher_on_connected(erd_cache_mqtt_publisher_t* self)
     disconnect_start = self->disconnect_start_ms;
   }
 
-  /* A fresh connection gets an immediate attempt, not a stale backoff. */
   self->retry_backoff_until_ms = 0;
 
   uint32_t now = self->get_time_ms ? self->get_time_ms() : 0;

@@ -1,8 +1,3 @@
-/*!
- * @file
- * @brief Stub for esphome/core/component.h — provides Component base class for tests.
- */
-
 #ifndef esphome_core_component_h
 #define esphome_core_component_h
 
@@ -24,6 +19,6 @@ namespace setup_priority {
   constexpr float DATA = 600.0f;
 }
 
-}  // namespace esphome
+}
 
-#endif  // esphome_core_component_h
+#endif

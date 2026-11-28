@@ -32,7 +32,6 @@ namespace geappliances_bridge {
 
 namespace {
 
-
 #if defined(USE_ESP_IDF_STUBS)
 
 void apply_mqtt_availability(void*, ha_discovery_manager_t*) {}
@@ -66,27 +65,15 @@ void feed_watchdog(void*) {}
 void reboot(void*) {}
 
 #else
-// NVS key for the persisted DiscoveryRecord ("disc").
 constexpr uint32_t kDiscoveryNvsKey = 0x64697363u;
-// ESPHome's own safe-mode counter; zeroing it marks the running firmware good.
 constexpr uint32_t kSafeModeRtcKey = 233825507UL;
-// NVS key for the discovery-abort reboot budget ("drab"). Separate from the
-// record and from ESPHome's safe-mode counter: those are firmware-validation
-// state, this counts discovery runs.
 constexpr uint32_t kAbortRebootNvsKey = 0x64726162u;
-// NVS key for the "a cleanup has not been republished yet" marker ("drpp").
-// A separate preference rather than a DiscoveryRecord field: a record field
-// would force kRecordVersion up, and a version bump makes every bridge clean
-// up and republish once at the next OTA. Same reasoning as kAbortRebootNvsKey.
 constexpr uint32_t kPublishPendingNvsKey = 0x64727070u;
 
 void apply_mqtt_availability(void*, ha_discovery_manager_t* manager) {
   auto mqtt_client = esphome::mqtt::global_mqtt_client;
   if (mqtt_client == nullptr) return;
   const auto& availability = mqtt_client->get_availability();
-  // Reuse ESPHome's own birth/LWT availability (default "<topic_prefix>/status")
-  // so HA marks appliance entities unavailable when the bridge drops offline.
-  // An empty topic (birth/will disabled) leaves availability off.
   ha_discovery_manager_set_availability(manager,
       availability.topic.c_str(),
       availability.payload_available.c_str(),
@@ -102,8 +89,6 @@ bool load_discovery_record(void*, DiscoveryLifecycleManager::DiscoveryRecord* ou
     return DiscoveryLifecycleManager::decode_record(
         reinterpret_cast<const uint8_t*>(&stored), sizeof(stored), out);
   }
-  // A record written by firmware with the version 4 layout: ESPHome won't load
-  // a blob of another size as the current struct, so read the old size.
   auto legacy = global_preferences->make_preference<DiscoveryLifecycleManager::DiscoveryRecordV4>(
       kDiscoveryNvsKey);
   DiscoveryLifecycleManager::DiscoveryRecordV4 old{};
@@ -124,8 +109,6 @@ void save_discovery_record(void*, const DiscoveryLifecycleManager::DiscoveryReco
 }
 
 void confirm_firmware(void*) {
-  // Always confirm the firmware is valid so a good OTA is not rolled back,
-  // regardless of the discovery outcome.
   uint32_t val = 0;
   ESPPreferenceObject rtc_pref =
       global_preferences->make_preference<uint32_t>(kSafeModeRtcKey, false);
@@ -170,10 +153,6 @@ bool write_publish_pending(void*, bool pending) {
   return true;
 }
 
-// MALLOC_CAP_DEFAULT is what the run's plain malloc() calls draw from. On the
-// fleet's targets (C3/C6/S3, no SPIRAM heap) this equals MALLOC_CAP_INTERNAL,
-// which ha_discovery_manager_start() logs; revisit if a PSRAM target ever runs
-// discovery.
 uint32_t read_largest_free_block(void*) {
   return static_cast<uint32_t>(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
 }
@@ -184,7 +163,7 @@ void reboot(void*) { esphome::App.safe_reboot(); }
 
 #endif
 
-}  // namespace
+}
 
 void DiscoveryLifecycleManager::init(
     ha_discovery_manager_t* ha_discovery_manager,
@@ -281,11 +260,6 @@ void DiscoveryLifecycleManager::set_phase_(Phase phase)
 bool DiscoveryLifecycleManager::claim_request_(Phase target, Trigger trigger,
                                                [[maybe_unused]] const char* request)
 {
-  // Accept only from Idle, atomically: trigger_discovery_refresh() can run
-  // off the main loop, so a plain check-then-act could let two triggers both
-  // pass the Idle check and overwrite each other's trigger. The claim lands
-  // in kPhaseClaimed first so loop() never observes a queued phase whose
-  // trigger_ is still stale; the release store publishes trigger_ with it.
   uint8_t expected = static_cast<uint8_t>(kPhaseIdle);
   if (!this->phase_.compare_exchange_strong(expected, static_cast<uint8_t>(kPhaseClaimed),
                                             std::memory_order_acq_rel,
@@ -304,7 +278,7 @@ bool DiscoveryLifecycleManager::decode_record(const uint8_t* blob, size_t size,
   if (blob == nullptr || out == nullptr) return false;
   if (size != sizeof(DiscoveryRecord) && size != kRecordV4Size) return false;
   DiscoveryRecord record{};
-  memcpy(&record, blob, size);  // v4 is a prefix; the newer fields stay 0
+  memcpy(&record, blob, size);
   *out = record;
   return true;
 }
@@ -353,9 +327,6 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
   }
   this->next_valid_erds_republishes_ = 0;
 
-  // Refresh the availability topic before hashing: the manager's buffers are
-  // only guaranteed populated at publish time, and the hash must reflect the
-  // current LWT topic so a topic_prefix/node-name change triggers a republish.
   this->hooks_.apply_mqtt_availability(this->hooks_.context, this->ha_discovery_manager_);
 
   DiscoveryRecord stored{};
@@ -387,26 +358,7 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
     return;
   }
 
-  // A cleanup that tore the topics down in an earlier boot and never got its
-  // republish leaves exactly this state: the stored record still matches every
-  // current input (it was written by the last successful publish), so all the
-  // comparisons below report "nothing changed" while the broker has no configs
-  // at all. The marker is the only surviving evidence of the teardown, so it
-  // forces a cleanup + republish (issue #203: a Discovery Refresh whose publish
-  // run died on the heap left a refrigerator with no entities until an operator
-  // pressed the button a second time).
   if (this->hooks_.read_publish_pending(this->hooks_.context)) {
-    // The retrigger must not defeat the abort budget's terminal state: the
-    // budget exists so a permanently failing run cannot reboot-loop, and with
-    // the marker set a spent budget would otherwise turn every boot into
-    // another cleanup + refused-run cycle (an NVS write and a broker pass
-    // each) forever. Hold instead. The change check runs once per boot, so
-    // this logs once; a manual Discovery Refresh is not budget-gated, and a
-    // successful publish clears the budget and the marker together. The hold
-    // also takes precedence over every change branch below it: with the marker
-    // set, a concurrent hash, device-id or version change is swallowed until
-    // the hold lifts -- the configs are already gone, so a second teardown
-    // could only lose more. Do not "fix" that ordering.
     if (this->hooks_.read_abort_reboot_count(this->hooks_.context) >= kMaxAbortReboots) {
       ESP_LOGW(TAG, "A previous boot removed the discovery configs without republishing, "
                     "but the discovery-abort reboot budget (%u) is spent; holding the "
@@ -420,7 +372,6 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
     return;
   }
 
-  // Older records have no compatible combined custom hash/config state.
   if (stored.version != kRecordVersion) {
     ESP_LOGI(TAG, "Discovery hash version changed; cleaning old topics");
     this->trigger_ota_cleanup();
@@ -435,7 +386,6 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
       (stored.appliance_api_parsing != this->appliance_api_parsing_);
   const bool filter_topics_changed =
       (stored.filter_config_topics != this->filter_config_topics_);
-  // Only a known fingerprint counts (see set_valid_erds_fingerprint())
   const bool valid_erds_changed =
       (this->valid_erds_fingerprint_ != 0 &&
        stored.valid_erds_fingerprint != this->valid_erds_fingerprint_);
@@ -452,15 +402,13 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
   }
 
   if (valid_erds_changed) {
-    // The only trigger read live from the appliance: bound it (see
-    // kMaxValidErdsRepublishes)
     if (stored.valid_erds_republishes >= kMaxValidErdsRepublishes) {
       ESP_LOGW(TAG, "Valid-ERD set changed again after %u republishes in a row; not republishing "
                     "(the appliance's feature bits may be read inconsistently). Press Discovery "
                     "Refresh to republish.",
                (unsigned) stored.valid_erds_republishes);
       if (stored.valid_erds_stable_checks != 0) {
-        stored.valid_erds_stable_checks = 0;  // the streak is broken
+        stored.valid_erds_stable_checks = 0;
         this->hooks_.save_discovery_record(this->hooks_.context, stored);
       }
       return;
@@ -471,8 +419,6 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
     return;
   }
 
-  // Nothing changed. Enough checks in a row with the fingerprint unchanged
-  // end a run of fingerprint-driven republishes.
   if (stored.valid_erds_republishes != 0 && this->valid_erds_fingerprint_ != 0) {
     stored.valid_erds_stable_checks++;
     if (stored.valid_erds_stable_checks >= kValidErdsStableChecksToReset) {
@@ -484,17 +430,9 @@ void DiscoveryLifecycleManager::check_discovery_changes(const char* current_devi
 }
 
 void DiscoveryLifecycleManager::begin_cleanup_() {
-  // Unlike the automatic initial publish, an explicit cleanup trigger (an OTA
-  // version change or the Discovery Refresh button) intentionally proceeds
-  // even when generate_device_config_ is off: stale topics from an earlier
-  // firmware still need removing.
   if (!is_ready()) {
     return;
   }
-  // Allocate the cleanup module's per-run topic queue before anything is
-  // committed. A cleanup that cannot track the topics it removes must not
-  // start, and refusing here changes neither NVS nor the broker, so the next
-  // boot simply tries again.
   ha_discovery_cleanup_configure(&this->ha_discovery_manager_->cleanup,
       this->device_identity_manager_->get_device_id(),
       &this->mqtt_client_adapter_->interface, this->get_time_ms_);
@@ -506,15 +444,7 @@ void DiscoveryLifecycleManager::begin_cleanup_() {
     return;
   }
 
-  // Record the intent before removing anything. The point of no return for
-  // Home Assistant's retained configs is the first removal publish, which only
-  // happens once the phase is kPhaseCleaning, so arming the marker after the
-  // allocation above is still ahead of every teardown; if the marker cannot be
-  // written, nothing has been removed and the queue allocated above is
-  // released again.
   const bool already_pending = this->hooks_.read_publish_pending(this->hooks_.context);
-  // Skip the write when the marker is already set: a held or looping state must
-  // not write NVS on every pass.
   if (!already_pending &&
       !this->hooks_.write_publish_pending(this->hooks_.context, true)) {
     ESP_LOGE(TAG, "Discovery cleanup refused: the pending-publish marker could not be "
@@ -535,9 +465,6 @@ void DiscoveryLifecycleManager::begin_cleanup_() {
   this->cleanup_completed_ = false;
   this->cleanup_removed_ = 0;
   this->phase_start_ms_ = this->get_time_ms_();
-  // Idle timeout: measures silence from phase entry until the module removes
-  // its first topic. The snapshot is seeded from the module instead of assumed
-  // zero, so a re-run can never inherit a stale count.
   this->progress_ms_ = this->phase_start_ms_;
   this->progress_snapshot_ =
     ha_discovery_cleanup_total_removed(&this->ha_discovery_manager_->cleanup);
@@ -570,9 +497,6 @@ void DiscoveryLifecycleManager::begin_publish_() {
     ESP_LOGE(TAG, "Not starting the discovery publish run: largest free block %" PRIu32
                   " B, run needs %" PRIu32 " B; rebooting to recover the heap",
              largest_block, needed);
-    // Same contract as the other abort paths: the firmware is confirmed
-    // whatever discovery does, so a good OTA is not rolled back because a run
-    // was refused.
     this->hooks_.confirm_firmware(this->hooks_.context);
     this->abort_publish_run_();
     return;
@@ -592,8 +516,6 @@ void DiscoveryLifecycleManager::begin_publish_() {
   this->hooks_.apply_mqtt_availability(this->hooks_.context, this->ha_discovery_manager_);
   ha_discovery_manager_start(this->ha_discovery_manager_);
   this->phase_start_ms_ = this->get_time_ms_();
-  // Idle timeout: measures silence from phase entry until the first entity is
-  // published. Seeded from the run, which init() above just zeroed.
   this->progress_ms_ = this->phase_start_ms_;
   this->progress_snapshot_ =
     ha_discovery_manager_total_published(this->ha_discovery_manager_);
@@ -601,25 +523,12 @@ void DiscoveryLifecycleManager::begin_publish_() {
 }
 
 void DiscoveryLifecycleManager::finish_publish_() {
-  // A discovery run ends in either COMPLETE or FAILED; is_processing() is
-  // false for both, so branch on the actual state. A FAILED run (e.g. a
-  // buffer-allocation or decompression error) must not be recorded as a
-  // successful publish, or the next boot's change check sees a matching
-  // hash and never retries.
   const bool discovery_failed =
       ha_discovery_manager_get_state(this->ha_discovery_manager_) == ha_discovery_state_failed;
 
   this->hooks_.confirm_firmware(this->hooks_.context);
 
   if (discovery_failed) {
-    // abort_publish_run_() releases the discovery allocations (the ~52 KB of
-    // run buffers plus tinfl state), clears run state and decides whether to
-    // reboot. It never saves the record: an absent or stale record is what
-    // makes check_discovery_changes() re-trigger discovery on the next boot.
-    // The record alone is NOT enough for a run that followed a cleanup -- the
-    // record from the previous successful publish is still stored and still
-    // matches, so the change check would report "nothing changed" over a broker
-    // with no configs. The marker armed in begin_cleanup_() covers that case.
     this->abort_publish_run_();
     ESP_LOGE(TAG, "HA discovery failed; not saving discovery state, will retry on next boot");
     return;
@@ -633,16 +542,9 @@ void DiscoveryLifecycleManager::finish_publish_() {
       : (this->trigger_ == kTriggerDiscoveryRefresh
              ? "Refresh"
              : (this->trigger_ == kTriggerPendingRepublish ? "Pending" : "OTA"));
-  // A Discovery Refresh run ends any run of fingerprint-driven republishes.
-  // Decided from trigger_ (published by the claim's release store), not by
-  // the refresh trigger writing the count: that may run on another task.
   const bool refresh_run = this->trigger_ == kTriggerDiscoveryRefresh;
   this->trigger_ = kTriggerNone;
 
-  // How many configs the republish put back against how many the cleanup took
-  // down. The cleanup removes every retained config under the device, i.e. the
-  // previous run's set, so a shortfall is entities Home Assistant is about to
-  // delete -- the loss in issue #212 was visible only to an external monitor.
   if (this->cleanup_completed_) {
     [[maybe_unused]] const uint32_t published =
         ha_discovery_manager_total_published(this->ha_discovery_manager_);
@@ -675,18 +577,11 @@ void DiscoveryLifecycleManager::finish_publish_() {
   this->next_valid_erds_republishes_ = 0;
   this->hooks_.save_discovery_record(this->hooks_.context, record);
 
-  // The teardown has been republished, so the marker is no longer needed.
-  // Clearing it after the record is saved means a reset between the two costs
-  // one extra republish on the next boot; clearing it before would risk a boot
-  // with no configs and no retry.
   if (!this->hooks_.write_publish_pending(this->hooks_.context, false)) {
     ESP_LOGW(TAG, "Could not clear the pending-publish marker; the next boot will republish "
                   "discovery once more");
   }
 
-  // The reboot below pays for whatever the run did to the heap, so the abort
-  // budget is spent for a different reason now; clearing it gives a later
-  // transient failure its full set of attempts.
   if (this->hooks_.read_abort_reboot_count(this->hooks_.context) != 0) {
     this->hooks_.write_abort_reboot_count(this->hooks_.context, 0);
   }
@@ -723,8 +618,6 @@ void DiscoveryLifecycleManager::abort_publish_run_() {
   }
   if (!this->hooks_.write_abort_reboot_count(this->hooks_.context,
                                              static_cast<uint8_t>(armed + 1))) {
-    // Rebooting without remembering that we rebooted is an unbounded retry
-    // loop with nothing to stop it, so an unwritable counter stops recovery.
     ESP_LOGE(TAG, "HA discovery aborted but the reboot count could not be stored; not rebooting");
     this->set_phase_(kPhaseIdle);
     return;
@@ -742,8 +635,6 @@ void DiscoveryLifecycleManager::loop() {
       return;
 
     case kPhaseClaimed:
-      // A trigger is between the claim and publishing its queued phase; the
-      // next iteration will see QueuedInitial/QueuedCleanup.
       return;
 
     case kPhaseQueuedInitial:
@@ -759,11 +650,6 @@ void DiscoveryLifecycleManager::loop() {
       return;
 
     case kPhaseCleaning: {
-      // Idle timeout on topics removed: a congested broker makes removal
-      // publishes drop and retry through the cleanup module's backoff, one
-      // topic per main-loop iteration, so a large cleanup can exceed any fixed
-      // entry-based bound while still working. Only a run that stops removing
-      // is wedged (e.g. the broker connection dropped mid-run).
       const uint32_t removed =
         ha_discovery_cleanup_total_removed(&this->ha_discovery_manager_->cleanup);
       if (removed != this->progress_snapshot_) {
@@ -771,9 +657,6 @@ void DiscoveryLifecycleManager::loop() {
         this->progress_ms_ = this->get_time_ms_();
       }
       if (this->get_time_ms_() - this->progress_ms_ >= kPhaseTimeoutMs) {
-        // Aborting is the only way the machine can accept another request in
-        // this boot; the record was never saved, so the next boot's change
-        // check retries too.
         ESP_LOGE(TAG, "HA discovery cleanup made no removal progress for %" PRIu32
                  " ms; aborting. Discovery Refresh or a reboot will retry.",
                  kPhaseTimeoutMs);
@@ -787,8 +670,6 @@ void DiscoveryLifecycleManager::loop() {
         return;
       }
       ESP_LOGI(TAG, "HA discovery cleanup complete, publishing fresh discovery...");
-      // Kept for finish_publish_(): begin_publish_() re-inits the manager,
-      // which zeroes the cleanup module's count.
       this->cleanup_removed_ =
         ha_discovery_cleanup_total_removed(&this->ha_discovery_manager_->cleanup);
       this->cleanup_completed_ = true;
@@ -799,10 +680,6 @@ void DiscoveryLifecycleManager::loop() {
 
     case kPhasePublishing:
       if (ha_discovery_manager_is_processing(this->ha_discovery_manager_)) {
-        // Idle timeout, not a wall-clock bound on the run: a congested broker
-        // makes entities drop and retry through the manager's publish backoff,
-        // and the largest runs can exceed any fixed entry-based bound while
-        // still publishing. Only a run that stops publishing is wedged.
         const uint32_t published =
           ha_discovery_manager_total_published(this->ha_discovery_manager_);
         if (published != this->progress_snapshot_) {
@@ -813,9 +690,6 @@ void DiscoveryLifecycleManager::loop() {
           ESP_LOGE(TAG, "HA discovery publish made no progress for %" PRIu32
                    " ms; aborting. Discovery Refresh or a reboot will retry.",
                    kPhaseTimeoutMs);
-          // Same contract as the failed-run path: the firmware is confirmed
-          // regardless of the discovery outcome, the run's allocations are
-          // released, and no record is saved so the next boot retries.
           this->hooks_.confirm_firmware(this->hooks_.context);
           this->abort_publish_run_();
           return;
@@ -840,5 +714,5 @@ void DiscoveryLifecycleManager::loop() {
   }
 }
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}

@@ -1,4 +1,3 @@
-
 #pragma once
 #include "esphome/components/mqtt/mqtt_client.h"
 
@@ -13,10 +12,7 @@ typedef struct {
   tiny_event_t on_write_request_event;
   tiny_event_t on_mqtt_disconnect_event;
   tiny_event_t on_mqtt_connect_event;
-  // Tracked write topic for unsubscribe on destroy.
   char write_topic_[128];
-  // Set by init(), cleared by destroy(): the bridge's initialize/teardown
-  // guard, replacing the bridge-side mqtt_client_adapter_initialized_ flag.
   bool initialized;
 } esphome_mqtt_client_adapter_t;
 

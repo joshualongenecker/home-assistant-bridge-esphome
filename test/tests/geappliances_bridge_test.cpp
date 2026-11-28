@@ -41,8 +41,6 @@ TEST_GROUP(geappliances_bridge)
 TEST(geappliances_bridge, set_mode_poll)
 {
   bridge.set_mode(BRIDGE_MODE_POLL);
-  // Verify via IBridgeServices interface (get_mode is protected in class but
-  // public in IBridgeServices — access through the interface pointer)
   IBridgeServices* services = &bridge;
   CHECK_EQUAL(BRIDGE_MODE_POLL, services->get_mode());
 }
@@ -111,7 +109,6 @@ TEST(geappliances_bridge, add_custom_erd_increments_count)
 
 TEST(geappliances_bridge, add_custom_erd_at_capacity)
 {
-  // Fill to exactly CUSTOM_ERDS_MAX (64).
   for (uint16_t i = 0; i < TEST_CUSTOM_ERDS_MAX; i++) {
     bridge.add_custom_erd(static_cast<tiny_erd_t>(i));
   }
@@ -188,7 +185,6 @@ TEST(geappliances_bridge, set_sensor_null)
   bridge.set_erd_cache_updates_sensor(nullptr);
   bridge.set_mqtt_publish_rate_sensor(nullptr);
 }
-
 
 TEST(geappliances_bridge, is_bridge_initialized_default_false)
 {

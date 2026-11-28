@@ -63,8 +63,6 @@ TEST(esphome_mqtt_client_adapter, init_sets_api_pointer)
   CHECK(adapter.interface.api != nullptr);
 }
 
-
-
 /* ------------------------------------------------------------------ */
 /* is_connected                                                         */
 /* ------------------------------------------------------------------ */
@@ -152,7 +150,6 @@ TEST(esphome_mqtt_client_adapter, update_erd_write_result_with_no_mqtt_client_is
 TEST(esphome_mqtt_client_adapter, destroy_frees_resources)
 {
   init_adapter();
-  /* destroy happens in teardown */
 }
 
 /* ------------------------------------------------------------------ */
@@ -163,21 +160,18 @@ TEST(esphome_mqtt_client_adapter, notify_connected_is_noop)
 {
   init_adapter();
   esphome_mqtt_client_adapter_notify_connected(&adapter);
-  // Should not crash
 }
 
 TEST(esphome_mqtt_client_adapter, notify_disconnected_is_noop)
 {
   init_adapter();
   esphome_mqtt_client_adapter_notify_disconnected(&adapter);
-  // Should not crash
 }
 
 TEST(esphome_mqtt_client_adapter, subscribe_write_topic_is_noop)
 {
   init_adapter();
   esphome_mqtt_client_adapter_subscribe_write_topic(&adapter);
-  // Should not crash
 }
 
 /* ------------------------------------------------------------------ */

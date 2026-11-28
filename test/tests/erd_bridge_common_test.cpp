@@ -119,7 +119,7 @@ TEST(BoardTally, formatting_never_writes_past_the_supplied_buffer) {
 TEST(BoardTally, a_zero_length_buffer_writes_nothing) {
   board_tally_add(&tally, PROBE_ENTRY_DEFAULT_ADDRESS);
   LONGS_EQUAL(0, board_tally_format(&tally, buf, 0));
-  CHECK(buf[0] == (char) 0xAA);  // untouched
+  CHECK(buf[0] == (char) 0xAA);
 }
 
 /* The one case the format loop cannot reach: it needs room for a character plus a
@@ -158,7 +158,7 @@ TEST(BoardTally, the_untracked_tail_truncates_inside_the_buffer) {
   board_tally_add(&tally, 0xC1);
   board_tally_add(&tally, 0xC2);
   board_tally_add(&tally, 0xC3);
-  board_tally_add(&tally, 0xC4);  // fifth board -> untracked
+  board_tally_add(&tally, 0xC4);
 
   char small[32];
   memset(small, 0xAA, sizeof(small));
@@ -173,7 +173,7 @@ TEST(BoardTally, the_untracked_tail_truncates_inside_the_buffer) {
  * nothing, so the wording and the suppression rules are asserted on the rendered
  * string. */
 
-static polled_erds_state_t s_state;  // storage so the helper can hand back a pointer
+static polled_erds_state_t s_state;
 
 static const polled_erds_state_t* make_state(bool polling_initialized,
                                              uint16_t custom_count, uint16_t unseen_count) {
@@ -235,7 +235,7 @@ TEST(BoardTally, summary_truncates_inside_the_buffer) {
   memset(small, 0xAA, sizeof(small));
   const int n = board_polled_summary_format(make_state(true, 0, 0), polled, 6,
                                             small, sizeof(small));
-  LONGS_EQUAL((long) sizeof(small) - 1, n);  // stored length, not the would-be length
+  LONGS_EQUAL((long) sizeof(small) - 1, n);
   CHECK(small[sizeof(small) - 1] == '\0');
   STRNCMP_EQUAL("Polled ERDs: 6 (0xC0 2,", small, 23);
 }
@@ -249,7 +249,7 @@ TEST(BoardTally, summary_reports_the_stored_length_for_a_truncated_reason_line) 
   memset(small, 0xAA, sizeof(small));
   const int n = board_polled_summary_format(make_state(false, 0, 0), NULL, 0,
                                             small, sizeof(small));
-  LONGS_EQUAL((long) sizeof(small) - 1, n);  // the full line is 45 characters
+  LONGS_EQUAL((long) sizeof(small) - 1, n);
   CHECK(small[sizeof(small) - 1] == '\0');
   STRNCMP_EQUAL("Polled ", small, 7);
 }
@@ -261,7 +261,6 @@ TEST(BoardTally, summary_reports_the_stored_length_for_a_one_byte_reason_buffer)
   LONGS_EQUAL(0, n);
   CHECK(one[0] == '\0');  // armed up front, so the buffer is never left unterminated
 }
-
 
 TEST(BoardTally, summary_names_no_custom_erds_rather_than_a_subscription_reason) {
   board_polled_summary_format(make_state(false, 0, 0), NULL, 0, buf, sizeof(buf));

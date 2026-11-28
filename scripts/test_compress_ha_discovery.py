@@ -16,7 +16,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "ha_discovery" / "generators"))
 import compress_ha_discovery as compress
 
-
 class TestCompressDecompressRoundTrip(unittest.TestCase):
     """Test that compression followed by decompression recovers the original."""
 
@@ -61,7 +60,6 @@ class TestCompressDecompressRoundTrip(unittest.TestCase):
         chunks = compress.split_into_chunks(jsonl.encode('utf-8'))
         decompressed = self._decompress_chunks(chunks)
         self.assertEqual(jsonl, decompressed)
-        # Should produce multiple chunks
         self.assertGreater(len(chunks), 1)
 
     def test_chunk_boundaries(self):
@@ -102,7 +100,6 @@ class TestCompressDecompressRoundTrip(unittest.TestCase):
         total_compressed = sum(len(c[0]) for c in chunks)
         self.assertLess(total_compressed, len(jsonl.encode('utf-8')))
 
-
 class TestCompressChunk(unittest.TestCase):
     """Test the compress_chunk function directly."""
 
@@ -124,7 +121,6 @@ class TestCompressChunk(unittest.TestCase):
         compressed = compress.compress_chunk(b'')
         decompressed = zlib.decompress(compressed)
         self.assertEqual(b'', decompressed)
-
 
 class TestSplitIntoChunks(unittest.TestCase):
     """Test split_into_chunks behavior."""
@@ -190,7 +186,6 @@ class TestSplitIntoChunks(unittest.TestCase):
             result += zlib.decompress(chunk_data)
         self.assertTrue(result.endswith(b'\n'))
 
-
 class TestBytesToCArray(unittest.TestCase):
     """Test bytes_to_c_array formatting."""
 
@@ -214,9 +209,8 @@ class TestBytesToCArray(unittest.TestCase):
         result = compress.bytes_to_c_array(data, indent=4)
         lines = result.split('\n')
         for line in lines:
-            if line:  # skip empty lines
+            if line:
                 self.assertTrue(line.startswith('    '), f"Line '{line}' doesn't start with 4 spaces")
-
 
 class TestCategoryToCppName(unittest.TestCase):
     """Test category_to_cpp_name."""
@@ -229,7 +223,6 @@ class TestCategoryToCppName(unittest.TestCase):
     def test_empty(self):
         """Empty category returns empty."""
         self.assertEqual(compress.category_to_cpp_name(''), '')
-
 
 class TestCompressEdgeCases(unittest.TestCase):
     """Test edge cases in compression."""

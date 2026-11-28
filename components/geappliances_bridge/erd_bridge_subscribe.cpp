@@ -1,4 +1,3 @@
-
 #include "erd_bridge_subscribe.h"
 #include "erd_cache.h"
 #include "geappliances_bridge_log.h"
@@ -21,12 +20,6 @@ static tiny_hsm_result_t sub_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       auto args = reinterpret_cast<const tiny_gea3_erd_client_on_activity_args_t*>(data);
       auto erd = args->subscription_publication_received.erd;
 
-      /* Skip ERDs not in the valid set (feature-bit + custom ERD filter).
-       * The filter is static (set once at bridge init), so filtered ERDs
-       * are never cached and never affect HSM state. This check runs before
-       * erd_set insertion so that filtered ERDs don't count toward the
-       * quiet-period decision — if only invalid ERDs are published, the
-       * bridge correctly falls through to state_failed. */
       if (self->erd_registry && !self->erd_registry->is_valid(erd)) {
         break;
       }
@@ -34,22 +27,15 @@ static tiny_hsm_result_t sub_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       bool is_new = !erd_set_contains(&self->erd_set, erd);
       if (is_new) {
         erd_set_insert(&self->erd_set, erd);
-        // New ERD registered — restart the quiet timer.
-        // If we're in steady state, a new ERD means we're no longer quiet.
         tiny_hsm_transition(hsm, state_subscribed);
       }
 
-      // Subscription publications come from the primary board. Store the
-      // physical host address; the publisher maps it back to the legacy
-      // (no-prefix) MQTT topic so topics remain backward compatible.
       erd_cache_update(self->erd_cache, erd, self->erd_host_address,
               reinterpret_cast<const uint8_t*>(args->subscription_publication_received.data),
               args->subscription_publication_received.data_size);
     } break;
 
     case signal_quiet_period_expired:
-      // If no ERDs were ever published, the appliance doesn't support
-      // subscriptions — transition to failed. Otherwise, go to steady.
       if (self->erd_set.count == 0) {
         tiny_hsm_transition(hsm, state_failed);
       } else {
@@ -58,8 +44,6 @@ static tiny_hsm_result_t sub_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal
       break;
 
     case signal_timer_expired:
-      // Retention timer fires in both subscribed and steady states.
-      // The child state must be one of those for this to be valid.
       tiny_gea3_erd_client_retain_subscription(self->erd_client, self->erd_host_address);
       break;
 
@@ -77,16 +61,9 @@ static tiny_hsm_result_t state_subscribing(tiny_hsm_t* hsm, tiny_hsm_signal_t si
 
   switch(signal) {
     case signal_subscription_host_came_online:
-      /* The appliance host restarted — its ERD set may have changed, so clear
-       * the local tracking set so that all ERDs are re-registered when new
-       * subscription publications arrive.  The ERD cache is NOT cleared — it
-       * may be shared with the polling bridge, and stale entries are harmless
-       * (they occupy slots but are overwritten when new publications arrive). */
       erd_set_clear(&self->erd_set);
       __attribute__((fallthrough));
     case tiny_hsm_signal_entry:
-      // Disarm the retention timer on entry to prevent spurious subscribe
-      // retries. The timer is re-armed when transitioning to state_subscribed.
       disarm_timer(self);
       self->current_state = subscription_state_subscribing;
       __attribute__((fallthrough));
@@ -153,8 +130,6 @@ static tiny_hsm_result_t state_subscribed(tiny_hsm_t* hsm, tiny_hsm_signal_t sig
       break;
 
     case tiny_hsm_signal_exit:
-      // Don't disarm the retention timer — it persists across
-      // subscribed <-> steady transitions. Only disarm quiet timer.
       tiny_timer_stop(self->timer_group, &self->quiet_timer);
       break;
 
@@ -173,9 +148,6 @@ static tiny_hsm_result_t state_steady(tiny_hsm_t* hsm, tiny_hsm_signal_t signal,
   switch(signal) {
     case tiny_hsm_signal_entry:
       self->current_state = subscription_state_steady;
-      // Stop the quiet timer — we're already steady, no need to re-enter.
-      // Retention timer is already armed from state_subscribed and
-      // was not disarmed on exit — no need to re-arm.
       tiny_timer_stop(self->timer_group, &self->quiet_timer);
       break;
 
@@ -184,8 +156,6 @@ static tiny_hsm_result_t state_steady(tiny_hsm_t* hsm, tiny_hsm_signal_t signal,
       break;
 
     case tiny_hsm_signal_exit:
-      // Don't disarm the retention timer — it persists across
-      // subscribed <-> steady transitions.
       break;
 
     default:
@@ -280,30 +250,19 @@ void erd_bridge_subscribe_init(
 
 void erd_bridge_subscribe_destroy(erd_bridge_subscribe_t* self)
 {
-  /* Guard against destroy() being called on a never-initialized struct (e.g.
-   * in test teardowns that always call both bridge and polling destroy). */
   if (!self->timer_group) {
     return;
   }
 
-  /* Stop the resubscribe timer so it cannot fire after the bridge is torn down.
-   * tiny_timer_stop() is idempotent: safe to call even if the timer is not active. */
   tiny_timer_stop(self->timer_group, &self->timer);
   tiny_timer_stop(self->timer_group, &self->quiet_timer);
 
-  /* Remove all event subscriptions before freeing heap state.
-   *
-   * erd_bridge_subscribe_init() subscribes one event callback that references
-   * this struct: erd_client_activity_subscription.  If it remains registered
-   * after destroy(), any subsequent event fires the HSM which dereferences
-   * self->erd_set — a use-after-free that corrupts the heap. */
   if (self->erd_client != nullptr) {
     tiny_event_unsubscribe(
       tiny_gea3_erd_client_on_activity(self->erd_client),
       &self->erd_client_activity_subscription);
   }
 
-  /* erd_set is a fixed array embedded in the struct — no heap cleanup needed. */
   self->current_state = subscription_state_none;
 }
 

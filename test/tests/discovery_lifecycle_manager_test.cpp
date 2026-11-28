@@ -178,10 +178,8 @@ void hook_availability(void* context, ha_discovery_manager_t*) {
   static_cast<HookRecorder*>(context)->availability_calls++;
 }
 
-/* Forces the cleanup topic-queue allocation to fail, to drive the refusal
- * path in begin_cleanup_(). */
 void *alloc_fails(size_t) { return nullptr; }
-}  // namespace
+}
 
 TEST_GROUP(discovery_lifecycle_manager)
 {
@@ -252,8 +250,6 @@ TEST_GROUP(discovery_lifecycle_manager)
       .andReturnValue(true);
   }
 
-  /* Both discovery-affecting config flags are on; tests that need other
-   * values re-init with them. */
   void init_lifecycle(bool generate_device_config = true,
                       DeviceIdentityManager* identity = nullptr)
   {
@@ -321,9 +317,9 @@ TEST_GROUP(discovery_lifecycle_manager)
       if (hooks_.save_calls > 0) hooks_.stored = hooks_.saved;
       return false;
     }
-    lifecycle_.loop();  // begins the cleanup
+    lifecycle_.loop();
     manager_.cleanup.state = ha_cleanup_state_done;
-    lifecycle_.loop();  // on to publishing
+    lifecycle_.loop();
     end_publish_run(ha_discovery_state_complete);
     hooks_.stored = hooks_.saved;
     return true;
@@ -925,10 +921,7 @@ TEST(discovery_lifecycle_manager, cleaning_phase_times_out_and_can_be_retried)
 
   CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
   CHECK_EQUAL(DiscoveryLifecycleManager::kTriggerNone, lifecycle_.trigger());
-  /* destroy() memsets the cleanup struct back to idle. */
   CHECK_EQUAL(ha_cleanup_state_idle, manager_.cleanup.state);
-  /* No publish ran, so nothing is recorded and the firmware is not
-   * confirmed: confirmation belongs to the publish outcome. */
   CHECK_EQUAL(0, hooks_.save_calls);
   CHECK_EQUAL(0, hooks_.confirm_calls);
   CHECK(!lifecycle_.initial_publish_done());
@@ -1171,9 +1164,9 @@ TEST(discovery_lifecycle_manager, discovery_refresh_resets_the_republish_count)
   lifecycle_.check_discovery_changes(identity_.get_device_id());
   CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseQueuedCleanup, lifecycle_.phase());
 
-  lifecycle_.loop();  // begins the cleanup
+  lifecycle_.loop();
   manager_.cleanup.state = ha_cleanup_state_done;
-  lifecycle_.loop();  // on to publishing
+  lifecycle_.loop();
   end_publish_run(ha_discovery_state_failed);
   CHECK_EQUAL(0, hooks_.save_calls);
   CHECK_EQUAL(DiscoveryLifecycleManager::kPhaseIdle, lifecycle_.phase());
@@ -1529,7 +1522,7 @@ TEST(discovery_lifecycle_manager, three_refused_runs_end_in_a_hold)
   hooks_.stored = matching_record();
   hooks_.has_stored = true;
   hooks_.largest_block = ha_discovery_manager_run_allocation_size() - 1;
-  hooks_.publish_pending = true;  // the #203 state: a teardown already happened
+  hooks_.publish_pending = true;
 
   for (int attempt = 1;
        attempt <= (int) DiscoveryLifecycleManager::kMaxAbortReboots; ++attempt) {

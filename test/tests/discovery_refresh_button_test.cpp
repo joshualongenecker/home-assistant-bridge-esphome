@@ -41,7 +41,6 @@ TEST(discovery_refresh_button, press_action_does_not_crash_with_uninitialized_br
    * publish only runs once the bridge reports steady state. */
   DiscoveryRefreshButton button(&bridge);
   button.press_action();
-  /* No crash = pass. */
 }
 TEST(discovery_refresh_button, press_action_is_idempotent_after_successful_trigger)
 {
@@ -59,7 +58,6 @@ TEST(discovery_refresh_button, press_action_safe_when_bridge_is_null)
   /* Button constructed with null bridge pointer must not crash on press. */
   DiscoveryRefreshButton button(nullptr);
   button.press_action();
-  /* No crash = pass. */
 }
 TEST(discovery_refresh_button, multiple_presses_with_null_bridge_are_safe)
 {
@@ -67,12 +65,10 @@ TEST(discovery_refresh_button, multiple_presses_with_null_bridge_are_safe)
   button.press_action();
   button.press_action();
   button.press_action();
-  /* No crash = pass. */
 }
 
 TEST(discovery_refresh_button, button_inherits_from_button_base)
 {
-  // Verify the button is a proper subclass of esphome::button::Button.
   DiscoveryRefreshButton button(&bridge);
   esphome::button::Button* base = &button;
   CHECK(base != nullptr);
@@ -84,5 +80,4 @@ TEST(discovery_refresh_button, press_action_safe_after_teardown)
   DiscoveryRefreshButton button(&bridge);
   bridge.teardown();
   button.press_action();
-  /* No crash = pass. */
 }

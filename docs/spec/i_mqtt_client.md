@@ -202,3 +202,30 @@ Carried by the event returned from `mqtt_client_on_write_request`. The `erd_writ
 2. **No error return on publish:** `mqtt_client_publish_raw` and `mqtt_client_update_erd_write_result` are fire-and-forget — they do not return success/failure. The adapter is expected to queue or drop messages internally.
 3. **Single write request event:** There is one `on_write_request` event shared across all ERDs. The bridge must filter by `erd` in the event args if it needs to handle specific ERDs differently.
 4. **No QoS or acknowledgment:** The interface does not expose MQTT QoS levels or publish acknowledgments. These are handled by the adapter.
+
+---
+
+## 9. Notes
+
+Module-local contracts the vtable declaration alone does not carry, verified against the only implementation
+(`EsphomeMqttClientAdapter`) and against the callers. The number in parentheses is the comment-audit id.
+
+- **`is_connected` exists so the data path can be tested at all.** A data-path module asks "may I publish?"
+  through the injected client rather than reading `esphome::mqtt::global_mqtt_client`, which exists only in
+  the firmware build and cannot be substituted by the host tests. The ESPHome adapter answers
+  `global_mqtt_client != nullptr && global_mqtt_client->is_connected()` — false when the global is absent —
+  and a test double answers from its own state. An implementation MUST return false, not throw or assert, when
+  it has no transport behind it. (1572)
+- **`publish_raw` returns a result, and callers branch on it.** The slot and the wrapper are
+  `bool (*publish_raw)(…)` / `static inline bool mqtt_client_publish_raw(…)`: the adapter returns false when
+  the global client is null, is not connected, or ESPHome's `publish()` refuses (outbound queue full).
+  `ha_discovery_manager_run()` treats false as a dropped config publish — it leaves `current_offset`
+  unchanged so the same entity is republished and arms `HA_DISCOVERY_PUBLISH_RETRY_BACKOFF_MS` (64 ms) — and
+  `ha_discovery_cleanup` uses the same window for its removal publishes. §2.2's vtable snippet, §3.6's
+  signature and §8.2's "fire-and-forget" describe an older `void` shape and are superseded by this note;
+  `update_erd_write_result` is genuinely `void`.
+- **`board_address` in `mqtt_client_on_write_request_args_t` (§5.1) is the primary-board sentinel, not a
+  board.** `0xFF` is the GEA broadcast address and can never name a physical board, which is what keeps a
+  secondary board at `0x00` unambiguous; the bridge resolves `0xFF` to its detected host address. That
+  decision is cross-cutting and lives in ADR-0011 (with the topic grammar in ADR-0012), so it is not
+  restated here beyond the pointer.

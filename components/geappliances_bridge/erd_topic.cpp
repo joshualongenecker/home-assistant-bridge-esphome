@@ -3,8 +3,6 @@
 #include <cstdio>
 #include <cstring>
 
-/* The parse loop below iterates the enum range; a non-contiguous enum would
- * silently break op matching. */
 static_assert(ERD_TOPIC_OP_VALUE == 0 && ERD_TOPIC_OP_WRITE == 1 &&
                   ERD_TOPIC_OP_WRITE_RESULT == 2,
               "erd_topic_op_t must stay contiguous");
@@ -91,14 +89,9 @@ bool erd_topic_parse(const char* topic, const char* device_id,
   uint32_t erd_value = 0;
   uint32_t addr_value = 0;
 
-  /* Secondary-board form: 0x{ADDR}_0x{ERD}/ — the "_" separator after two
-   * hex digits is what distinguishes it from the legacy primary form. */
   if (erd_topic_parse_hex_fixed(p, 2, &addr_value) && p[2] == '_' &&
       p[3] == '0' && p[4] == 'x' &&
       erd_topic_parse_hex_fixed(p + 5, 4, &erd_value) && p[9] == '/') {
-    /* 0xFF is the broadcast/primary sentinel and can never be a physical
-     * board address (0x00-0xFE); reject it rather than silently aliasing
-     * it onto the primary-board form. */
     if (addr_value == (uint32_t)ERD_TOPIC_PRIMARY) return false;
     addr = addr_value;
     p += 10;

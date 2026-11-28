@@ -50,7 +50,6 @@ TEST_GROUP(device_identity_manager)
     manager.init("", &erd_client.interface, 0xC0);
   }
 
-  /* Expect that a read for the given ERD will be queued successfully. */
   void expect_successful_read(uint8_t address, tiny_erd_t erd)
   {
     mock()
@@ -62,7 +61,6 @@ TEST_GROUP(device_identity_manager)
       .andReturnValue(true);
   }
 
-  /* Expect that a read for the given ERD will fail to queue. */
   void expect_failed_read(uint8_t address, tiny_erd_t erd)
   {
     mock()
@@ -74,8 +72,6 @@ TEST_GROUP(device_identity_manager)
       .andReturnValue(false);
   }
 
-  /* Simulate appliance type read completion.
-   * This internally queues a model number read -- expect it. */
   void trigger_appliance_type_read_completed(const void* data, uint8_t size)
   {
     expect_successful_read(0xC0, ERD_MODEL_NUMBER);
@@ -83,8 +79,6 @@ TEST_GROUP(device_identity_manager)
                                   static_cast<const uint8_t*>(data), size);
   }
 
-  /* Simulate model number read completion.
-   * This internally queues a serial number read -- expect it. */
   void trigger_model_number_read_completed(const void* data, uint8_t size)
   {
     expect_successful_read(0xC0, ERD_SERIAL_NUMBER);
@@ -92,8 +86,6 @@ TEST_GROUP(device_identity_manager)
                                   static_cast<const uint8_t*>(data), size);
   }
 
-  /* Simulate serial number read completion.
-   * This does NOT queue another read -- goes straight to COMPLETE. */
   void trigger_serial_number_read_completed(const void* data, uint8_t size)
   {
     manager.on_erd_read_completed(ERD_SERIAL_NUMBER,
@@ -108,7 +100,6 @@ TEST_GROUP(device_identity_manager)
     manager.on_erd_read_failed(erd);
   }
 
-  /* Simulate an ERD read failure where the re-queue also fails. */
   void trigger_read_failed_requeue_fails(tiny_erd_t erd)
   {
     expect_failed_read(0xC0, erd);
@@ -126,9 +117,7 @@ TEST(device_identity_manager, init_with_configured_id_still_reads_erds)
   expect_successful_read(0xC0, ERD_APPLIANCE_TYPE);
   init_with_configured_id("my-custom-device");
 
-  // State is READING_APPLIANCE_TYPE (not COMPLETE shortcut).
   CHECK_EQUAL(DEVICE_ID_STATE_READING_APPLIANCE_TYPE, manager.get_state());
-  // But get_device_id() returns the configured ID.
   CHECK(strcmp(manager.get_device_id(), "my-custom-device") == 0);
 }
 
@@ -288,7 +277,6 @@ TEST(device_identity_manager, on_erd_read_failed_never_uses_fallback)
 
 TEST(device_identity_manager, configured_device_id_returned_after_all_erds_read)
 {
-  // Init with configured ID, read all ERDs, then get_device_id returns configured.
   expect_successful_read(0xC0, ERD_APPLIANCE_TYPE);
   init_with_configured_id("my-custom-device");
 

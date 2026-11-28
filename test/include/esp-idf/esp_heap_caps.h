@@ -1,8 +1,3 @@
-/*!
- * @file
- * @brief ESP-IDF esp_heap_caps stubs for test/simulation builds.
- */
-
 #ifndef ESP_HEAP_CAPS_STUB_H
 #define ESP_HEAP_CAPS_STUB_H
 
@@ -30,4 +25,4 @@ static inline size_t heap_caps_get_largest_free_block(uint32_t caps) { (void)cap
 }
 #endif
 
-#endif /* ESP_HEAP_CAPS_STUB_H */
+#endif

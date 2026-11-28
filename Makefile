@@ -1,21 +1,10 @@
 TARGET := home-assistant-bridge_tests
 BUILD_DIR := ./build
 
-# ThreadSanitizer variant for the concurrency tests: `make test TSAN=1`.
-# TSan cannot share a binary with ASan, so it gets its own build dir (set
-# here, before OBJS expands BUILD_DIR). It checks the happens-before edges
-# of the discovery lifecycle claim protocol (the release store on phase_
-# publishing trigger_) the way the dual-core device will; the plain ASan
-# build only catches invariant violations that happen to manifest.
-# TSan does not run LeakSanitizer: leak detection stays with the ASan
-# variants (the ASAN_OPTIONS export below is inert under TSAN=1).
 TSAN ?= 0
 ifeq ($(TSAN),1)
 BUILD_DIR := ./build-tsan
 endif
-# The integration build links a separate binary so the two targets can never
-# run each other's stale binary (make cannot tell which source set produced a
-# shared output path).
 TARGET_INTEGRATION := home-assistant-bridge_tests_integration
 
 INC_DIRS := \
@@ -41,7 +30,6 @@ SRC_FILES := $(wildcard components/geappliances_bridge/*.cpp) components/geappli
 
 SRCS := $(SRC_FILES) $(shell find $(SRC_DIRS) -maxdepth 1 \( -name '*.cpp' -or -name '*.c' -or -name '*.s' \) -not -name 'startup_integration_test.cpp')
 
-# Integration test sources (includes startup_integration_test.cpp)
 SRCS_INTEGRATION := $(SRC_FILES) $(shell find $(SRC_DIRS) -maxdepth 1 \( -name '*.cpp' -or -name '*.c' -or -name '*.s' \))
 OBJS := $(SRCS:%=$(BUILD_DIR)/%.o)
 DEPS := $(OBJS:.o=.d)
@@ -55,27 +43,18 @@ else
 SANITIZE_FLAGS := -fsanitize=address -fsanitize=undefined
 endif
 
-
-# CppUTest installation paths — auto-detect common locations
-# Override with: make CPPUTEST_PREFIX=/path/to/cpputest
-#   macOS (Apple Silicon):  /opt/homebrew  (default)
-#   macOS (Intel):          /usr/local
-#   Linux (system pkg):     /usr
-#   Linux (local build):    /path/to/CppUTest
 UNAME_S := $(shell uname -s)
 UNAME_P := $(shell uname -p)
 ifeq ($(TSAN)$(UNAME_S),1Darwin)
 $(error TSAN=1 is unsupported on Darwin: clang ships no macOS ThreadSanitizer runtime)
 endif
 ifeq ($(UNAME_S),Darwin)
-  # Apple Silicon → homebrew at /opt/homebrew; Intel → /usr/local
   ifeq ($(UNAME_P),arm)
     CPPUTEST_PREFIX ?= /opt/homebrew
   else
     CPPUTEST_PREFIX ?= /usr/local
   endif
 else
-  # Linux: default to system-wide install
   CPPUTEST_PREFIX ?= /usr
 endif
 CPPUTEST_INC := -I$(CPPUTEST_PREFIX)/include
@@ -103,22 +82,14 @@ else
 endif
 
 CFLAGS += -std=c11 -pedantic
-CPPFLAGS += $(SANITIZE_FLAGS) -fno-omit-frame-pointer -fprofile-arcs -ftest-coverage -DUSE_ESP_IDF -DUSE_ESP_IDF_STUBS -DUNIT_TEST_BUILD -DHA_DISCOVERY_TEST_EXPORT -DHA_DISCOVERY_CLEANUP_TEST_BUF_SIZE=512 -DHA_CLEANUP_TEST_BUF_SIZE=512 -DHA_DISCOVERY_CLEANUP_TEST_EXPORT 
+CPPFLAGS += $(SANITIZE_FLAGS) -fno-omit-frame-pointer -fprofile-arcs -ftest-coverage -DUSE_ESP_IDF -DUSE_ESP_IDF_STUBS -DUNIT_TEST_BUILD -DHA_DISCOVERY_TEST_EXPORT -DHA_DISCOVERY_CLEANUP_TEST_BUF_SIZE=512 -DHA_CLEANUP_TEST_BUF_SIZE=512 -DHA_DISCOVERY_CLEANUP_TEST_EXPORT
 CPPFLAGS += $(INC_FLAGS) $(CPPUTEST_INC) -MMD -MP -g -Wall -Wextra -Wcast-qual -Werror
 CXXFLAGS += -std=c++17 -pthread
-# Extra flags for a variant build that must keep the suite's own flags, e.g.
-# the pattern-init gate in CI:
-#   make integration-test BUILD_DIR=./build-pattern \
-#     EXTRA_CXXFLAGS=-ftrivial-auto-var-init=pattern
-# BUILD_DIR has to differ from the default: otherwise make considers the
-# objects built without the flag up to date and the variant tests nothing.
 CXXFLAGS += $(EXTRA_CXXFLAGS)
 LDFLAGS := $(SANITIZE_FLAGS) $(CPPUTEST_LIB) --coverage -pthread
 LDLIBS := -lstdc++ -lCppUTest -lCppUTestExt -lm --coverage
 
 BUILD_DEPS += $(MAKEFILE_LIST)
-
-
 
 .PHONY: test
 test: $(BUILD_DIR)/$(TARGET)
@@ -152,7 +123,7 @@ clean:
 
 .PHONY: pytest
 pytest:
-	@python3 -m pytest scripts/test_generate_erd_lists.py scripts/test_ha_discovery.py -v
+	@python3 -m pytest scripts/test_*.py -v
 
 .PHONY: check-generated
 check-generated:
@@ -178,15 +149,19 @@ check-protocol-variants:
 	done
 
 .PHONY: check-diagnostic-mqtt
-# Regenerate the CI config's sources and assert every component-created diagnostic
-# entity got an MQTT wrapper. --only-generate is what makes this cheap: the check
-# reads generated main.cpp, it does not need the ESP-IDF build. docs/secrets.yaml
-# is gitignored and only ever holds the throwaway values from docs/test-secrets.yaml.
 check-diagnostic-mqtt:
 	@cp docs/test-secrets.yaml docs/secrets.yaml
 	@trap 'rm -f docs/secrets.yaml' EXIT; \
 	esphome compile --only-generate docs/test-compile.yaml && \
 	python3 scripts/check_diagnostic_mqtt_wrappers.py
+
+.PHONY: check-comments
+check-comments:
+	@python3 scripts/comment_policy.py check
+
+.PHONY: comments-baseline
+comments-baseline:
+	@python3 scripts/comment_policy.py baseline --write
 
 .PHONY: integration-test
 integration-test:

@@ -1,4 +1,3 @@
-
 #include "autodiscovery_manager.h"
 #include "geappliances_bridge_constants.h"
 #include "tiny_gea3_erd_api.h"
@@ -38,8 +37,6 @@ void AutodiscoveryManager::init(tiny_timer_group_t* timer_group,
   this->gea3_rx_              = discover_rx_t{};
   this->gea2_rx_              = discover_rx_t{};
 
-  // Byte-level subscription feeds our own packet assembler so we see all
-  // packets even when the GEA interface's single-packet buffer drops bytes.
   if (this->has_gea3_uart_ && this->gea3_uart_adapter_ != nullptr) {
     tiny_event_subscription_init(
       &this->gea3_byte_subscription_,
@@ -64,8 +61,6 @@ void AutodiscoveryManager::init(tiny_timer_group_t* timer_group,
 
 void AutodiscoveryManager::cleanup()
 {
-  // Stop the broadcast window timer first to prevent the callback from
-  // firing while we unsubscribe and nullify pointers.
   if (this->timer_group_ != nullptr) {
     tiny_timer_stop(this->timer_group_, &this->broadcast_window_timer_);
   }
@@ -164,8 +159,6 @@ void AutodiscoveryManager::process_byte_(uint8_t byte, bool is_gea3)
   if (is_gea3 && !gea3_waiting) return;
   if (!is_gea3 && !gea2_waiting) return;
 
-  // GEA protocol sends 0xE0 followed by the raw byte for control
-  // characters; on receive the escaped byte is passed through as-is.
   if (rx->escaped) {
     rx->escaped = false;
     goto buffer_byte;
@@ -183,7 +176,6 @@ void AutodiscoveryManager::process_byte_(uint8_t byte, bool is_gea3)
       return;
 
     case tiny_gea_etx: {
-      // ETX without a preceding STX is not a valid packet.
       if (!rx->stx_received) {
         return;
       }
@@ -195,7 +187,6 @@ void AutodiscoveryManager::process_byte_(uint8_t byte, bool is_gea3)
         return;
       }
 
-      // Minimum: dst(1) + len(1) + src(1) + payload(1) + CRC(2) = 6
       if (rx->count < 6) {
         rx->count = 0;
         return;
@@ -224,7 +215,6 @@ void AutodiscoveryManager::process_byte_(uint8_t byte, bool is_gea3)
       uint8_t command = rx->buffer[3];
 
       if (is_gea3) {
-        // GEA3: only read responses (0xA1).
         if (command != tiny_gea3_erd_api_command_read_response) {
           rx->count = 0;
           return;
@@ -235,9 +225,8 @@ void AutodiscoveryManager::process_byte_(uint8_t byte, bool is_gea3)
           return;
         }
 
-        uint8_t result = rx->buffer[5];  // payload[2] = result
+        uint8_t result = rx->buffer[5];
         if (result != tiny_gea3_erd_api_read_result_success) {
-          // unsupported_erd — skip, keep waiting for a success
           rx->count = 0;
           return;
         }
@@ -257,7 +246,6 @@ void AutodiscoveryManager::process_byte_(uint8_t byte, bool is_gea3)
         uint8_t appliance_type = rx->buffer[9];
         this->on_broadcast_response(source, appliance_type, true);
       } else {
-        // GEA2: read response command is 0xF0, same value as read request per spec.
         if (command != tiny_gea2_erd_api_command_read_response) {
           rx->count = 0;
           return;
@@ -268,7 +256,7 @@ void AutodiscoveryManager::process_byte_(uint8_t byte, bool is_gea3)
           return;
         }
 
-        uint8_t erd_count = rx->buffer[4];  // payload[1] = erd_count
+        uint8_t erd_count = rx->buffer[4];
         if (erd_count != 1) {
           rx->count = 0;
           return;
@@ -310,9 +298,9 @@ buffer_byte:
 void AutodiscoveryManager::on_broadcast_response(uint8_t address, uint8_t appliance_type,
                                                   bool is_gea3)
 {
-  (void)appliance_type;  /* Used only in ESP_LOG calls that may be compiled out. */
+  (void)appliance_type;
   if (this->state_ == AUTODISCOVERY_COMPLETE) return;
-  if (this->active_erd_client_ != nullptr)    return;  // single response wins
+  if (this->active_erd_client_ != nullptr)    return;
 
   if (this->target_address_set_ && address != this->target_address_) {
     ESP_LOGD(TAG, "Ignoring response from 0x%02X (expected 0x%02X)",
@@ -386,8 +374,6 @@ void AutodiscoveryManager::run()
       } else {
         ESP_LOGW(TAG, "GEA3 probe read failed (queue full), will retry after timeout");
       }
-      // Always start the timer and transition to WAITING so the state
-      // machine keeps moving even if the broadcast couldn't be queued.
       tiny_timer_start(this->timer_group_,
                        &this->broadcast_window_timer_,
                        AUTODISCOVERY_BROADCAST_WINDOW_MS,
@@ -415,8 +401,6 @@ void AutodiscoveryManager::run()
       } else {
         ESP_LOGW(TAG, "GEA2 probe read failed (queue full), will retry after timeout");
       }
-      // Always start the timer and transition to WAITING so the state
-      // machine keeps moving even if the broadcast couldn't be queued.
       tiny_timer_start(this->timer_group_,
                        &this->broadcast_window_timer_,
                        AUTODISCOVERY_BROADCAST_WINDOW_MS,
@@ -434,5 +418,5 @@ void AutodiscoveryManager::run()
   }
 }
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}

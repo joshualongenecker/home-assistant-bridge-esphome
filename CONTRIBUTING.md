@@ -34,19 +34,21 @@ See [Development Guide](./docs/guides/development.md) for the full workflow incl
 1. **Fork and branch** from `develop`.
 2. **Make your changes.** Follow existing patterns — grep the codebase before inventing a new convention.
 3. **Run tests.** `make test` and `make pytest` must pass.
-4. **Run the pipeline** if you modified ERD definitions, overrides, or pipeline scripts:
+4. **Keep the comment ratchet satisfied.** `make check-comments` must pass; new comments fail it. Put the explanation in an ADR or the module spec instead ([Comment Policy](./docs/comment-policy.md)).
+5. **Run the pipeline** if you modified ERD definitions, overrides, or pipeline scripts:
    ```bash
    python3 scripts/ha_discovery/run_pipeline.py
    ```
    Commit all generated files (`ha_discovery/*.jsonl`, `components/geappliances_bridge/ha_discovery_data.h`).
-5. **Update documentation** if your change affects behavior, configuration, or architecture. See [docs/style-guide.md](./docs/style-guide.md).
-6. **Open a PR** against `develop` with a clear description of what changed and why.
+6. **Update documentation** if your change affects behavior, configuration, or architecture. See [docs/style-guide.md](./docs/style-guide.md).
+7. **Open a PR** against `develop` with a clear description of what changed and why.
 
 ## Code Style
 
 - **C++**: Follow the existing codebase style (4-space indent, braces on same line, `camelCase` for functions, `snake_case` for variables).
 - **C**: Same as C++ but use `snake_case` for all identifiers.
 - **Python**: PEP 8.
+- **No comments in source.** Rationale lives in `docs/adr/` and `docs/spec/`. See [Comment Policy](./docs/comment-policy.md).
 - **No trailing whitespace.** No lines > 120 characters in prose.
 
 ## Documentation

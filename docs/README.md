@@ -91,7 +91,18 @@ Detailed behavioral contracts for each module. Each spec covers purpose, interfa
 | [MQTT Topics](./reference/mqtt-topics.md) | Topic schema, payloads, QoS |
 | [ERD Protocol](./reference/erd-protocol.md) | GEA2/GEA3 protocol overview |
 | [Interfaces](./reference/interfaces.md) | Key C interface documentation |
+| [Appliance Type Categories](./reference/appliance-type-categories.md) | Appliance-type to discovery-category mapping, enum index table, generator constraints |
+| [HA Discovery Entity Generation](./reference/ha-discovery-entity-generation.md) | How the pipeline decides domain, device class, unit, scaling, pairing and writability |
 | [Hardware](../HARDWARE.md) | Hardware configuration and pin mapping |
+
+## Decisions
+
+Architectural decisions and the rationale that used to live in code comments.
+
+| Document | Description |
+|---|---|
+| [ADR Index](./adr/README.md) | Numbered decision records, format, and index |
+| [ADR-0001](./adr/0001-source-comments-banned.md) | Source carries no comments; rationale lives in ADRs and specs |
 
 ## Quality
 
@@ -99,3 +110,4 @@ Detailed behavioral contracts for each module. Each spec covers purpose, interfa
 |---|---|
 | [Style Guide](./style-guide.md) | Formatting conventions, spec template, review checklist |
 | [Review Checklist](./review-checklist.md) | Pre-commit quality checklist |
+| [Comment Policy](./comment-policy.md) | No-comments rule, triage rubric, ratchet gate |

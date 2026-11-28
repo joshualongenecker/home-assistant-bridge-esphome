@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <cstdint>
@@ -41,7 +40,6 @@ class DiagnosticSensorPublisher {
   uint32_t last_erd_cache_stats_publish_{0};
   uint32_t last_mqtt_disconnect_stats_publish_{0};
 
-  // Sensor pointers (nullable — set by ESPHome codegen)
   sensor::Sensor* erd_publish_rate_sensor_{nullptr};
   sensor::Sensor* mqtt_publish_rate_sensor_{nullptr};
   sensor::Sensor* erd_cache_entries_sensor_{nullptr};
@@ -53,5 +51,5 @@ class DiagnosticSensorPublisher {
   erd_cache_mqtt_publisher_t* erd_cache_publisher_{nullptr};
 };
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}

@@ -294,7 +294,7 @@ TEST(protocol_stack, gea2_tick_source_drives_interface_ack_timeout)
       stack.get_gea2_adapter_client(), &request_id, 0xC0, 0x0008));
 
   esphome_hal_double_set_millis(1);
-  stack.run(true);  // first iteration latches gea2_last_ms_ at t=1
+  stack.run(true);
 
   esphome_hal_double_set_millis(51);
   stack.run(true);
@@ -335,7 +335,7 @@ TEST(protocol_stack, tick_source_is_per_stack_not_shared)
   CHECK(tiny_gea3_erd_client_read(stack_b.get_gea2_adapter_client(), &id_b, 0xC0, 0x0008));
 
   esphome_hal_double_set_millis(1);
-  stack_a.run(true);  // first iteration latches each stack's gea2_last_ms_
+  stack_a.run(true);
   stack_b.run(true);
 
   esphome_hal_double_set_millis(51);

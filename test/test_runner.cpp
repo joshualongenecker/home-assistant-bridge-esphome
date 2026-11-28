@@ -3,17 +3,6 @@
 #include "CppUTestExt/MockSupport.h"
 #include "CppUTestExt/MockSupportPlugin.h"
 
-/*
- * MockSupportPlugin checks mock expectations, then clears them, in its
- * postTestAction. CppUTest runs a group's teardown() before that, so a
- * mock().clear() in teardown() (or setup(), or a test body) discards pending
- * expectations first and an unfulfilled expectOneCall passes silently.
- *
- * Tests therefore never call mock().clear(): the plugin already checks and
- * clears after every test. This guard enforces that. It plants a marker in
- * mock()'s data store before each test; mock().clear() erases it. If the
- * marker is gone when the test finishes, the test fails.
- */
 class MockClearGuardPlugin : public TestPlugin {
  public:
   MockClearGuardPlugin() : TestPlugin("MockClearGuard") {}
@@ -43,11 +32,6 @@ class MockClearGuardPlugin : public TestPlugin {
 
 int main(int argc, char** argv)
 {
-  /* CppUTest runs preTestAction in reverse install order and postTestAction
-   * in install order. Installed first, the guard plants its marker after
-   * every other plugin's pre-test work and inspects it before
-   * MockSupportPlugin's post-test clear. Install it after MockSupportPlugin
-   * and that clear erases the marker first, so every test fails. */
   MockClearGuardPlugin guardPlugin;
   TestRegistry::getCurrentRegistry()->installPlugin(&guardPlugin);
 

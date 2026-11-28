@@ -1,8 +1,3 @@
-/*!
- * @file
- * @brief ESP-IDF esp_http_client stubs for test/simulation builds.
- */
-
 #ifndef ESP_HTTP_CLIENT_STUB_H
 #define ESP_HTTP_CLIENT_STUB_H
 
@@ -40,4 +35,4 @@ static inline void esp_http_client_cleanup(esp_http_client_handle_t) { }
 }
 #endif
 
-#endif /* ESP_HTTP_CLIENT_STUB_H */
+#endif

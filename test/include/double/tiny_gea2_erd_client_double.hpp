@@ -1,8 +1,3 @@
-/*!
- * @file
- * @brief Test double for GEA2 ERD client interface.
- */
-
 #ifndef tiny_gea2_erd_client_double_hpp
 #define tiny_gea2_erd_client_double_hpp
 

@@ -23,12 +23,9 @@ from typing import Dict, List, Optional, Set
 
 from appliance_type_categories import APPLIANCE_TYPE_CATEGORY, UNKNOWN_APPLIANCE_TYPE
 
-
-
 def parse_erd_id(erd_id_str: str) -> int:
     """Convert ERD ID string (e.g., '0x0001') to integer."""
     return int(erd_id_str, 16)
-
 
 def categorize_erds(erds: List[Dict]) -> Dict[str, List[int]]:
     """
@@ -83,9 +80,7 @@ def categorize_erds(erds: List[Dict]) -> Dict[str, List[int]]:
         elif 0xD000 <= erd_id <= 0xDFFF:
             categories['energy'].add(erd_id)
     
-    # Convert sets to sorted lists
     return {key: sorted(list(value)) for key, value in categories.items()}
-
 
 def format_erd_list(erds: List[int], indent: int = 2) -> str:
     """Format a list of ERDs as C array elements."""
@@ -100,11 +95,6 @@ def format_erd_list(erds: List[int], indent: int = 2) -> str:
     
     return '\n'.join(lines)
 
-
-# (category_key, array_name, count_name, description). category_key.lower() is
-# the discovery category token shared with the HA pipeline
-# (ha_discovery/<token>.jsonl, pipeline/ha_constants.CATEGORIES) and with
-# scripts/appliance_type_categories.py.
 CATEGORY_INFO = [
     ('common', 'commonErds', 'commonErdCount', '0x0000 to 0x0FFF: common ERDs (all appliance types)'),
     ('refrigeration', 'refrigerationErds', 'refrigerationErdCount', '0x1000 to 0x1FFF: refrigeration ERDs'),
@@ -118,10 +108,8 @@ CATEGORY_INFO = [
     ('energy', 'energyErds', 'energyErdCount', '0xD000 to 0xDFFF: energy ERDs (all appliance types)')
 ]
 
-# Discovery category token -> (array_name, count_name) C symbols.
 CATEGORY_CPP = {key.lower(): (array_name, count_name)
                 for key, array_name, count_name, _ in CATEGORY_INFO}
-
 
 def get_appliance_type_values(erds: List[Dict]) -> Dict[str, str]:
     """Return the ERD 0x0008 (Appliance Type) enum: value string -> display name."""
@@ -129,7 +117,6 @@ def get_appliance_type_values(erds: List[Dict]) -> Dict[str, str]:
     if erd is None:
         raise ValueError("ERD 0x0008 (Appliance Type) not found in ERD definitions")
     return erd['data'][0]['values']
-
 
 def build_appliance_group_rows(appliance_type_values: Dict[str, str]):
     """Rows for applianceTypeToErdGroupTranslation[], one per appliance type.
@@ -167,7 +154,6 @@ def build_appliance_group_rows(appliance_type_values: Dict[str, str]):
                 "add it (None if it has no category-specific ERDs) and regenerate")
         rows.append((type_value, display[type_value], APPLIANCE_TYPE_CATEGORY[type_value]))
     return rows
-
 
 def generate_header(categories: Dict[str, List[int]], polling_list_max_size: int) -> str:
     """Generate the erd_lists.h header file with extern const declarations."""
@@ -218,7 +204,6 @@ extern const uint16_t maximumApplianceType;
 """
     
     return header
-
 
 def generate_erd_lists_cpp(categories: Dict[str, List[int]],
                            appliance_type_values: Dict[str, str]) -> str:
@@ -276,18 +261,13 @@ def generate_erd_lists_cpp(categories: Dict[str, List[int]],
     cpp += ("const uint16_t maximumApplianceType = sizeof(applianceTypeToErdGroupTranslation) / "
             "sizeof(applianceTypeToErdGroupTranslation[0]);\n")
 
-
     return cpp
-
-
-
 
 def sanitize_name_for_cpp(name: str) -> str:
     """Sanitize a feature API name for use as a C++ identifier (all lowercase)."""
     result = re.sub(r'[^a-zA-Z0-9]', '_', name)
     result = re.sub(r'_+', '_', result)
     return result.strip('_').lower()
-
 
 def make_array_names(valid_feature_apis):
     """Return a dict mapping (api_key, ver, feature_index) -> unique array name."""
@@ -309,7 +289,6 @@ def make_array_names(valid_feature_apis):
                         result[(key, ver, idx)] = f"{base[:-len('_erds')]}_m{mask:08x}_erds"
     return result
 
-
 def collect_erds_for_feature(feature: Dict) -> List[int]:
     """Collect all ERD IDs for a single feature (required + optional)."""
     erds: Set[int] = set()
@@ -317,14 +296,12 @@ def collect_erds_for_feature(feature: Dict) -> List[int]:
         erds.add(parse_erd_id(erd_entry['erd']))
     return sorted(erds)
 
-
 def collect_all_erds_for_common_feature(feature: Dict) -> List[int]:
     """Collect all ERD IDs for a single common feature."""
     erds: Set[int] = set()
     for erd_entry in feature.get('required', []) + feature.get('optional', []):
         erds.add(parse_erd_id(erd_entry['erd']))
     return sorted(erds)
-
 
 def generate_appliance_api_feature_lists_header(appliance_api_data: Dict) -> str:
     """Generate the appliance_api_feature_lists.h header file with extern const declarations."""
@@ -366,7 +343,6 @@ def generate_appliance_api_feature_lists_header(appliance_api_data: Dict) -> str
     for ver_data in common.get('versions', {}).values():
         all_common_features.extend(ver_data.get('features', []))
 
-    # Generate extern declarations for each common feature
     for feature in all_common_features:
         sanitized = sanitize_name_for_cpp(feature['name'])
         erds = collect_all_erds_for_common_feature(feature)
@@ -377,7 +353,6 @@ def generate_appliance_api_feature_lists_header(appliance_api_data: Dict) -> str
             lines.append(f"extern const tiny_erd_t* {array_name};")
     lines.append("")
 
-    # Master common feature descriptor array declaration
     lines.append("extern const common_feature_descriptor_t common_feature_descriptors[];")
     lines.append("extern const uint16_t common_feature_descriptor_count;")
     lines.append("")
@@ -409,10 +384,8 @@ def generate_appliance_api_feature_lists_header(appliance_api_data: Dict) -> str
         if (api['featureType'] >> 8) <= 9
     ]
 
-
     array_names = make_array_names(valid_feature_apis)
 
-    # Generate extern declarations for each feature array
     for key, api in valid_feature_apis:
         for ver, ver_data in api.get('versions', {}).items():
             for i, feature in enumerate(ver_data.get('features', [])):
@@ -424,7 +397,6 @@ def generate_appliance_api_feature_lists_header(appliance_api_data: Dict) -> str
                     lines.append(f"extern const tiny_erd_t* {array_name};")
     lines.append("")
 
-    # Master descriptor array declaration
     lines.append("extern const appliance_feature_api_descriptor_t appliance_feature_api_descriptors[];")
     lines.append("extern const uint16_t appliance_feature_api_descriptor_count;")
     lines.append("")
@@ -432,7 +404,6 @@ def generate_appliance_api_feature_lists_header(appliance_api_data: Dict) -> str
     lines.append("")
 
     return "\n".join(lines)
-
 
 def generate_appliance_api_feature_lists_cpp(appliance_api_data: Dict) -> str:
     """Generate the appliance_api_feature_lists.cpp companion file with actual definitions."""
@@ -454,7 +425,6 @@ def generate_appliance_api_feature_lists_cpp(appliance_api_data: Dict) -> str:
     for ver_data in common.get('versions', {}).values():
         all_common_features.extend(ver_data.get('features', []))
 
-    # Generate ERD arrays for each common feature
     for feature in all_common_features:
         sanitized = sanitize_name_for_cpp(feature['name'])
         erds = collect_all_erds_for_common_feature(feature)
@@ -468,7 +438,6 @@ def generate_appliance_api_feature_lists_cpp(appliance_api_data: Dict) -> str:
             lines.append(f"const tiny_erd_t* {array_name} __attribute__((unused)) = nullptr;")
         lines.append("")
 
-    # Generate master common feature descriptor array
     lines.append("const common_feature_descriptor_t common_feature_descriptors[] = {")
     for feature in all_common_features:
         sanitized = sanitize_name_for_cpp(feature['name'])
@@ -499,10 +468,8 @@ def generate_appliance_api_feature_lists_cpp(appliance_api_data: Dict) -> str:
         if (api['featureType'] >> 8) <= 9
     ]
 
-
     array_names = make_array_names(valid_feature_apis)
 
-    # Generate one ERD array per feature per version per appliance API.
     for key, api in valid_feature_apis:
         for ver, ver_data in api.get('versions', {}).items():
             for i, feature in enumerate(ver_data.get('features', [])):
@@ -518,7 +485,6 @@ def generate_appliance_api_feature_lists_cpp(appliance_api_data: Dict) -> str:
                     lines.append(f"const tiny_erd_t* {array_name} __attribute__((unused)) = nullptr;")
                     lines.append("")
 
-    # Generate master descriptor array
     lines.append("const appliance_feature_api_descriptor_t appliance_feature_api_descriptors[] = {")
     for key, api in valid_feature_apis:
         ft = api['featureType']
@@ -539,7 +505,6 @@ def generate_appliance_api_feature_lists_cpp(appliance_api_data: Dict) -> str:
     lines.append("")
 
     return "\n".join(lines)
-
 
 def generate_appliance_type_map(erds: List[Dict]) -> str:
     """Generate the appliance_type_map.h header from ERD 0x0008 (Appliance Type).
@@ -585,7 +550,6 @@ def generate_appliance_type_map(erds: List[Dict]) -> str:
     lines.append("#endif // APPLIANCE_TYPE_MAP_H")
     return "\n".join(lines) + "\n"
 
-
 def find_json_file(filename: str, component_dir: str) -> Optional[str]:
     """Search for a JSON file from the public-appliance-api-documentation library.
 
@@ -595,13 +559,11 @@ def find_json_file(filename: str, component_dir: str) -> Optional[str]:
     search_paths = []
     seen = set()
 
-    # 1. Local submodule (development checkout)
     p = os.path.normpath(os.path.join(component_dir, "..", "..", "lib",
                                       "public-appliance-api-documentation", filename))
     search_paths.append(p)
     seen.add(p)
 
-    # 2. ESPHome library cache in user home
     home_dir = os.path.expanduser("~")
     p = os.path.join(home_dir, ".esphome", "external_files", "libraries",
                      "public-appliance-api-documentation", filename)
@@ -609,14 +571,12 @@ def find_json_file(filename: str, component_dir: str) -> Optional[str]:
         search_paths.append(p)
         seen.add(p)
 
-    # 3. ESPHome library cache in /config (Home Assistant add-on)
     p = os.path.join("/config", ".esphome", "external_files", "libraries",
                      "public-appliance-api-documentation", filename)
     if p not in seen:
         search_paths.append(p)
         seen.add(p)
 
-    # 4. ESPHome library cache relative to component (build directory)
     p = os.path.normpath(os.path.join(component_dir, "..", "..", ".esphome",
                                       "external_files", "libraries",
                                       "public-appliance-api-documentation", filename))
@@ -624,7 +584,6 @@ def find_json_file(filename: str, component_dir: str) -> Optional[str]:
         search_paths.append(p)
         seen.add(p)
 
-    # 5. Parent lib directory (alternative location)
     parent_dir = os.path.dirname(os.path.dirname(component_dir))
     p = os.path.normpath(os.path.join(parent_dir, "lib",
                                       "public-appliance-api-documentation", filename))
@@ -637,7 +596,6 @@ def find_json_file(filename: str, component_dir: str) -> Optional[str]:
             return path
 
     return None
-
 
 def main():
     """Main entry point for the script."""
@@ -669,7 +627,6 @@ def main():
     component_dir = os.path.normpath(args.component_dir)
     output_dir = os.path.normpath(args.output_dir) if args.output_dir else component_dir
 
-    # Resolve JSON file paths: CLI arg > auto-search > local submodule
     def resolve_json(filename, cli_arg):
         if cli_arg and os.path.exists(cli_arg):
             return Path(cli_arg)
@@ -689,7 +646,6 @@ def main():
         print("Make sure git submodules are initialized (git submodule update --init).", file=sys.stderr)
         sys.exit(1)
 
-    # Read and parse JSON
     print(f"Reading ERD definitions from {json_file}")
     with open(json_file, 'r') as f:
         data = json.load(f)
@@ -697,17 +653,12 @@ def main():
     erds = data.get('erds', [])
     print(f"Found {len(erds)} ERD definitions")
 
-    # Categorize ERDs
     categories = categorize_erds(erds)
 
-    # Print statistics
     print("\nERD counts by category:")
     for category, erd_list in categories.items():
         print(f"  {category}: {len(erd_list)}")
 
-    # Calculate required POLLING_LIST_MAX_SIZE.
-    # The polling list holds: common ERDs + energy ERDs + appliance API feature ERDs + appliance-specific ERDs.
-    # Use the worst case across all appliance-specific categories.
     appliance_specific_categories = [
         'waterHeater', 'laundry', 'refrigeration', 'smallAppliance',
         'range', 'dishWasher', 'airConditioning', 'waterFilter'
@@ -721,11 +672,9 @@ def main():
     print(f"  common ERDs: {common_erds_count}, energy ERDs: {energy_erds_count}, appliance API feature ERDs: {appliance_api_feature_erd_count}, max appliance ERDs: {max_appliance_erds}")
     print(f"  POLLING_LIST_MAX_SIZE: {polling_list_max_size}")
 
-    # Generate header (includes POLLING_LIST_MAX_SIZE)
     header_content = generate_header(categories, polling_list_max_size)
     cpp_content = generate_erd_lists_cpp(categories, get_appliance_type_values(erds))
 
-    # Write output
     print(f"\nWriting generated header to {output_file}")
     with open(output_file, 'w') as f:
         f.write(header_content)
@@ -781,7 +730,6 @@ def main():
         f.write(api_cpp_content)
 
     print("Done!")
-
 
 if __name__ == '__main__':
     main()

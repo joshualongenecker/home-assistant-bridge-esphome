@@ -32,7 +32,6 @@ if [ ! -f "$SUBMODULE/appliance_api_erd_definitions.json" ] || [ ! -f "$SUBMODUL
   exit 1
 fi
 
-# Generated files that must match a fresh generator run.
 GENERATED=(
   components/geappliances_bridge/erd_lists.h
   components/geappliances_bridge/erd_lists.cpp
@@ -43,7 +42,6 @@ GENERATED=(
   components/geappliances_bridge/ha_discovery_data.cpp
   scripts/ha_discovery/appliance_api_erd_definitions_processed.json
 )
-# ha_discovery/*.jsonl are generated too; resolve the set from the index.
 mapfile -t JSONL < <(git ls-files 'ha_discovery/*.jsonl')
 GENERATED+=("${JSONL[@]}")
 
@@ -57,8 +55,6 @@ if ! python3 scripts/ha_discovery/run_pipeline.py > /dev/null 2>&1; then
   exit 1
 fi
 
-# Any change (modified, deleted, or newly-created) to a generated file means
-# the committed output is out of sync with the generators.
 CHANGED=$(git status --porcelain -- "${GENERATED[@]}" || true)
 
 if [ -n "$CHANGED" ]; then

@@ -189,7 +189,6 @@ TEST(write_flow_integration, should_report_write_result_on_completion)
 
   when_home_assistant_publishes_write(erd, "01");
 
-  // Simulate write completion.
   uint8_t dummy = 0;
   tiny_gea3_erd_client_on_activity_args_t args;
   args.type = tiny_gea3_erd_client_activity_type_write_completed;
@@ -229,7 +228,6 @@ TEST(write_flow_integration, should_report_write_failure_to_mqtt)
 
   when_home_assistant_publishes_write(erd, "01");
 
-  // Simulate write failure.
   uint8_t dummy = 0;
   tiny_gea3_erd_client_on_activity_args_t args;
   args.type = tiny_gea3_erd_client_activity_type_write_failed;

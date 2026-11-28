@@ -1,4 +1,3 @@
-
 #include "i_bridge_services.h"
 #include "erd_bridge_common.h"
 #include "geappliances_bridge_constants.h"
@@ -7,7 +6,7 @@
 #include "esphome/core/hal.h"
 
 extern "C" {
-#include "tiny_utils.h"  // element_count macro
+#include "tiny_utils.h"  
 }
 
 GEA_TAG(TAG) = "geappliances_bridge_startup_hsm";
@@ -40,9 +39,6 @@ tiny_hsm_result_t startup_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, c
   (void)data;
   (void)hsm;
 
-  // The top state is the root of the hierarchy.  Any signal not consumed
-  // by a child state will bubble up here.  We consume it to avoid the
-  // signal being silently dropped (deferred at root = lost).
   switch (signal) {
     case tiny_hsm_signal_entry:
     case tiny_hsm_signal_exit:
@@ -55,9 +51,6 @@ tiny_hsm_result_t startup_state_top(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, c
   return tiny_hsm_result_signal_consumed;
 }
 
-// Waits AUTODISCOVERY_STARTUP_DELAY_MS before transitioning to autodiscovery.
-// This gives the appliance board time to boot and be ready to respond to
-// broadcast requests.
 tiny_hsm_result_t startup_state_startup_delay(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data)
 {
   IBridgeServices* svc = services_from_hsm(hsm);
@@ -86,8 +79,6 @@ tiny_hsm_result_t startup_state_startup_delay(tiny_hsm_t* hsm, tiny_hsm_signal_t
   return tiny_hsm_result_signal_consumed;
 }
 
-// If no board responds, the manager keeps retrying indefinitely — this state
-// will not transition until a valid board address is found.
 tiny_hsm_result_t startup_state_autodiscovery(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data)
 {
   IBridgeServices* svc = services_from_hsm(hsm);
@@ -126,8 +117,6 @@ tiny_hsm_result_t startup_state_device_id(tiny_hsm_t* hsm, tiny_hsm_signal_t sig
   switch (signal) {
     case tiny_hsm_signal_entry:
       svc->init_device_id_reading();
-      // If a device_id is pre-configured and the manager completes synchronously
-      // during init(), transition immediately.
       if (svc->is_device_id_complete()) {
         tiny_hsm_transition(hsm, startup_state_mqtt_client_init);
       }
@@ -149,7 +138,6 @@ tiny_hsm_result_t startup_state_device_id(tiny_hsm_t* hsm, tiny_hsm_signal_t sig
   return tiny_hsm_result_signal_consumed;
 }
 
-// This phase is fast — it doesn't wait for MQTT connection.
 tiny_hsm_result_t startup_state_mqtt_client_init(tiny_hsm_t* hsm, tiny_hsm_signal_t signal, const void* data)
 {
   IBridgeServices* svc = services_from_hsm(hsm);
@@ -220,8 +208,6 @@ tiny_hsm_result_t startup_state_bridge_init(tiny_hsm_t* hsm, tiny_hsm_signal_t s
       if (!svc->is_bridge_initialized() &&
           svc->is_autodiscovery_complete()) {
         svc->initialize_erd_bridge();
-        // Do NOT transition here — wait for signal_bridge_ready from the
-        // polling bridge when ERD discovery is complete.
       }
       break;
 
@@ -287,9 +273,6 @@ tiny_hsm_result_t startup_state_running(tiny_hsm_t* hsm, tiny_hsm_signal_t signa
 
   switch (signal) {
     case tiny_hsm_signal_entry:
-      // Check steady state immediately on entry so the log fires even if
-      // subsequent loop() calls are delayed by the long probe phase that
-      // triggered the transition.
       svc->check_steady_state();
       break;
 
@@ -334,5 +317,5 @@ const tiny_hsm_configuration_t startup_hsm_configuration = {
   .state_count = element_count(startup_hsm_state_descriptors)
 };
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}

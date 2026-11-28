@@ -4,6 +4,17 @@
 
 - When a PR is updated with a new commit, the PR description and title must be updated to reflect the context of **all changes in the PR**, not just the changes from the latest commit or request.
 
+## Never Add Code Comments
+
+**First-party source carries no prose comments. Do not add any, and do not "helpfully" restate one that was removed.**
+
+- `make check-comments` fails CI if any file exceeds its comment baseline in `scripts/comment_baseline.json`. Never raise a baseline value.
+- Rationale for a decision goes in `docs/adr/NNNN-<slug>.md` (with a Code anchors section) or the module's `docs/spec/<module>.md` § Notes.
+- Protocol and wire facts go in `docs/reference/`.
+- Exempt: submodules, vendored `miniz*`, generated files, Python docstrings, and tool directives (`NOLINT`, `LCOV_EXCL_*`, `clang-format`, `type: ignore`, `noqa`).
+
+Triage rubric and the removal procedure: `docs/comment-policy.md` and `.omp/skills/delete-comment/SKILL.md`.
+
 ## Never Merge PRs
 
 **You must never merge a PR yourself. Only the user can merge a PR.**

@@ -1,8 +1,3 @@
-/*!
- * @file
- * @brief Stub for esphome/components/sensor/sensor.h — provides Sensor class for tests.
- */
-
 #ifndef esphome_components_sensor_sensor_h
 #define esphome_components_sensor_sensor_h
 
@@ -19,7 +14,7 @@ class Sensor {
   virtual void publish_state(const std::string& value) { (void)value; }
 };
 
-}  // namespace sensor
-}  // namespace esphome
+}
+}
 
-#endif  // esphome_components_sensor_sensor_h
+#endif

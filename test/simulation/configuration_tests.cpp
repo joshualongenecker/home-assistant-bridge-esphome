@@ -1,7 +1,7 @@
 /*!
  * @file
  * @brief Comprehensive configuration-based tests for the GEA bridge.
- * 
+ *
  * These tests validate different YAML configuration scenarios and their
  * resulting behavior at the application level, simulating various real-world
  * appliance configurations and operational modes.
@@ -19,46 +19,32 @@ extern "C" {
 #include "double/tiny_gea3_erd_client_double.hpp"
 #include "double/tiny_timer_group_double.hpp"
 
-/*!
- * Test group for configuration-based application-level tests.
- * 
- * These tests simulate different YAML configuration scenarios:
- * - Mode: auto, subscribe, poll
- * - Device ID: auto-generated vs. configured
- * - Polling intervals: various values
- * - Different appliance types
- */
 TEST_GROUP(configuration_based_tests)
 {
   enum {
-    host_address = 0xC0,  // Default GEA3 host address
+    host_address = 0xC0,
     client_address = 0xE4,
-    default_polling_interval = 10 * 1000,  // 10 seconds
-    fast_polling_interval = 5 * 1000,      // 5 seconds
-    slow_polling_interval = 30 * 1000,     // 30 seconds
+    default_polling_interval = 10 * 1000,
+    fast_polling_interval = 5 * 1000,
+    slow_polling_interval = 30 * 1000,
   };
   
-  // Common ERD identifiers
   enum {
     ERD_APPLIANCE_TYPE = 0x0008,
     ERD_MODEL_NUMBER = 0x0001,
     ERD_SERIAL_NUMBER = 0x0002,
     
-    // Dishwasher ERDs
     ERD_DISHWASHER_CYCLE_STATE = 0x3001,
     ERD_DISHWASHER_OPERATING_MODE = 0x3002,
     ERD_DISHWASHER_DOOR_STATUS = 0x3003,
     
-    // Refrigerator ERDs
     ERD_FRIDGE_TEMPERATURE = 0x0502,
     ERD_FREEZER_TEMPERATURE = 0x0503,
     ERD_ICE_MAKER_BUCKET_STATUS = 0x0504,
     
-    // Laundry ERDs
     ERD_LAUNDRY_CYCLE = 0x2001,
     ERD_LAUNDRY_END_TIME = 0x2002,
     
-    // Appliance types
     APPLIANCE_TYPE_DISHWASHER = 6,
     APPLIANCE_TYPE_REFRIGERATOR = 5,
     APPLIANCE_TYPE_WASHER = 3,
@@ -87,11 +73,6 @@ TEST_GROUP(configuration_based_tests)
     erd_cache_destroy(&test_cache);
   }
   
-  // Configuration Scenarios
-  
-  /*!
-   * Simulate configuration: mode: subscribe (default device_id auto-generation)
-   */
   void configure_subscription_mode(uint8_t address = host_address)
   {
     erd_bridge_subscribe_init(
@@ -102,9 +83,6 @@ TEST_GROUP(configuration_based_tests)
       &test_cache);
   }
   
-  /*!
-   * Simulate configuration: mode: poll, polling_interval: 10000
-   */
   void configure_polling_mode(
     uint32_t polling_interval = default_polling_interval)
   {
@@ -116,8 +94,6 @@ TEST_GROUP(configuration_based_tests)
       0xC0, nullptr, 0,
       &test_cache);
   }
-  
-  // Helper methods for simulating appliance behavior
   
   void simulate_erd_read_response(
     tiny_gea3_erd_client_request_id_t request_id,
@@ -173,21 +149,17 @@ TEST_GROUP(configuration_based_tests)
 
 TEST(configuration_based_tests, config_subscription_mode_dishwasher_cycle)
 {
-  // Configuration: mode: subscribe
   mock().disable();
   configure_subscription_mode();
   simulate_subscription_added();
   mock().enable();
   
-  // Simulate dishwasher starting a cycle
   uint8_t cycle_state_running[] = {0x01};
   simulate_erd_publication(ERD_DISHWASHER_CYCLE_STATE, cycle_state_running, sizeof(cycle_state_running));
 
-  // Simulate door status update
   uint8_t door_closed[] = {0x00};
   simulate_erd_publication(ERD_DISHWASHER_DOOR_STATUS, door_closed, sizeof(door_closed));
 
-  // Verify both ERDs are in the cache
   CHECK(erd_cache_get_count(&test_cache) == 2);
 }
 
@@ -201,25 +173,21 @@ TEST(configuration_based_tests, config_subscription_mode_dishwasher_cycle)
 
 TEST(configuration_based_tests, config_subscription_mode_refrigerator_temperatures)
 {
-  // Configuration: mode: subscribe
   mock().disable();
   configure_subscription_mode();
   simulate_subscription_added();
   mock().enable();
   
   // Simulate refrigerator temperature update (big-endian)
-  uint8_t fridge_temp[] = {0x00, 0x25};  // 37°F
+  uint8_t fridge_temp[] = {0x00, 0x25};
   simulate_erd_publication(ERD_FRIDGE_TEMPERATURE, fridge_temp, sizeof(fridge_temp));
 
-  // Simulate freezer temperature update
-  uint8_t freezer_temp[] = {0x00, 0x00};  // 0°F
+  uint8_t freezer_temp[] = {0x00, 0x00};
   simulate_erd_publication(ERD_FREEZER_TEMPERATURE, freezer_temp, sizeof(freezer_temp));
 
-  // Simulate ice maker status
   uint8_t ice_maker_full[] = {0x01};
   simulate_erd_publication(ERD_ICE_MAKER_BUCKET_STATUS, ice_maker_full, sizeof(ice_maker_full));
 
-  // Verify all three ERDs are in the cache
   CHECK(erd_cache_get_count(&test_cache) == 3);
 }
 
@@ -234,11 +202,9 @@ TEST(configuration_based_tests, config_subscription_mode_refrigerator_temperatur
 
 TEST(configuration_based_tests, config_polling_mode_default_interval)
 {
-  // Configuration: mode: poll, polling_interval: 10000
   mock().disable();
   configure_polling_mode(default_polling_interval);
 
-  // Bridge should be in probe state after init.
   mock().enable();
   CHECK(erd_bridge_poll.current_state == polling_state_polling);
 }
@@ -254,11 +220,9 @@ TEST(configuration_based_tests, config_polling_mode_default_interval)
 
 TEST(configuration_based_tests, config_polling_mode_fast_interval)
 {
-  // Configuration: mode: poll, polling_interval: 5000
   mock().disable();
   configure_polling_mode(fast_polling_interval);
 
-  // Bridge should be in probe state after init.
   mock().enable();
   CHECK(erd_bridge_poll.current_state == polling_state_polling);
 }
@@ -274,11 +238,9 @@ TEST(configuration_based_tests, config_polling_mode_fast_interval)
 
 TEST(configuration_based_tests, config_polling_mode_slow_interval)
 {
-  // Configuration: mode: poll, polling_interval: 30000
   mock().disable();
   configure_polling_mode(slow_polling_interval);
 
-  // Bridge should be in probe state after init.
   mock().enable();
   CHECK(erd_bridge_poll.current_state == polling_state_polling);
 }
@@ -293,21 +255,17 @@ TEST(configuration_based_tests, config_polling_mode_slow_interval)
 
 TEST(configuration_based_tests, config_subscription_mode_washer_cycle)
 {
-  // Configuration: mode: subscribe
   mock().disable();
   configure_subscription_mode();
   simulate_subscription_added();
   mock().enable();
   
-  // Simulate washer cycle state change
-  uint8_t cycle_running[] = {0x02};  // Wash cycle
+  uint8_t cycle_running[] = {0x02};
   simulate_erd_publication(ERD_LAUNDRY_CYCLE, cycle_running, sizeof(cycle_running));
 
-  // Simulate end time update (4 bytes - time in minutes)
-  uint8_t end_time[] = {0x00, 0x00, 0x00, 0x2D};  // 45 minutes
+  uint8_t end_time[] = {0x00, 0x00, 0x00, 0x2D};
   simulate_erd_publication(ERD_LAUNDRY_END_TIME, end_time, sizeof(end_time));
 
-  // Verify both ERDs are in the cache
   CHECK(erd_cache_get_count(&test_cache) == 2);
 }
 
@@ -318,25 +276,20 @@ TEST(configuration_based_tests, config_subscription_mode_washer_cycle)
 
 TEST(configuration_based_tests, config_subscription_mode_mixed_erd_sizes)
 {
-  // Configuration: mode: subscribe
   mock().disable();
   configure_subscription_mode();
   simulate_subscription_added();
   mock().enable();
 
-  // 1-byte ERD
   uint8_t single_byte[] = {0xAB};
   simulate_erd_publication(ERD_DISHWASHER_DOOR_STATUS, single_byte, sizeof(single_byte));
 
-  // 2-byte ERD
   uint8_t two_bytes[] = {0x12, 0x34};
   simulate_erd_publication(ERD_FRIDGE_TEMPERATURE, two_bytes, sizeof(two_bytes));
 
-  // 4-byte ERD
   uint8_t four_bytes[] = {0xDE, 0xAD, 0xBE, 0xEF};
   simulate_erd_publication(ERD_LAUNDRY_END_TIME, four_bytes, sizeof(four_bytes));
 
-  // Verify all three ERDs are in the cache
   CHECK(erd_cache_get_count(&test_cache) == 3);
 }
 // ============================================================================
@@ -439,7 +392,6 @@ TEST_GROUP(dual_subscription_config)
 
 TEST(dual_subscription_config, each_bridge_subscribes_to_its_own_address)
 {
-  // Expect bridge A to subscribe to address_appliance_a
   mock()
     .expectOneCall("subscribe")
     .onObject(&erd_client)
@@ -452,7 +404,6 @@ TEST(dual_subscription_config, each_bridge_subscribes_to_its_own_address)
     address_appliance_a,
     &test_cache);
 
-  // Expect bridge B to subscribe to address_appliance_b
   mock()
     .expectOneCall("subscribe")
     .onObject(&erd_client)
@@ -479,15 +430,12 @@ TEST(dual_subscription_config, publications_routed_to_correct_mqtt_client)
   given_both_bridges_are_initialized();
   given_both_subscriptions_are_active();
 
-  // Appliance A (dishwasher) publishes cycle state
   uint8_t cycle_state[] = {0x01};
   simulate_publication(address_appliance_a, ERD_DISHWASHER_CYCLE, cycle_state, sizeof(cycle_state));
 
-  // Appliance B (refrigerator) publishes temperature
   uint8_t fridge_temp[] = {0x00, 0x25};
   simulate_publication(address_appliance_b, ERD_FRIDGE_TEMP, fridge_temp, sizeof(fridge_temp));
 
-  // Verify both ERDs are in the cache
   CHECK(erd_cache_get_count(&test_cache) == 2);
 }
 
@@ -502,11 +450,9 @@ TEST(dual_subscription_config, publications_from_one_appliance_not_forwarded_to_
   given_both_bridges_are_initialized();
   given_both_subscriptions_are_active();
 
-  // Bridge A receives an ERD publication
   uint8_t cycle_state[] = {0x02};
   simulate_publication(address_appliance_a, ERD_DISHWASHER_CYCLE, cycle_state, sizeof(cycle_state));
 
-  // Verify only one ERD is in the cache (from appliance A only)
   CHECK(erd_cache_get_count(&test_cache) == 1);
 }
 

@@ -1,12 +1,3 @@
-/*!
- * @file
- * @brief Whether a Home Assistant discovery category applies to an appliance type.
- *
- * Hand-written, but it holds no appliance knowledge of its own: the type ->
- * category fact lives in the generated applianceTypeToErdGroupTranslation[]
- * table (scripts/appliance_type_categories.py is its source of truth). Adding a
- * new appliance type therefore only means updating that Python mapping.
- */
 #ifndef APPLIANCE_TYPE_CATEGORY_H
 #define APPLIANCE_TYPE_CATEGORY_H
 
@@ -29,4 +20,4 @@ static inline bool should_process_category(const char* category, uint8_t applian
   return type_category != nullptr && strcmp(type_category, category) == 0;
 }
 
-#endif  // APPLIANCE_TYPE_CATEGORY_H
+#endif

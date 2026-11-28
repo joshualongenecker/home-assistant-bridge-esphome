@@ -25,7 +25,6 @@ using namespace esphome::geappliances_bridge;
 
 class MockBridgeServices : public IBridgeServices {
  public:
-  // -- Autodiscovery ----------------------------------------------------------
   void run_autodiscovery() override {
     mock().actualCall("run_autodiscovery").onObject(this);
   }
@@ -42,7 +41,6 @@ class MockBridgeServices : public IBridgeServices {
                .returnBoolValueOrDefault(false);
   }
 
-  // -- Device ID --------------------------------------------------------------
   void init_device_id_reading() override {
     mock().actualCall("init_device_id_reading").onObject(this);
   }
@@ -51,7 +49,6 @@ class MockBridgeServices : public IBridgeServices {
                .returnBoolValueOrDefault(false);
   }
 
-  // -- MQTT client adapter ----------------------------------------------------
   bool is_mqtt_client_initialized() const override {
     return mock().actualCall("is_mqtt_client_initialized").onObject(this)
                .returnBoolValueOrDefault(false);
@@ -60,7 +57,6 @@ class MockBridgeServices : public IBridgeServices {
     mock().actualCall("initialize_mqtt_client").onObject(this);
   }
 
-  // -- Feature bits -----------------------------------------------------------
   void start_feature_bit_reading() override {
     mock().actualCall("start_feature_bit_reading").onObject(this);
   }
@@ -69,7 +65,6 @@ class MockBridgeServices : public IBridgeServices {
                .returnBoolValueOrDefault(false);
   }
 
-  // -- Bridge initialization --------------------------------------------------
   bool is_bridge_initialized() const override {
     return mock().actualCall("is_bridge_initialized").onObject(this)
                .returnBoolValueOrDefault(false);
@@ -78,7 +73,6 @@ class MockBridgeServices : public IBridgeServices {
     mock().actualCall("initialize_erd_bridge").onObject(this);
   }
 
-  // -- Operating mode ---------------------------------------------------------
   BridgeMode get_mode() const override {
     return static_cast<BridgeMode>(
       mock().actualCall("get_mode").onObject(this)
@@ -95,7 +89,6 @@ class MockBridgeServices : public IBridgeServices {
         .returnIntValueOrDefault(polling_state_none));
   }
 
-  // -- Startup delay ----------------------------------------------------------
   void record_startup_delay_start() override {
     mock().actualCall("record_startup_delay_start").onObject(this);
   }
@@ -104,7 +97,6 @@ class MockBridgeServices : public IBridgeServices {
                .returnBoolValueOrDefault(false);
   }
 
-  // -- Recurring tasks --------------------------------------------------------
   void handle_subscription_failed() override {
     mock().actualCall("handle_subscription_failed").onObject(this);
   }
@@ -245,7 +237,6 @@ TEST(startup_hsm, full_startup_flow_reaches_running)
   /* Set up all mock expectations upfront in the order they will be called. */
   /* Phase 1: startup_delay entry */
   mock().expectOneCall("record_startup_delay_start").onObject(&svc);
-  /* Phase 2: startup_delay run_loop → autodiscovery entry */
   mock().expectOneCall("is_startup_delay_elapsed").onObject(&svc).andReturnValue(true);
   mock().expectOneCall("run_autodiscovery").onObject(&svc);
   /* Phase 3: autodiscovery run_loop → device_id → mqtt_client_init → feature_bits */
@@ -257,18 +248,13 @@ TEST(startup_hsm, full_startup_flow_reaches_running)
   mock().expectOneCall("is_erd_cache_publisher_initialized").onObject(&svc).andReturnValue(false);
   mock().expectOneCall("initialize_erd_cache_publisher").onObject(&svc);
   mock().expectOneCall("start_feature_bit_reading").onObject(&svc);
-  /* Phase 4: feature_bits run_loop → bridge_init */
   mock().expectOneCall("is_feature_bits_complete").onObject(&svc).andReturnValue(true);
-  /* Phase 5: bridge_init run_loop */
   mock().expectOneCall("is_bridge_initialized").onObject(&svc).andReturnValue(false);
   mock().expectOneCall("is_autodiscovery_complete").onObject(&svc).andReturnValue(true);
   mock().expectOneCall("initialize_erd_bridge").onObject(&svc);
-  /* Phase 6: subscription_watch entry -> running (POLL mode) */
   mock().expectOneCall("get_mode").onObject(&svc).andReturnValue(BRIDGE_MODE_POLL);
   mock().expectOneCall("maybe_start_custom_erd_polling").onObject(&svc);
-  /* Phase 7: running entry checks steady state */
   mock().expectOneCall("check_steady_state").onObject(&svc).andReturnValue(false);
-  /* Phase 7: running run_loop */
   mock().expectOneCall("get_subscription_state").onObject(&svc).andReturnValue(static_cast<subscription_state_t>(subscription_state_none));
   mock().expectOneCall("handle_polling_failed").onObject(&svc);
   mock().expectOneCall("log_poll_state_transitions").onObject(&svc);
@@ -295,7 +281,6 @@ TEST(startup_hsm, full_startup_flow_reaches_running)
   CHECK(wrapper.hsm.current == startup_state_bridge_init);
 
   tiny_hsm_send_signal(&wrapper.hsm, signal_bridge_ready, nullptr);
-  /* After bridge_ready, we should be in running (non-AUTO mode). */
   CHECK(wrapper.hsm.current == startup_state_running);
 
   tiny_hsm_send_signal(&wrapper.hsm, signal_run_loop, nullptr);

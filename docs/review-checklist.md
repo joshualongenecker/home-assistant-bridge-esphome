@@ -59,3 +59,10 @@ Use this checklist before committing documentation changes.
 - [ ] If ERD definitions, overrides, or pipeline scripts changed, the pipeline was rerun.
 - [ ] The [docs/README.md](./README.md) index is updated if new docs were added.
 - [ ] No generated files (`.pyc`, build artifacts) are included.
+
+## Source Comments
+
+- [ ] `make check-comments` passes (no file exceeds its comment baseline).
+- [ ] Any rationale a removed comment carried is now in an ADR or the module spec's Notes.
+- [ ] New ADRs are listed in [adr/README.md](./adr/README.md) with Code anchors.
+- [ ] Excuse comments that were deleted have a filed issue for the underlying hack.

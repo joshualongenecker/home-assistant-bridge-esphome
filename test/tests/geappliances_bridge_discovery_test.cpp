@@ -77,7 +77,6 @@ TEST(geappliances_bridge_discovery, button_inherits_from_button_base)
 
 TEST(geappliances_bridge_discovery, setter_toggles_are_safe)
 {
-  /* Repeatedly toggling both setters doesn't crash. */
   for (int i = 0; i < 10; i++) {
     bridge.set_generate_device_config(i % 2 == 0);
     bridge.set_filter_config_topics(i % 2 != 0);

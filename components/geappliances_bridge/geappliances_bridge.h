@@ -98,20 +98,9 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   void add_custom_erds_with_addresses(const uint16_t* erds, const uint8_t* addresses, uint16_t count);
   void add_custom_erd(tiny_erd_t erd);
   void trigger_discovery_refresh();
-  // Treat the appliance as lost: drop the appliance-side data path
-  // (subscription, polling and write bridges), clear the ERD cache contents,
-  // the valid-ERD filter and the feature bits, and run the appliance startup
-  // again from the stabilization delay: autodiscovery, feature bits, bridge
-  // init. The MQTT client, the device ID, the cache object and its publisher,
-  // and the HA discovery state are kept; the device does not reboot. For
-  // when the appliance's boards were reprogrammed or reset behind the
-  // bridge's back (the Reconnect Appliance button). Safe to call from any
-  // main-loop context: the restart runs at the start of the next loop(), once
-  // no HA discovery run is in progress.
   void restart_appliance_connection();
 
  protected:
-  // ── IBridgeServices implementation (called exclusively by the startup HSM) ──
   void run_autodiscovery() override;
   bool is_autodiscovery_complete() const override;
   uint8_t get_discovered_host_address() const override;
@@ -166,18 +155,9 @@ class GeappliancesBridge : public Component, public IBridgeServices {
     kSubscriptionCustomPolling,
     kSubscriptionSettled,
   };
-  // One-way readiness latch: true once the appliance-side data path has
-  // reached steady-state operation. Kept separate from the phase because a
-  // failure rebuild returns the phase to kPolling while the latch stays set.
   enum class DataPlaneReadiness { kNotSteady, kSteady };
-  // Publisher pause machine: the ERD cache publisher pauses while HA
-  // discovery publishes and resumes afterwards; kResuming tracks the
-  // post-resume drain so "Device is in steady state" logs exactly once.
   enum class PublisherPausePhase { kIdle, kPaused, kResuming };
 
-  // Whether the phase implies a live subscription/polling bridge. The
-  // subscription bridge survives a custom-polling failure and the settled
-  // state; the polling bridge exists only in the two polling phases.
   static bool phase_has_subscription_bridge(DataPlanePhase phase) {
     return phase == DataPlanePhase::kSubscription ||
            phase == DataPlanePhase::kSubscriptionCustomPolling ||
@@ -189,9 +169,6 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   }
   void log_poll_state_transitions_();
   void update_publisher_state_();
-  // Readiness predicate handed to DiscoveryLifecycleManager: the bridge owns
-  // steady state and MQTT initialization, so it answers instead of exposing
-  // those members as references the manager could alias.
   static bool discovery_is_ready_(void* context);
   void start_feature_bit_reading_();
   void init_erd_cache_publisher_();
@@ -204,22 +181,14 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   void destroy_data_plane_();
   void restart_appliance_connection_now_();
 
-  // Set by restart_appliance_connection(); loop() acts on it
   bool restart_requested_{false};
-  // The MQTT write-topic subscription outlives the write bridge: it routes
-  // through the MQTT adapter, which every write bridge re-subscribes to, so a
-  // restart must not subscribe the topic a second time.
   bool write_topic_subscribed_{false};
 
   startup_hsm_wrapper_t startup_hsm_wrapper_;
-  // ── Data-plane phase machine state ──
   DataPlanePhase data_plane_phase_{DataPlanePhase::kIdle};
   DataPlaneReadiness data_plane_readiness_{DataPlaneReadiness::kNotSteady};
   PublisherPausePhase publisher_pause_phase_{PublisherPausePhase::kIdle};
 
-  // Wire-level protocol machinery: UART adapters, GEA2/GEA3 interfaces, both
-  // ERD clients, the GEA2→GEA3 adapter, their buffers, the GEA2 tick source,
-  // and the shared timer group (see protocol_stack.h).
   ProtocolStack protocol_stack_;
 
   uart::UARTComponent *uart_{nullptr};
@@ -237,16 +206,12 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   uint8_t throttle_rate_seconds_{1};
   uint32_t last_cooldown_tick_{0};
   static constexpr uint16_t CUSTOM_ERDS_MAX = 128;
-  // ErdRegistry stores customs in its own ERD_REGISTRY_MAX_EXTRA side array;
-  // a smaller side array would silently drop customs past the cap.
   static_assert(ERD_REGISTRY_MAX_EXTRA >= CUSTOM_ERDS_MAX,
                 "ERD_REGISTRY_MAX_EXTRA must cover CUSTOM_ERDS_MAX");
   struct custom_erd_entry_t {
     tiny_erd_t erd;
     uint8_t board_address;
   };
-  // Lent to HA discovery as ha_discovery_board_erd_t and to the poll-list
-  // builder as probe_entry_t, so the three layouts must stay the same.
   static_assert(sizeof(custom_erd_entry_t) == sizeof(ha_discovery_board_erd_t) &&
                 offsetof(custom_erd_entry_t, erd) == offsetof(ha_discovery_board_erd_t, erd) &&
                 offsetof(custom_erd_entry_t, board_address) ==
@@ -259,9 +224,6 @@ class GeappliancesBridge : public Component, public IBridgeServices {
                 "custom_erd_entry_t must match probe_entry_t");
   custom_erd_entry_t custom_erds_[CUSTOM_ERDS_MAX];
   uint16_t custom_erds_count_{0};
-  // Retain the address with the ERD when subscription mode falls back to
-  // polling. A bare ERD ID would silently route every fallback read to the
-  // primary board.
   probe_entry_t subscription_unseen_custom_erds_[CUSTOM_ERDS_MAX];
   uint16_t subscription_unseen_custom_erds_count_{0};
 
@@ -289,11 +251,6 @@ class GeappliancesBridge : public Component, public IBridgeServices {
 
   ErdRegistry erd_registry_;
 
-  // Value-initialized on purpose: teardown() dispatches on
-  // erd_cache_publisher_.cache, and erd_cache_destroy() guards on
-  // self->initialized before deleting self->lock, so a heap-allocated bridge
-  // must not start out with garbage in either field -- those guards decide
-  // whether the destroy paths run at all.
   erd_cache_mqtt_publisher_t erd_cache_publisher_{};
   erd_cache_t erd_cache_{};
 
@@ -310,14 +267,9 @@ class GeappliancesBridge : public Component, public IBridgeServices {
   ha_discovery_manager_t ha_discovery_manager_{};
 
   AutodiscoveryManager autodiscovery_manager_;
-  // HA discovery lifecycle: initial publish, cleanup + republish (OTA, config
-  // change, Discovery Refresh) and the reboot that follows a successful
-  // publish. Driven from loop() once steady state is reached.
   DiscoveryLifecycleManager discovery_lifecycle_manager_;
   DiagnosticSensorPublisher diagnostic_sensor_publisher_;
 
-  // The i_mqtt_client_t wrappers in i_mqtt_client.h call straight through
-  // self->api, so this must start out NULL rather than whatever the heap had.
   esphome_mqtt_client_adapter_t mqtt_client_adapter_{};
 
   erd_bridge_subscribe_t erd_bridge_subscribe_;
@@ -357,5 +309,5 @@ class ReconnectApplianceButton : public button::Button {
   GeappliancesBridge* bridge_;
 };
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}

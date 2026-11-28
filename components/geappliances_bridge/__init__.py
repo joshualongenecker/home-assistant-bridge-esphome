@@ -19,11 +19,9 @@ CODEOWNERS = ["@joshualongenecker"]
 DEPENDENCIES = ["uart", "mqtt"]
 AUTO_LOAD = ["sensor", "button"]
 
-# UART configuration keys
 CONF_GEA3_UART_ID = "gea3_uart_id"
 CONF_GEA2_UART_ID = "gea2_uart_id"
 
-# Bridge (MQTT) configuration keys
 CONF_ADAPTER_ADDRESS = "adapter_address"
 CONF_DEVICE_ID = "device_id"
 CONF_MODE = "mode"
@@ -45,14 +43,10 @@ CONF_RECONNECT_APPLIANCE_BUTTON = "reconnect_appliance_button"
 CONF_CUSTOM_HA_DISCOVERY_FILE = "custom_ha_discovery_file"
 CONF_BOARD_ADDRESS = "board_address"
 
-
-
-# Bridge mode options (polling vs subscriptions)
 MODE_POLL = "poll"
 MODE_SUBSCRIBE = "subscribe"
 MODE_AUTO = "auto"
 
-# Mode enum values (must match BridgeMode enum in C++)
 MODE_POLL_VALUE = 0
 MODE_SUBSCRIBE_VALUE = 1
 MODE_AUTO_VALUE = 2
@@ -62,22 +56,14 @@ GeappliancesBridge = geappliances_bridge_ns.class_(
     "GeappliancesBridge", cg.Component
 )
 
-# Concrete button subclass for discovery refresh (Button is abstract)
 DiscoveryRefreshButton = geappliances_bridge_ns.class_(
     "DiscoveryRefreshButton", button.Button
 )
 
-# Treats the appliance as lost and connects to it again, without rebooting
 ReconnectApplianceButton = geappliances_bridge_ns.class_(
     "ReconnectApplianceButton", button.Button
 )
 
-
-# Diagnostic entities are created unless their option is set to `false`. Their defaults live
-# in CONFIG_SCHEMA so config validation materializes the entity `id` and, because this
-# component depends on `mqtt`, an `mqtt_id`. Codegen emits the MQTTSensorComponent /
-# MQTTButton wrapper that publishes an entity's state only for entities carrying that key,
-# so entities assembled by hand here were registered but never published.
 DIAGNOSTIC_ENTITY_KEYS = (
     CONF_ERD_PUBLISH_RATE_SENSOR,
     CONF_ERD_CACHE_ENTRIES_SENSOR,
@@ -88,7 +74,6 @@ DIAGNOSTIC_ENTITY_KEYS = (
     CONF_DISCOVERY_REFRESH_BUTTON,
     CONF_RECONNECT_APPLIANCE_BUTTON,
 )
-
 
 def expand_diagnostic_entity_defaults(config: dict[str, Any]) -> dict[str, Any]:
     """Normalize a literal `true` diagnostic-entity option to `{}` before validation.
@@ -102,7 +87,6 @@ def expand_diagnostic_entity_defaults(config: dict[str, Any]) -> dict[str, Any]:
             config[key] = {}
     return config
 
-
 async def _create_diagnostic_sensor(config: dict[str, Any], config_key: str, var: Any, setter_name: str) -> None:
     """Create a diagnostic sensor unless its option is `false`.
 
@@ -114,7 +98,6 @@ async def _create_diagnostic_sensor(config: dict[str, Any], config_key: str, var
         return
     sens = await sensor.new_sensor(val)
     cg.add(getattr(var, setter_name)(sens))
-
 
 def validate_at_least_one_uart(config: dict[str, Any]) -> dict[str, Any]:
     """Validate that at least one UART ID is specified.
@@ -132,7 +115,6 @@ def validate_at_least_one_uart(config: dict[str, Any]) -> dict[str, Any]:
         raise cv.Invalid("At least one of gea3_uart_id or gea2_uart_id must be specified")
     return config
 
-
 def validate_board_address_not_adapter_address(config: dict[str, Any]) -> dict[str, Any]:
     """Validate that board_address does not collide with adapter_address."""
     if CONF_BOARD_ADDRESS in config:
@@ -144,7 +126,6 @@ def validate_board_address_not_adapter_address(config: dict[str, Any]) -> dict[s
                 f"adapter_address (0x{adapter_addr:02X}) — the bridge would probe itself"
             )
     return config
-
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -213,10 +194,6 @@ CONFIG_SCHEMA = cv.Schema(
                 cv.Optional("name", default="Discovery Refresh"): cv.string,
             })),
         ),
-        # Drops the appliance-side data path, the ERD cache and the feature
-        # bits, and runs autodiscovery and the appliance startup again; MQTT
-        # and the device stay up. For after the appliance's boards were
-        # reprogrammed or reset (press it from YAML with button.press).
         cv.Optional(CONF_RECONNECT_APPLIANCE_BUTTON, default={}): cv.Any(
             cv.boolean_false,
             button.button_schema(ReconnectApplianceButton, icon="mdi:lan-connect").extend(cv.Schema({
@@ -228,74 +205,44 @@ CONFIG_SCHEMA = cv.Schema(
 ).extend(cv.COMPONENT_SCHEMA)
 CONFIG_SCHEMA = cv.All(expand_diagnostic_entity_defaults, CONFIG_SCHEMA, validate_at_least_one_uart, validate_board_address_not_adapter_address)
 
-
 async def to_code(config: dict[str, Any]) -> None:
     """Generate C++ code for the component.
 
     Args:
         config: Configuration dictionary
     """
-    # Add library dependencies (pinned to specific commit SHAs to prevent
-    # silent breakage from upstream branch movement)
-    # tiny-gea-api transitively depends on ryanplusplus/tiny (^7.1.3).
-    # Pinning tiny-gea-api to a commit SHA is sufficient — adding tiny
-    # directly creates a duplicate graph node ("ryanplusplus/tiny" vs "tiny")
-    # that triggers a deduplication warning in ESPHome 2026.x.
     cg.add_library("tiny-gea-api", None, "https://github.com/geappliances/tiny-gea-api#4fa8fee8297e24baa91bfe4a464088a73e7c6a5a")
-    # Force async MQTT sends on ESP32 to prevent TWDT crashes.
-    # ESPHome defaults idf_send_async to False for ESP32, which means
-    # esp_mqtt_client_publish() is synchronous and can block for seconds
-    # (network timeout, send buffer full, message fragmentation).
-    # On single-core ESP32 variants (C3, C6, S3), a blocking publish from
-    # the background mqtt_publisher_task stalls the MQTT library's internal
-    # state machine, preventing the main task from running and feeding the
-    # Task Watchdog Timer — resulting in a TWDT reset.
-    # The enqueue path (USE_MQTT_IDF_ENQUEUE) uses a lock-free queue and a
-    # dedicated background task to drain publishes, making publish() non-blocking.
     if CORE.is_esp32:
         cg.add_define("USE_MQTT_IDF_ENQUEUE")
     
     var = cg.new_Pvariable(config[CONF_ID])
-    # Deprecation warning for polling_onlypublish_onchange
     if CONF_POLLING_ONLY_PUBLISH_ON_CHANGE in config:
         _LOGGER.warning(
             "polling_onlypublish_onchange is deprecated and will be removed in a future release. "
             "The component now always publishes only on change."
 )
     await cg.register_component(var, config)
-    # Architecture review rec 9: a device that configures one UART cannot use
-    # the other protocol's ring buffers, so ProtocolStack compiles them out
-    # (8447 B of static storage for GEA2, 5351 B for GEA3).
-    # Load-bearing coupling: these defines are emitted under exactly the
-    # conditions that make the set_gea3_uart / set_gea2_uart calls below
-    # happen. protocol_stack.h documents why the two must agree.
     if CONF_GEA3_UART_ID in config:
         cg.add_define("GEA_BRIDGE_HAS_GEA3")
     if CONF_GEA2_UART_ID in config:
         cg.add_define("GEA_BRIDGE_HAS_GEA2")
 
-    # Get optional GEA3 UART component reference
     if CONF_GEA3_UART_ID in config:
         gea3_uart_component = await cg.get_variable(config[CONF_GEA3_UART_ID])
         cg.add(var.set_gea3_uart(gea3_uart_component))
 
-    # Get optional GEA2 UART component reference
     if CONF_GEA2_UART_ID in config:
         gea2_uart_component = await cg.get_variable(config[CONF_GEA2_UART_ID])
         cg.add(var.set_gea2_uart(gea2_uart_component))
 
-    # Set device ID if provided, otherwise it will be auto-generated
     if CONF_DEVICE_ID in config:
         cg.add(var.set_device_id(config[CONF_DEVICE_ID]))
 
-    # Set adapter address (defaults to 0xE4)
     cg.add(var.set_client_address(config[CONF_ADAPTER_ADDRESS]))
 
-    # Set board address if provided (probes specific address instead of broadcast)
     if CONF_BOARD_ADDRESS in config:
         cg.add(var.set_board_address(config[CONF_BOARD_ADDRESS]))
 
-    # Set bridge mode configuration (config[CONF_MODE] is now an integer from cv.enum)
     cg.add(var.set_mode(config[CONF_MODE]))
     cg.add(var.set_polling_interval(config[CONF_POLLING_INTERVAL]))
     cg.add(var.set_appliance_api_parsing(config[CONF_APPLIANCE_API_PARSING]))
@@ -317,9 +264,6 @@ async def to_code(config: dict[str, Any]) -> None:
                 "See the project documentation for the custom profile generator.")
         cg.add_global(cg.RawStatement(contents))
         if "CUSTOM_HA_DISCOVERY_DATA_HASH" not in contents:
-            # Headers generated before hash support remain valid. Hash their
-            # contents at compile time so replacing the file still triggers a
-            # cleanup and HA discovery republish on the next firmware boot.
             legacy_hash = zlib.crc32(contents.encode("utf-8")) & 0xFFFFFFFF
             cg.add_global(cg.RawStatement(
                 f"#define CUSTOM_HA_DISCOVERY_DATA_HASH 0x{legacy_hash:08x}u"))
@@ -335,7 +279,6 @@ async def to_code(config: dict[str, Any]) -> None:
             raise cv.Invalid(
                 f"custom_ha_discovery_file contains {generated_erd_count} ERDs; together with custom_erds "
                 "this exceeds the 128 ERD polling limit")
-        # Check for optional board address array (per-ERD board addressing)
         if "custom_ha_discovery_erd_addresses" in contents:
             cg.add(var.add_custom_erds_with_addresses(
                 cg.RawExpression("custom_ha_discovery_erds"),
@@ -345,7 +288,6 @@ async def to_code(config: dict[str, Any]) -> None:
             cg.add(var.add_custom_erds(
                 cg.RawExpression("custom_ha_discovery_erds"),
                 cg.RawExpression("CUSTOM_HA_DISCOVERY_ERD_COUNT")))
-    # Create diagnostic sensors (auto-created by default, set to false to disable)
     await _create_diagnostic_sensor(config, CONF_ERD_PUBLISH_RATE_SENSOR, var, "set_erd_publish_rate_sensor")
     await _create_diagnostic_sensor(config, CONF_ERD_CACHE_ENTRIES_SENSOR, var, "set_erd_cache_entries_sensor")
     await _create_diagnostic_sensor(config, CONF_ERD_CACHE_UPDATES_SENSOR, var, "set_erd_cache_updates_sensor")
@@ -353,19 +295,15 @@ async def to_code(config: dict[str, Any]) -> None:
     await _create_diagnostic_sensor(config, CONF_MQTT_DISCONNECT_COUNT_SENSOR, var, "set_mqtt_disconnect_count_sensor")
     await _create_diagnostic_sensor(config, CONF_MQTT_DISCONNECT_DURATION_SENSOR, var, "set_mqtt_disconnect_duration_sensor")
 
-
-    # Create discovery refresh button (auto-created by default, set to false to disable)
     val = config.get(CONF_DISCOVERY_REFRESH_BUTTON)
     if val is not None and val is not False:
         btn = cg.new_Pvariable(val[CONF_ID], var)
         await button.register_button(btn, val)
 
-    # Create reconnect appliance button (auto-created by default, set to false to disable)
     val = config.get(CONF_RECONNECT_APPLIANCE_BUTTON)
     if val is not None and val is not False:
         btn = cg.new_Pvariable(val[CONF_ID], var)
         await button.register_button(btn, val)
 
-    # Register any user-configured custom ERDs
     for erd in config[CONF_CUSTOM_ERDS]:
         cg.add(var.add_custom_erd(erd))

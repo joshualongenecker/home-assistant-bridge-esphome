@@ -56,74 +56,66 @@ inheriting a guess. UNVERIFIED on hardware: 53.
 
 from typing import Dict, Optional
 
-# Appliance type value (ERD 0x0008) -> category token, or None for no category.
-# Keys must cover every value of the upstream ERD 0x0008 enum except 255
-# (Unknown); scripts/generate_erd_lists.py raises if the enum gains a value
-# that is not listed here, so a new appliance type can never be silently
-# dropped again.
 APPLIANCE_TYPE_CATEGORY: Dict[int, Optional[str]] = {
-    0: "waterheater",       # WaterHeater
-    1: "laundry",           # ClothesDryer
-    2: "laundry",           # ClothesWasher
-    3: "refrigeration",     # Refrigerator
-    4: "range",             # Microwave            (feature-API evidence)
-    5: "range",             # Advantium
-    6: "dishwasher",        # Dishwasher
-    7: "range",             # Oven
-    8: "range",             # ElectricRange
-    9: "range",             # GasRange
-    10: "airconditioning",  # ThermostatRAC
-    11: "range",            # ElectricCooktop
-    12: "range",            # PizzaOven
-    13: "range",            # GasCooktop
-    14: "airconditioning",  # SplitDFSDuctFreeSplitAC
-    15: "range",            # Hood
-    16: "waterfilter",      # PointOfEntryWaterFilter
-    17: "range",            # InductionCooktop
-    18: "refrigeration",    # DeliveryBox
-    19: "range",            # KitchenHubVentHood
-    20: "airconditioning",  # ZonelinePTAC
-    21: "waterfilter",      # WaterSoftener
-    22: "airconditioning",  # PortableAC
-    23: "laundry",          # CombinationWasherDryer
-    24: "refrigeration",    # DualZoneWineChiller
-    25: "refrigeration",    # BeverageCenter
-    26: "smallappliance",   # CoffeeBrewer
-    27: "smallappliance",   # OpalNuggetIceMaker
-    28: "refrigeration",    # InHomeGrower          (feature-API evidence)
-    29: "airconditioning",  # Dehumidifier          (feature-API evidence)
-    30: "smallappliance",   # UnderCounterIceMaker  (feature-API evidence)
-    31: "airconditioning",  # ThroughWallAC
-    32: "dishwasher",       # FPDishDrawer
-    33: "smallappliance",   # EspressoCoffeeMaker
-    34: "smallappliance",   # ToasterOven           (feature-API evidence)
-    35: "airconditioning",  # ZonelineVertical
-    36: "airconditioning",  # CentralDFSDuctFreeSplitController
-    37: "smallappliance",   # BLEMeshGateway
-    38: "smallappliance",   # StandMixer
-    39: "range",            # FisherPaykelCooktop
-    40: "range",            # FPCooktopTeppanyaki
-    41: "range",            # FPVentilationDowndraft
-    42: "smallappliance",   # SmartPlug
-    43: "smallappliance",   # Smoker                (feature-API evidence)
-    44: "airconditioning",  # AirHandlerVRF
-    45: "laundry",          # FabricCareCabinetCloset
-    46: "laundry",          # LaundryCenter
-    47: "range",            # Grill
-    48: "refrigeration",    # Freezer
-    49: "range",            # WarmingDrawer
-    50: "smallappliance",   # VacuumSealDrawer
-    51: "refrigeration",    # WineCabinet
-    52: "airconditioning",  # CentralAC
-    53: None,               # SoftStarter           (no upstream ERD evidence)
-    54: "range",            # HearthPizzaOven       (old polling table was off by one)
-    55: "smallappliance",   # SourdoughStarter      (ERDs 0x9500, 0x9505)
-    56: "airconditioning",  # Thermostat            (was missing from the polling table)
-    57: "airconditioning",  # AirPurifier           (ERDs 0x7051, 0x7053)
-    58: None,               # HomeVentilation       (no upstream ERD defined yet)
+    0: "waterheater",
+    1: "laundry",
+    2: "laundry",
+    3: "refrigeration",
+    4: "range",
+    5: "range",
+    6: "dishwasher",
+    7: "range",
+    8: "range",
+    9: "range",
+    10: "airconditioning",
+    11: "range",
+    12: "range",
+    13: "range",
+    14: "airconditioning",
+    15: "range",
+    16: "waterfilter",
+    17: "range",
+    18: "refrigeration",
+    19: "range",
+    20: "airconditioning",
+    21: "waterfilter",
+    22: "airconditioning",
+    23: "laundry",
+    24: "refrigeration",
+    25: "refrigeration",
+    26: "smallappliance",
+    27: "smallappliance",
+    28: "refrigeration",
+    29: "airconditioning",
+    30: "smallappliance",
+    31: "airconditioning",
+    32: "dishwasher",
+    33: "smallappliance",
+    34: "smallappliance",
+    35: "airconditioning",
+    36: "airconditioning",
+    37: "smallappliance",
+    38: "smallappliance",
+    39: "range",
+    40: "range",
+    41: "range",
+    42: "smallappliance",
+    43: "smallappliance",
+    44: "airconditioning",
+    45: "laundry",
+    46: "laundry",
+    47: "range",
+    48: "refrigeration",
+    49: "range",
+    50: "smallappliance",
+    51: "refrigeration",
+    52: "airconditioning",
+    53: None,
+    54: "range",
+    55: "smallappliance",
+    56: "airconditioning",
+    57: "airconditioning",
+    58: None,
 }
 
-# GEA broadcast / "unknown" appliance type. Never a real category owner; the
-# generator skips it when emitting the table.
 UNKNOWN_APPLIANCE_TYPE = 255
-

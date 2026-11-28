@@ -1,4 +1,3 @@
-
 #include <cstring>
 #include "geappliances_bridge.h"
 #include "appliance_api_feature_lists.h"
@@ -12,11 +11,6 @@
 
 GEA_TAG(TAG) = "geappliances_bridge_bridge_init";
 
-// The write bridge copies MQTT write payloads into fixed slots sized by
-// ERD_WRITE_MAX_DATA_SIZE; the MQTT adapter hands it buffers sized by
-// ERD_CACHE_MAX_DATA_SIZE. Both encode the same GEA3 on-wire limit, so they
-// must not drift apart — a smaller write slot would silently truncate a
-// payload the adapter accepted.
 static_assert(ERD_WRITE_MAX_DATA_SIZE == ERD_CACHE_MAX_DATA_SIZE,
               "write payload limit drifted from the ERD cache payload limit");
 
@@ -84,18 +78,10 @@ void GeappliancesBridge::init_polling_bridge_(bool log_as_info,
 
 void GeappliancesBridge::start_feature_bit_reading_()
 {
-  // Guard: don't re-initialize while the manager already holds an ERD
-  // client — init() subscribes activity and queues the first read, so a
-  // second call while reads are in flight (or after PARSING/FAILED/COMPLETE)
-  // would double-queue. cleanup() resets the client pointer, re-arming the
-  // guard for a re-init.
   if (this->feature_bit_manager_.is_initialized()) {
     return;
   }
 
-  // Guard: only proceed once a valid ERD client is available. If the client
-  // is null (e.g. autodiscovery not yet complete), return so the next loop()
-  // call retries rather than getting permanently stuck.
   i_tiny_gea3_erd_client_t* erd_client = this->autodiscovery_manager_.get_active_erd_client();
   if (erd_client == nullptr) {
     return;
@@ -114,9 +100,6 @@ void GeappliancesBridge::initialize_mqtt_client_()
     return;
   }
 
-  // For manual device_id configs where autodiscovery is skipped (gea2_uart
-  // only, no GEA3 uart), mark GEA2 as the active protocol so the protocol
-  // stack runs the GEA2 tight loop even before autodiscovery would run.
   if (this->autodiscovery_manager_.get_active_erd_client() == nullptr) {
     if (this->uart_ == nullptr) {
       this->protocol_stack_.set_gea2_active(true);
@@ -141,20 +124,11 @@ void GeappliancesBridge::initialize_erd_bridge_()
 
   ESP_LOGI(TAG, "Initializing ERD bridge");
 
-  // Apply the valid-ERD filter when appliance API parsing is enabled and
-  // produced results. An empty set is ignored by the registry so all ERDs
-  // continue to be published in that case. The registry borrows the
-  // manager's array and sorts it in place rather than copying 645 entries
-  // (architecture review rec 9), so the manager's own view of the set is
-  // sorted from here on.
   if (this->appliance_api_parsing_ &&
       this->feature_bit_manager_.get_state() == FEATURE_BIT_STATE_COMPLETE &&
       this->feature_bit_manager_.get_valid_erd_count() > 0) {
     this->erd_registry_.set_valid_erds(this->feature_bit_manager_.get_valid_erds_for_filter(),
                                        this->feature_bit_manager_.get_valid_erd_count());
-    // Merge custom ERDs so they pass the filter — up to the merged cap
-    // (ERD_REGISTRY_MAX_VALID); past it add_valid_erds() drops them, same as
-    // the pre-rec-9 copy kept the total at 645.
     if (this->custom_erds_count_ > 0) {
       std::vector<tiny_erd_t> erd_ids(this->custom_erds_count_);
       for (uint16_t i = 0; i < this->custom_erds_count_; i++) {
@@ -164,10 +138,6 @@ void GeappliancesBridge::initialize_erd_bridge_()
     }
   }
 
-  // Wire the ErdRegistry to the subscription bridge so it filters
-  // subscription publications before they enter the cache. When
-  // appliance_api_parsing is disabled, the registry has no filter active
-  // (is_valid returns true for all ERDs), so this is a no-op.
   erd_bridge_subscribe_set_erd_registry(&this->erd_bridge_subscribe_, &this->erd_registry_);
 
   bool        use_polling = false;
@@ -188,19 +158,13 @@ void GeappliancesBridge::initialize_erd_bridge_()
   }
 
   ESP_LOGI(TAG, "Bridge mode: %s", mode_name);
-  (void)mode_name; /* suppress -Wunused-but-set-variable when ESP_LOGI is stubbed */
+  (void)mode_name;
 
   if (use_polling) {
     this->init_polling_bridge_(false);
-    // Mark the data plane active BEFORE the probe phase starts, so that if
-    // the probe completes synchronously and fires signal_bridge_ready,
-    // check_steady_state() in the running entry can see the phase.
     this->data_plane_phase_ = DataPlanePhase::kPolling;
   }
 
-  // Initialize the subscription bridge for non-polling modes (subscribe, auto).
-  // In polling mode (GEA2 or explicit poll), subscriptions are not used, but
-  // the bridge is still initialized above for custom ERD subscription support.
   if (!use_polling) {
 
     erd_bridge_subscribe_init(
@@ -211,15 +175,9 @@ void GeappliancesBridge::initialize_erd_bridge_()
       &this->erd_cache_);
     this->data_plane_phase_ = DataPlanePhase::kSubscription;
 
-    // Subscription bridge has no discovery phase — signal the startup HSM
-    // immediately so it can transition to subscription_watch.
     tiny_hsm_send_signal(&this->startup_hsm_wrapper_.hsm, signal_bridge_ready, nullptr);
   }
-  // Initialize the write bridge. Autodiscovery is complete by this point,
-  // so we have the real host address from the broadcast FF 0x0008 response.
   uint8_t host_addr = this->autodiscovery_manager_.get_host_address();
-  // The write bridge subscribes to the wildcard write topic so incoming write
-  // commands from Home Assistant are routed to it via on_write_request_event.
   erd_write_bridge_init(
     &this->erd_write_bridge_,
     this->protocol_stack_.timer_group(),
@@ -241,9 +199,6 @@ void GeappliancesBridge::start_custom_erd_polling_()
   this->subscription_unseen_custom_erds_count_ = 0;
   for (uint16_t i = 0; i < this->custom_erds_count_; i++) {
     const auto &entry = this->custom_erds_[i];
-    // Subscription publications originate only from the primary host. A
-    // matching ERD ID observed there does not cover the same ERD on another
-    // board, so every explicit non-primary address must be polled.
     if (entry.board_address != PROBE_ENTRY_DEFAULT_ADDRESS ||
         !erd_set_contains(&this->custom_erd_subscription_seen_erds_, entry.erd)) {
       this->subscription_unseen_custom_erds_[this->subscription_unseen_custom_erds_count_++] = {
@@ -273,10 +228,6 @@ void GeappliancesBridge::maybe_start_custom_erd_polling_()
   }
 
   subscription_state_t sub_state = this->get_subscription_state();
-  // Wait for the subscription bridge to reach steady state before starting
-  // custom ERD polling. This gives the subscription bridge time to publish
-  // its ERDs, so we can avoid redundant polling of ERDs already covered
-  // by subscription.
   if (sub_state != subscription_state_steady) {
     return;
   }
@@ -297,8 +248,6 @@ void GeappliancesBridge::handle_polling_failed()
     this->data_plane_phase_ = DataPlanePhase::kSubscription;
   } else {
     ESP_LOGE(TAG, "Primary polling bridge failed; no data path available");
-    // Leave the bridge in failed state. The appliance_lost handler in
-    // state_failed will re-probe if the appliance comes back.
   }
   this->last_logged_poll_state_ = polling_state_none;
 }
@@ -313,19 +262,14 @@ void GeappliancesBridge::handle_subscription_failed()
   this->last_logged_poll_state_ = polling_state_none;
   this->last_logged_subscribe_state_ = subscription_state_none;
 
-  // Destroy any existing polling bridge (e.g., from custom ERD polling)
-  // before re-initializing to avoid leaking heap allocations.
   if (phase_has_polling_bridge(this->data_plane_phase_)) {
     erd_bridge_poll_destroy(&this->erd_bridge_poll_);
   }
 
   this->init_polling_bridge_(true);
   this->data_plane_phase_ = DataPlanePhase::kPolling;
-  // The startup HSM owns the subscription_watch → running transition (its
-  // run_loop handler transitions right after calling this); this handler only
-  // rebuilds the data path.
   ESP_LOGI(TAG, "Successfully switched to polling mode");
 }
 
-}  // namespace geappliances_bridge
-}  // namespace esphome
+}
+}

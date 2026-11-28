@@ -28,7 +28,7 @@ TEST_GROUP(erd_poll_list_builder)
     config.feature_bit_valid_erds_count = 0;
     config.custom_erds = nullptr;
     config.custom_erds_count = 0;
-    config.appliance_type = 0;  // water heater
+    config.appliance_type = 0;
     feature_bits_count = 0;
     custom_erds_count = 0;
   }
@@ -135,11 +135,10 @@ TEST(erd_poll_list_builder, poll_mode_without_api_parsing_returns_full_list)
 {
   config.mode = BRIDGE_MODE_POLL;
   config.appliance_api_parsing = false;
-  config.appliance_type = 0;  // water heater
+  config.appliance_type = 0;
 
   auto result = build_erd_poll_list(config);
 
-  // Should contain common + energy + applianceApiFeature + waterHeater ERDs.
   CHECK(result.erds_count >= (commonErdCount + energyErdCount +
                               applianceApiFeatureErdCount + waterHeaterErdCount));
 }
@@ -148,7 +147,7 @@ TEST(erd_poll_list_builder, poll_mode_without_api_parsing_with_custom)
 {
   config.mode = BRIDGE_MODE_POLL;
   config.appliance_api_parsing = false;
-  config.appliance_type = 0;  // water heater
+  config.appliance_type = 0;
   custom_erds_arr[0] = {0xBEEF, PROBE_ENTRY_DEFAULT_ADDRESS};
   custom_erds_count = 1;
   config.custom_erds = custom_erds_arr;
@@ -156,7 +155,6 @@ TEST(erd_poll_list_builder, poll_mode_without_api_parsing_with_custom)
 
   auto result = build_erd_poll_list(config);
 
-  // Should contain full list + custom.
   bool found_custom = false;
   for (uint16_t i = 0; i < result.erds_count; i++) {
     if (result.erds[i].erd == 0xBEEF) {
@@ -189,7 +187,7 @@ TEST(erd_poll_list_builder, deduplicates_custom_erd_already_in_feature_bits)
   feature_bits_count = 2;
   config.feature_bit_valid_erds = feature_bits;
   config.feature_bit_valid_erds_count = feature_bits_count;
-  custom_erds_arr[0] = {0x0001, PROBE_ENTRY_DEFAULT_ADDRESS};  // duplicate of feature bit ERD
+  custom_erds_arr[0] = {0x0001, PROBE_ENTRY_DEFAULT_ADDRESS};
   custom_erds_count = 1;
   config.custom_erds = custom_erds_arr;
   config.custom_erds_count = custom_erds_count;
@@ -205,11 +203,10 @@ TEST(erd_poll_list_builder, invalid_appliance_type_skips_appliance_specific_erds
 {
   config.mode = BRIDGE_MODE_POLL;
   config.appliance_api_parsing = false;
-  config.appliance_type = 255;  // invalid
+  config.appliance_type = 255;
 
   auto result = build_erd_poll_list(config);
 
-  // Should contain common + energy + applianceApiFeature, but NOT appliance-specific.
   CHECK(result.erds_count >= (commonErdCount + energyErdCount + applianceApiFeatureErdCount));
 }
 

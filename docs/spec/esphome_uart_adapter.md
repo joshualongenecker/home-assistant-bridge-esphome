@@ -169,3 +169,19 @@ This deferral matches the half-duplex nature of the GEA bus where send completio
 2. **Snapshot guard is critical:** The snapshot-based receive is not just an optimization — it is required for correct half-duplex operation. Removing or weakening the snapshot causes large-payload ERD reads to fail.
 3. **No flow control:** The adapter does not implement hardware or software flow control. The GEA protocol handles this at a higher level.
 4. **Single UART per adapter:** Each adapter instance wraps exactly one `UARTComponent`. Dual-UART configurations use two adapter instances with `set_enabled()` to gate the inactive one.
+
+---
+
+## 9. Notes
+
+Module-local decisions and hazards. The code carries no comments for these; they live here (§5.1, §5.2, §6 and §8.2 state the same rules where they are implemented).
+
+1. **The enable gate exists because the poll timers are shared.** `protocol_stack.cpp` initializes both adapters with the same `&this->timer_group_`, so when both `gea3_uart_id` and `gea2_uart_id` are configured both poll timers fire every loop. The `enabled` check in `poll()` is what keeps the inactive adapter from reading bytes and filling the `receive_event` / `send_complete_event` queues of an interface that is not in use. `esphome_uart_adapter_set_enabled()` is the only switch: the protocol stack sets GEA3 to `!need_gea2_loop` and GEA2 to `need_gea2_loop`.
+
+2. **The byte count is snapshotted once per poll, on purpose.** `poll()` evaluates `int rx_bytes = self->uart->available();` before the `while (rx_bytes--)` loop so it consumes only the bytes that were present when the poll started. Bytes arriving *during* event processing — the half-duplex reflection of a byte just sent by `send_next_byte()`, or an appliance response that begins arriving while `send_ack()` is executing — are deferred to the next `poll()` call.
+
+3. **What the snapshot prevents, in the GEA2 interface.** Without it, the receive loop feeds the ACK reflection to `tiny_gea2_interface.c` while `receive.packet_ready` is still true (set by `send_ack()`), so the following appliance response STX (`tiny_gea_stx`) fails the `!packet_ready` guard and the FSM drops into `state_idle_cooldown`, silently discarding the response.
+
+4. **The measured symptom of a weakened snapshot:** ERD reads for large payloads (e.g. the 32-byte model number) always fail while small payloads (e.g. the 1-byte appliance type) succeed by chance. Any change to the poll loop MUST be verified against a large-payload read, not a small one.
+
+5. **Period 0 is a real value, not a placeholder.** `tiny_timer_start_periodic(timer_group, &self->timer, 0, self, poll)` means "as fast as the event loop allows"; it is the byte-latency knob for the protocol stack above it, so substituting a nonzero interval adds that interval to the delivery time of every received byte.

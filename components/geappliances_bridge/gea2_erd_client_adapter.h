@@ -1,9 +1,3 @@
-/* GEA2 and GEA3 on_activity args are layout-compatible for read/write event
- * types (types 0-3), so GEA2 activity args can be re-published through the
- * adapter's GEA3-typed event without transformation. subscribe() and
- * retain_subscription() are no-ops because GEA2 does not support
- * subscriptions; callers must use polling mode only. */
-
 #pragma once
 
 extern "C" {

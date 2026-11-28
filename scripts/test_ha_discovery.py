@@ -22,20 +22,14 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-# Add generators dir to path so we can import generate_ha_discovery
 sys.path.insert(0, str(Path(__file__).parent / "ha_discovery" / "generators"))
 import generate_ha_discovery as gen
 
-
-# Jinja2 for template validation
 import jinja2
-
 
 JINJA2_ENV = jinja2.Environment()
 
-# All category names
 from scripts.ha_discovery.pipeline.ha_constants import CATEGORIES_LIST as CATEGORIES
-
 
 def load_all_entities() -> List[Dict[str, Any]]:
     """Load all entities from the generated JSONL files."""
@@ -54,14 +48,12 @@ def load_all_entities() -> List[Dict[str, Any]]:
             entities.append(obj)
     return entities
 
-
 def load_erd_definitions() -> List[Dict[str, Any]]:
     """Load ERD definitions from the JSON file."""
     json_file = Path(__file__).parent.parent / 'lib' / 'public-appliance-api-documentation' / 'appliance_api_erd_definitions.json'
     with open(json_file) as f:
         data = json.load(f)
     return data.get('erds', [])
-
 
 class TestJSONLStructure(unittest.TestCase):
     """Test that all generated entities have valid structure."""
@@ -126,7 +118,6 @@ class TestJSONLStructure(unittest.TestCase):
         self.assertLess(len(self.entities), 20000,
             f'Expected <20000 entities, got {len(self.entities)}')
 
-
 class TestJinja2Templates(unittest.TestCase):
     """Test that all Jinja2 templates compile and execute correctly."""
 
@@ -164,7 +155,6 @@ class TestJinja2Templates(unittest.TestCase):
             if not vt:
                 continue
             ds = obj['ds']
-            # Generate a hex payload matching the data size
             payload = '00' * ds
             compiled = JINJA2_ENV.from_string(vt)
             with self.subTest(entity=obj['n'], erd=obj['i']):
@@ -213,13 +203,11 @@ class TestJinja2Templates(unittest.TestCase):
                     self.assertEqual(tmpl.count('('), tmpl.count(')'),
                         f'{obj["n"]} {tmpl_type} unbalanced parens')
 
-
 class TestSignedIntegerTemplates(unittest.TestCase):
     """Test that signed integer templates produce correct two's-complement results."""
 
     def test_i16_positive(self):
         """i16 positive values are decoded correctly."""
-        # Template: {{ (value | int(base=16)) - 65536 if (value | int(base=16)) >= 32768 else (value | int(base=16)) }}
         tmpl = JINJA2_ENV.from_string(
             '{{ (value | int(base=16)) - 65536 if (value | int(base=16)) >= 32768 else (value | int(base=16)) }}')
         self.assertEqual(int(tmpl.render(value='0064')), 100)
@@ -238,9 +226,9 @@ class TestSignedIntegerTemplates(unittest.TestCase):
         """i16 with scaling factor produces correct decimal results."""
         tmpl = JINJA2_ENV.from_string(
             '{{ ((value | int(base=16)) - 65536 if (value | int(base=16)) >= 32768 else (value | int(base=16))) / 10 | round(1) }}')
-        self.assertEqual(float(tmpl.render(value='0064')), 10.0)   # 100/10
-        self.assertEqual(float(tmpl.render(value='ff96')), -10.6)  # -106/10
-        self.assertEqual(float(tmpl.render(value='0032')), 5.0)    # 50/10
+        self.assertEqual(float(tmpl.render(value='0064')), 10.0)
+        self.assertEqual(float(tmpl.render(value='ff96')), -10.6)
+        self.assertEqual(float(tmpl.render(value='0032')), 5.0)
 
     def test_i32_negative(self):
         """i32 negative values are decoded correctly."""
@@ -261,9 +249,8 @@ class TestSignedIntegerTemplates(unittest.TestCase):
         """Signed number command template with scaling factor."""
         tmpl = JINJA2_ENV.from_string(
             "{{ '%04x' % ((((value | float) * 10) | round | int) % 65536) }}")
-        self.assertEqual(tmpl.render(value=10.5), '0069')   # 105
-        self.assertEqual(tmpl.render(value=-10.5), 'ff97')  # -105 % 65536 = 65431 = 0xff97
-
+        self.assertEqual(tmpl.render(value=10.5), '0069')
+        self.assertEqual(tmpl.render(value=-10.5), 'ff97')
 
 class TestEnumTemplates(unittest.TestCase):
     """Test that enum templates produce correct label mappings."""
@@ -299,14 +286,11 @@ class TestEnumTemplates(unittest.TestCase):
             "{{ {'Don\\'t Care': '00', 'Auto': '01'}[value] }}")
         self.assertEqual(tmpl.render(value="Don't Care"), '00')
 
-
 class TestBitfieldTemplates(unittest.TestCase):
     """Test that bitfield templates extract bits correctly using arithmetic."""
 
     def test_1bit_extraction(self):
         """1-bit bitfield extraction using // and %."""
-        # Original: ((value[0:4] | int(base=16)) >> 8) & 1
-        # Fixed:    ((value[0:4] | int(base=16)) // 256) % 2
         tmpl = JINJA2_ENV.from_string(
             "{{ '01' if ((value[0:4] | int(base=16)) // 256) % 2 else '00' }}")
         self.assertEqual(tmpl.render(value='0000'), '00')
@@ -316,13 +300,11 @@ class TestBitfieldTemplates(unittest.TestCase):
 
     def test_1bit_at_various_offsets(self):
         """1-bit extraction at different bit offsets."""
-        # Bit 0
         tmpl0 = JINJA2_ENV.from_string(
             "{{ '01' if ((value[0:4] | int(base=16)) // 1) % 2 else '00' }}")
         self.assertEqual(tmpl0.render(value='0001'), '01')
         self.assertEqual(tmpl0.render(value='0000'), '00')
 
-        # Bit 15
         tmpl15 = JINJA2_ENV.from_string(
             "{{ '01' if ((value[0:4] | int(base=16)) // 32768) % 2 else '00' }}")
         self.assertEqual(tmpl15.render(value='8000'), '01')
@@ -330,15 +312,12 @@ class TestBitfieldTemplates(unittest.TestCase):
 
     def test_multibit_extraction(self):
         """Multi-bit field extraction using // and %."""
-        # Original: ((value[0:4] | int(base=16)) >> 24) & 0xFF
-        # Fixed:    ((value[0:8] | int(base=16)) // 16777216) % 256
         tmpl = JINJA2_ENV.from_string(
             "{{ ((value[0:8] | int(base=16)) // 16777216) % 256 }}")
         self.assertEqual(int(tmpl.render(value='00000000')), 0)
         self.assertEqual(int(tmpl.render(value='ff000000')), 255)
         self.assertEqual(int(tmpl.render(value='01000000')), 1)
         self.assertEqual(int(tmpl.render(value='80000000')), 128)
-
 
 class TestNumberCommandTemplates(unittest.TestCase):
     """Test number command templates produce correct hex output."""
@@ -361,8 +340,8 @@ class TestNumberCommandTemplates(unittest.TestCase):
         """u16 with scaling factor produces correct hex."""
         tmpl = JINJA2_ENV.from_string(
             "{{ '%04x' % (((value | float) * 10) | round | int) }}")
-        self.assertEqual(tmpl.render(value=10.5), '0069')   # 105
-        self.assertEqual(tmpl.render(value=0.1), '0001')    # 1
+        self.assertEqual(tmpl.render(value=10.5), '0069')
+        self.assertEqual(tmpl.render(value=0.1), '0001')
 
     def test_i16_command(self):
         """i16 command template handles negative values via modulo."""
@@ -377,7 +356,6 @@ class TestNumberCommandTemplates(unittest.TestCase):
             "{{ '%04x' % ((((value | float) * 10) | round | int) % 65536) }}")
         self.assertEqual(tmpl.render(value=-10.5), 'ff97')
         self.assertEqual(tmpl.render(value=10.5), '0069')
-
 
 class TestGeneratedTemplatesMatchERD(unittest.TestCase):
     """Test that generated templates match ERD definitions."""
@@ -402,9 +380,6 @@ class TestGeneratedTemplatesMatchERD(unittest.TestCase):
             if not obj.get('vt'):
                 continue
             with self.subTest(entity=obj['n']):
-                # Single-field enums use .get() for label mapping
-                # Multi-field enums use raw hex VTs (no label mapping possible)
-                # Both are valid; just verify the VT is non-empty
                 self.assertTrue(len(obj['vt']) > 0,
                     f'{obj["n"]} has device_class=enum but empty vt')
 
@@ -507,7 +482,6 @@ class TestGeneratedTemplatesMatchERD(unittest.TestCase):
                         self.fail(
                             f'{obj["n"]} {tmpl_type} uses & as bitwise operator: {tmpl[:80]}')
 
-
 class TestFieldSlugGeneration(unittest.TestCase):
     """Test that field slugs are generated correctly."""
 
@@ -517,13 +491,11 @@ class TestFieldSlugGeneration(unittest.TestCase):
         self.assertEqual(gen._field_slug('GH (Fan Hi)'), 'gh_fan_hi')
         self.assertEqual(gen._field_slug('Cyclic Supported'), 'cyclic_supported')
 
-
 class TestActualZonelineERDs(unittest.TestCase):
     """Test specific Zoneline ERD templates that are critical for the adapter."""
 
     def test_erd_7000_system_mode(self):
         """ERD 0x7000 System Mode enum template works correctly."""
-        # Find the entity in generated files
         entities = load_all_entities()
         obj = None
         for e in entities:
@@ -569,11 +541,9 @@ class TestActualZonelineERDs(unittest.TestCase):
         self.assertIsNotNone(obj, 'ERD 0x7100 not found')
         self.assertIn(obj['d'], ('sensor', 'number'))
         self.assertEqual(obj.get('dc'), 'temperature')
-        # sf may or may not be set depending on auto-detection
         self.assertIn('vt', obj)
 
         tmpl = JINJA2_ENV.from_string(obj['vt'])
-        # Value depends on whether scaling is applied in template
         result = float(tmpl.render(value='0064'))
         self.assertIn(result, (10.0, 100.0))
 
@@ -587,14 +557,11 @@ class TestActualZonelineERDs(unittest.TestCase):
             self.assertEqual(obj['d'], 'binary_sensor')
             self.assertIn('vt', obj)
             vt = obj['vt']
-            # Verify no bitwise operators
             self.assertNotIn('>>', vt, f'{obj["n"]} uses >>')
             self.assertNotIn('& 1', vt, f'{obj["n"]} uses & 1')
-            # Verify it uses arithmetic
             self.assertIn('//', vt, f'{obj["n"]} missing //')
             self.assertIn('% 2', vt, f'{obj["n"]} missing % 2')
 
-            # Test execution
             tmpl = JINJA2_ENV.from_string(vt)
             result = tmpl.render(value='0000')
             self.assertIn(result, ('00', '01'))
@@ -620,8 +587,6 @@ class TestActualZonelineERDs(unittest.TestCase):
         ct_tmpl = JINJA2_ENV.from_string(obj['ct'])
         self.assertEqual(ct_tmpl.render(value='None'), '00')
         self.assertEqual(ct_tmpl.render(value='Simple'), '01')
-
-
 
 class TestEntityFiltering(unittest.TestCase):
     """Test that entity filtering logic correctly includes/excludes entities."""
@@ -667,8 +632,6 @@ class TestEntityFiltering(unittest.TestCase):
             "0x100e (Turbo Freeze Status) should be included (asymmetric pairing)")
         self.assertIn('100f', entity_ids,
             "0x100f (Turbo Cool Status) should be included (asymmetric pairing)")
-
-
 
 class TestBufferSizeSufficiency(unittest.TestCase):
     """Verify that generated topics fit within C buffer sizes.
@@ -737,7 +700,6 @@ class TestBufferSizeSufficiency(unittest.TestCase):
                     f'topic too long ({len(topic)} chars, max {self.TOPIC_BUF_SIZE - 1}): '
                     f'{topic}')
 
-        # Report the longest topic for reference
         print(f'Longest topic ({longest_len} chars): {longest_topic[:80]}...')
 
     def test_all_topics_fit_in_cleanup_buffer(self):
@@ -788,7 +750,6 @@ class TestBufferSizeSufficiency(unittest.TestCase):
                     len(unique_id), self.UNIQUE_ID_BUF_SIZE - 1,
                     f'unique_id too long ({len(unique_id)} chars, max {self.UNIQUE_ID_BUF_SIZE - 1}): '
                     f'{unique_id}')
-
 
 class TestBitfieldDeviceClassWiring(unittest.TestCase):
     """Test that bitfield entities with device_class in field data
@@ -936,7 +897,6 @@ class TestBitfieldDeviceClassWiring(unittest.TestCase):
         humid = next(e for e in entries if 'Humidity' in e['name'])
         self.assertEqual(humid['device_class'], 'humidity')
 
-
 class TestFloat32Templates(unittest.TestCase):
     def test_single_float32_sensor_uses_ieee754_decoding(self):
         erds = [{
@@ -956,7 +916,6 @@ class TestFloat32Templates(unittest.TestCase):
             "{{ value[4:12] | from_hex | unpack('>f') | round(3) }}",
             gen._byte_subfield_value_template(field, 1),
         )
-
 
 class TestControllableEntitiesHaveCommandTopic(unittest.TestCase):
     """Every switch/number/select must produce a command_topic.
@@ -997,7 +956,6 @@ class TestControllableEntitiesHaveCommandTopic(unittest.TestCase):
         self.assertEqual(ct.render(value='Open'), '01')
         self.assertEqual(ct.render(value='Closed'), '02')
 
-
 class TestSelectUnmappedFallback(unittest.TestCase):
     """Select VTs must not emit a non-option string for unmapped values.
 
@@ -1019,7 +977,6 @@ class TestSelectUnmappedFallback(unittest.TestCase):
                     self.assertTrue(out in opts or out == 'None',
                                     f'{obj["n"]}: {raw!r} -> {out!r}')
 
-
 class TestUnpairedMultiFieldDemotion(unittest.TestCase):
     """Unpaired switch/number sub-fields of multi-field ERDs are read-only."""
 
@@ -1036,7 +993,7 @@ class TestUnpairedMultiFieldDemotion(unittest.TestCase):
         gen._handle_byte_offset_erd({}, collect, 0x4048, 'Vacation setpoint',
                                     'number', '', '', 10, 4, '', '', erd_data)
         self.assertEqual([e[2] for e in entries], ['sensor', 'sensor'])
-        self.assertEqual([e[11] for e in entries], ['', ''])  # no ct
+        self.assertEqual([e[11] for e in entries], ['', ''])
         vt = JINJA2_ENV.from_string(entries[1][10])
         self.assertEqual(float(vt.render(value='02d00384')), 90.0)
 
@@ -1059,7 +1016,6 @@ class TestUnpairedMultiFieldDemotion(unittest.TestCase):
         vt = JINJA2_ENV.from_string(entries[1][10])
         self.assertEqual(vt.render(value='0001'), '01')
 
-
 class TestNoPartialWrites(unittest.TestCase):
     """No controllable entity may write part of an ERD payload.
 
@@ -1079,9 +1035,6 @@ class TestNoPartialWrites(unittest.TestCase):
             m = re.search(r"%0(\d+)x", ct)
             if m:
                 hex_chars = int(m.group(1))
-                # Scaled templates render round(value * sf); values near
-                # the range limit can overflow the format width. Signed
-                # templates (mn < 0) apply a modulo and cannot.
                 sf = obj.get('sf', 1)
                 mn, mx = obj.get('mn'), obj.get('mx')
                 if sf > 1 and mn is not None and mx is not None and mn >= 0:
@@ -1129,7 +1082,6 @@ class TestNoPartialWrites(unittest.TestCase):
                         f'{obj["n"]} ({obj["i"]}) shares target ERD 0x{target} '
                         f'with {len(group) - 1} other writer(s)')
 
-
 class TestPartialWriteDemotion(unittest.TestCase):
     """The partial-write demotion pass demotes unsafe writers to read-only."""
 
@@ -1162,7 +1114,6 @@ class TestPartialWriteDemotion(unittest.TestCase):
         self.assertEqual(entries[0]['command_template'], '')
 
     def test_short_write_select_demoted(self):
-        # 0xd023 shape: 2-byte enum in a 4-byte ERD (enum + reserved padding)
         entries = [self._entry(0x1000, 'select', cb=2, paired=0x1001,
                                role='request', ct='ct')]
         demoted = gen._demote_partial_write_entities(
@@ -1200,14 +1151,10 @@ class TestPartialWriteDemotion(unittest.TestCase):
                                role='request', ct='ct')]
         demoted = gen._demote_partial_write_entities(
             entries, self._erd_by_id({0x1000: 4, 0x1001: 2}))
-        # Both target 0x1000: the status writer renders 2 of 4 bytes and the
-        # request writer shares the target, so both are demoted.
         self.assertEqual(len(demoted), 2)
         self.assertEqual([e['domain'] for e in entries], ['sensor', 'sensor'])
 
     def test_bitfield_switch_with_readonly_siblings_demoted(self):
-        # Sole controllable writer at bit 0 of a 1-byte ERD, but the ERD
-        # also holds a read-only sibling bit: the '01' command would zero it.
         entries = [self._entry(0x1000, 'switch', cb=1, bit_start=0,
                                paired=0x1001, role='request')]
         erd_by_id = {
@@ -1229,8 +1176,6 @@ class TestPartialWriteDemotion(unittest.TestCase):
         self.assertEqual(entries[0]['domain'], 'binary_sensor')
 
     def test_bitfield_switch_sole_non_reserved_field_stays(self):
-        # Bit 0 switch that is the only non-reserved field of the target
-        # ERD: the 1-byte command cannot clobber anything.
         entries = [self._entry(0x1000, 'switch', cb=1, bit_start=0,
                                paired=0x1001, role='request')]
         erd_by_id = {
@@ -1252,10 +1197,6 @@ class TestPartialWriteDemotion(unittest.TestCase):
         self.assertEqual(entries[0]['domain'], 'switch')
 
     def test_unknown_target_erd_fails_closed(self):
-        # A 1-byte writer whose target ERD is not in the definitions cannot
-        # be verified, so it is demoted. cb=1 is the distinguishing case:
-        # with the old fail-open default (target_ds=1) this entity would
-        # have been kept as a switch.
         entries = [self._entry(0x1001, 'switch', cb=1, paired=0x9999,
                                role='status')]
         demoted = gen._demote_partial_write_entities(
@@ -1297,7 +1238,6 @@ class TestPartialWriteDemotion(unittest.TestCase):
         self.assertEqual(len(demoted), 2)
         self.assertEqual([e['domain'] for e in entries], ['sensor', 'sensor'])
         self.assertEqual([e['command_template'] for e in entries], ['', ''])
-
 
 if __name__ == '__main__':
     unittest.main()

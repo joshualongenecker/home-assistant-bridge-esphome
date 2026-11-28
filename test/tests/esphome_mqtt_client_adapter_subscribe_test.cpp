@@ -83,7 +83,6 @@ TEST_GROUP(esphome_mqtt_client_adapter_subscribe)
     esphome::mqtt::global_mqtt_client = &mqtt_double;
     mqtt_double.connected_ = true;
 
-    // Reset static state
     g_callback_count = 0;
     g_received_topic.clear();
     g_received_payload.clear();
@@ -119,7 +118,6 @@ TEST(esphome_mqtt_client_adapter_subscribe, subscribe_callback_fires_on_message)
 
   adapter.interface.api->subscribe(&adapter.interface, "test/topic", test_callback, nullptr);
 
-  // Simulate an incoming MQTT message
   mqtt_double.simulate_message("test/topic", "hello");
 
   CHECK_EQUAL(1, g_callback_count);
@@ -138,7 +136,6 @@ TEST(esphome_mqtt_client_adapter_subscribe, unsubscribe_removes_callback)
 
   adapter.interface.api->subscribe(&adapter.interface, "test/topic", test_callback, nullptr);
 
-  // Verify callback fires before unsubscribe
   mqtt_double.simulate_message("test/topic", "before");
   CHECK_EQUAL(1, g_callback_count);
 
@@ -156,10 +153,8 @@ TEST(esphome_mqtt_client_adapter_subscribe, subscribe_with_null_mqtt_client_is_s
 {
   init_adapter();
 
-  // Set global_mqtt_client to null
   esphome::mqtt::global_mqtt_client = nullptr;
 
-  // Should not crash — early return when mqtt_client is null
   adapter.interface.api->subscribe(&adapter.interface, "test/topic", test_callback, nullptr);
 
   CHECK_EQUAL(0, g_callback_count);
@@ -173,10 +168,8 @@ TEST(esphome_mqtt_client_adapter_subscribe, unsubscribe_with_null_mqtt_client_is
 {
   init_adapter();
 
-  // Set global_mqtt_client to null
   esphome::mqtt::global_mqtt_client = nullptr;
 
-  // Should not crash — early return when mqtt_client is null
   adapter.interface.api->unsubscribe(&adapter.interface, "test/topic");
 }
 
@@ -190,10 +183,8 @@ TEST(esphome_mqtt_client_adapter_subscribe, subscribe_stores_callback_for_later)
 
   adapter.interface.api->subscribe(&adapter.interface, "stored/topic", test_callback, nullptr);
 
-  // Before simulation, callback should not have been invoked
   CHECK_FALSE(g_callback_invoked);
 
-  // Simulate message after subscribe — callback should fire
   mqtt_double.simulate_message("stored/topic", "data");
 
   CHECK_TRUE(g_callback_invoked);
@@ -217,7 +208,6 @@ TEST(esphome_mqtt_client_adapter_subscribe, multiple_subscriptions_independent)
   CHECK_EQUAL(0, g_callback1_count);
   CHECK_EQUAL(0, g_callback2_count);
 
-  // Simulating a message invokes the last registered callback (test_callback2)
   mqtt_double.simulate_message("topic/b", "payload_b");
   CHECK_EQUAL(1, g_callback2_count);
   CHECK(g_last_topic2 == "topic/b");

@@ -20,8 +20,6 @@ from pathlib import Path
 
 DEFAULT_MAIN_CPP = Path("docs/.esphome/build/gea-esphome-test/src/main.cpp")
 
-# Display names of entities the component creates itself. Mirrors the *_sensor /
-# discovery_refresh_button / reconnect_appliance_button options in components/geappliances_bridge/__init__.py.
 EXPECTED_SENSORS = (
     "ERD Publish Rate",
     "ERD Cache Entries",
@@ -32,10 +30,8 @@ EXPECTED_SENSORS = (
 )
 EXPECTED_BUTTONS = ("Discovery Refresh", "Reconnect Appliance")
 
-# ESPHome 2026.11 wraps the name in ESPHOME_PSTR(...); older releases passed a plain literal
 REGISTRATION_RE = re.compile(r"App\.register_(sensor|button)\((\w+), (?:ESPHOME_PSTR\()?\"([^\"]+)\"")
 WRAPPER_RE = re.compile(r"new\(\w+\) mqtt::MQTT(Sensor|Button)Component\((\w+)\)")
-
 
 def main(argv: list[str]) -> int:
     path = Path(argv[1]) if len(argv) > 1 else DEFAULT_MAIN_CPP
@@ -45,7 +41,6 @@ def main(argv: list[str]) -> int:
         return 2
 
     source = path.read_text(encoding="utf-8", errors="replace")
-    # findall() would yield (kind, var); keep (var, kind) to match the lookups below.
     wrapped = {(m.group(2), m.group(1)) for m in WRAPPER_RE.finditer(source)}
     registered = {
         (kind, name): var
@@ -100,7 +95,6 @@ def main(argv: list[str]) -> int:
 
     print(f"OK: {len(EXPECTED_SENSORS) + len(EXPECTED_BUTTONS)} diagnostic entities have MQTT wrappers")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv))
